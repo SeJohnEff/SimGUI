@@ -1,0 +1,5 @@
+# SimGUI dependencies
+# tkinter is part of the Python standard library (no pip install needed)
+# The following are only needed if you use the card-hardware features:
+pyscard>=2.0.0
+pytlv>=0.3
