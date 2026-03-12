@@ -48,6 +48,18 @@ This installs SimGUI to `/opt/simgui` with a `/usr/bin/simgui` launcher and a
 desktop entry. Dependencies (`python3`, `python3-tk`) are pulled in
 automatically.
 
+### Updating to a new version
+
+```bash
+cd ~/SimGUI
+git pull
+bash scripts/build-deb.sh
+sudo dpkg -i ../simgui_*.deb
+```
+
+The `.deb` file is built one directory above the repo (`../`), not inside it.
+The build script prints the exact filename when done.
+
 ## Usage
 
 ```bash
