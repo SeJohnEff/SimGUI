@@ -29,10 +29,12 @@ _FORM_FIELDS = [
 class ProgramSIMPanel(ttk.Frame):
     """Tab for programming a single SIM card."""
 
-    def __init__(self, parent, card_manager: CardManager, **kwargs):
+    def __init__(self, parent, card_manager: CardManager, *,
+                 last_read_data: dict | None = None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._csv = CSVManager()
+        self._last_read_data = last_read_data if last_read_data is not None else {}
         self._mode_var = tk.StringVar(value="manual")
         self._field_vars: dict[str, tk.StringVar] = {}
         self._field_entries: dict[str, ttk.Entry] = {}
@@ -54,6 +56,9 @@ class ProgramSIMPanel(ttk.Frame):
                         ).pack(side=tk.LEFT, padx=(pad, 0))
         ttk.Radiobutton(src, text="From CSV", variable=self._mode_var,
                         value="csv", command=self._on_mode_change
+                        ).pack(side=tk.LEFT, padx=(pad, 0))
+        ttk.Radiobutton(src, text="From Read Card", variable=self._mode_var,
+                        value="read_card", command=self._on_mode_change
                         ).pack(side=tk.LEFT, padx=(pad, 0))
 
         # CSV selector (hidden when manual)
@@ -120,7 +125,10 @@ class ProgramSIMPanel(ttk.Frame):
     # ---- mode switching ------------------------------------------------
 
     def _on_mode_change(self):
-        is_csv = self._mode_var.get() == "csv"
+        mode = self._mode_var.get()
+        is_csv = mode == "csv"
+        is_read_card = mode == "read_card"
+
         if is_csv:
             self._csv_frame.pack(fill=tk.X,
                                  padx=ModernTheme.get_padding("medium"),
@@ -128,10 +136,44 @@ class ProgramSIMPanel(ttk.Frame):
         else:
             self._csv_frame.pack_forget()
 
+        # All fields editable for manual and read_card modes
         for key, _, editable_csv in _FORM_FIELDS:
             state = "normal" if (not is_csv or editable_csv) else "readonly"
             self._field_entries[key].configure(state=state)
+
+        if is_read_card:
+            self._populate_from_read_card()
+
         self._reset_step()
+
+    # ---- Read Card population ------------------------------------------
+
+    # Map from lowercase read-data keys to form field keys
+    _READ_KEY_MAP = {
+        "iccid": "ICCID",
+        "imsi": "IMSI",
+        "ki": "Ki",
+        "opc": "OPc",
+        "adm1": "ADM1",
+        "acc": "ACC",
+        "spn": "SPN",
+        "fplmn": "FPLMN",
+    }
+
+    def _populate_from_read_card(self):
+        """Fill form fields from the shared last-read card data."""
+        if not self._last_read_data:
+            self._action_status.configure(
+                text="No card data available \u2014 read a card first on the Read SIM tab",
+                style="Warning.TLabel")
+            return
+        for read_key, form_key in self._READ_KEY_MAP.items():
+            if form_key in self._field_vars:
+                self._field_vars[form_key].set(
+                    self._last_read_data.get(read_key, ""))
+        self._action_status.configure(
+            text="Fields populated from last read card",
+            style="Success.TLabel")
 
     # ---- CSV -----------------------------------------------------------
 

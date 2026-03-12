@@ -55,9 +55,11 @@ _PROTECTED_DISPLAY = [
 class ReadSIMPanel(ttk.Frame):
     """Tab that guides the user through reading a SIM card."""
 
-    def __init__(self, parent, card_manager: CardManager, **kwargs):
+    def __init__(self, parent, card_manager: CardManager, *,
+                 last_read_data: dict | None = None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
+        self._last_read_data = last_read_data if last_read_data is not None else {}
         self._public_data: dict = {}
         self._protected_data: dict = {}
         self._detected_iccid: str = ""
@@ -180,11 +182,15 @@ class ReadSIMPanel(ttk.Frame):
             for key, lbl in self._pub_labels.items():
                 val = pub.get(key, "")
                 lbl.configure(text=val if val else "-")
+            # Store public data in shared state for Program SIM tab
+            self._update_shared_read_data()
         else:
             self._public_data = {}
             self._detected_iccid = ""
             for lbl in self._pub_labels.values():
                 lbl.configure(text="-")
+            # Clear shared state when no card
+            self._last_read_data.clear()
 
     # ---- actions -------------------------------------------------------
 
@@ -260,6 +266,14 @@ class ReadSIMPanel(ttk.Frame):
         for key, lbl in self._prot_labels.items():
             val = data.get(key, "")
             lbl.configure(text=val if val else "-")
+        # Update shared state with protected fields
+        self._update_shared_read_data()
+
+    def _update_shared_read_data(self):
+        """Merge public + protected data into the shared last_read_data dict."""
+        self._last_read_data.clear()
+        self._last_read_data.update(self._public_data)
+        self._last_read_data.update(self._protected_data)
 
     def _on_copy(self):
         combined = {}

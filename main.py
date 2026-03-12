@@ -51,6 +51,9 @@ class SimGUIApp:
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
 
+        # Shared state: last card data read from Read SIM tab
+        self.last_read_data: dict[str, str] = {}
+
         self._build_menu()
         self._build_layout()
         self._bind_shortcuts()
@@ -88,10 +91,14 @@ class SimGUIApp:
         notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Workflow tabs
-        self._read_panel = ReadSIMPanel(notebook, self._card_manager)
+        self._read_panel = ReadSIMPanel(
+            notebook, self._card_manager,
+            last_read_data=self.last_read_data)
         notebook.add(self._read_panel, text="Read SIM")
 
-        self._program_panel = ProgramSIMPanel(notebook, self._card_manager)
+        self._program_panel = ProgramSIMPanel(
+            notebook, self._card_manager,
+            last_read_data=self.last_read_data)
         notebook.add(self._program_panel, text="Program SIM")
 
         self._batch_panel = BatchProgramPanel(
