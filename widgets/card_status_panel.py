@@ -70,11 +70,11 @@ class CardStatusPanel(ttk.LabelFrame):
         self.status_label.configure(text=message)
 
     def set_card_info(self, card_type=None, imsi=None, iccid=None):
-        if card_type:
+        if card_type is not None:
             self._info_vars['card_type'].set(card_type)
-        if imsi:
+        if imsi is not None:
             self._info_vars['imsi'].set(imsi)
-        if iccid:
+        if iccid is not None:
             self._info_vars['iccid'].set(iccid)
 
     def set_auth_status(self, authenticated):

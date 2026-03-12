@@ -7,9 +7,13 @@ Self-contained: works with plain CSV data, no dependency on the CLI tool.
 """
 
 import csv
+import logging
 import os
 from typing import Dict, List, Optional, Tuple
 
+from utils.validation import validate_card_data
+
+logger = logging.getLogger(__name__)
 
 # Standard CSV columns for SIM card programming
 STANDARD_COLUMNS = [
@@ -41,7 +45,7 @@ class CSVManager:
             self.filepath = filepath
             return True
         except Exception as e:
-            print(f"Error loading CSV: {e}")
+            logger.error("Error loading CSV: %s", e)
             return False
 
     def save_csv(self, filepath: str) -> bool:
@@ -55,7 +59,7 @@ class CSVManager:
             self.filepath = filepath
             return True
         except Exception as e:
-            print(f"Error saving CSV: {e}")
+            logger.error("Error saving CSV: %s", e)
             return False
 
     def load_card_parameters_file(self, filepath: str) -> bool:
@@ -72,14 +76,13 @@ class CSVManager:
                         card_data[key.strip()] = value.strip()
             if card_data:
                 self.cards.append(card_data)
-                # Merge any new columns
                 for k in card_data:
                     if k not in self.columns:
                         self.columns.append(k)
                 return True
             return False
         except Exception as e:
-            print(f"Error loading card parameters: {e}")
+            logger.error("Error loading card parameters: %s", e)
             return False
 
     # ---- Card access ---------------------------------------------------
@@ -112,41 +115,29 @@ class CSVManager:
 
     # ---- Validation ----------------------------------------------------
 
+    @staticmethod
+    def _validate_card_data(card: Dict[str, str], row_label: str) -> List[str]:
+        """Validate a single card's data using shared validation.
+
+        Args:
+            card: Card data dict.
+            row_label: Label for error messages (e.g. "Row 3").
+
+        Returns:
+            List of error strings.
+        """
+        raw_errors = validate_card_data(card)
+        return [f"{row_label}: {err}" for err in raw_errors]
+
     def validate_all(self) -> List[str]:
         """Return a list of human-readable validation errors."""
         errors: List[str] = []
         for i, card in enumerate(self.cards):
-            row = i + 1
-            imsi = card.get('IMSI', '')
-            if imsi and (not imsi.isdigit() or not (6 <= len(imsi) <= 15)):
-                errors.append(f"Row {row}: IMSI must be 6-15 digits")
-            iccid = card.get('ICCID', '')
-            if iccid and (not iccid.isdigit() or not (10 <= len(iccid) <= 20)):
-                errors.append(f"Row {row}: ICCID must be 10-20 digits")
-            ki = card.get('Ki', '')
-            if ki:
-                ki_clean = ki.replace(' ', '')
-                if len(ki_clean) != 32 or not all(
-                    c in '0123456789abcdefABCDEF' for c in ki_clean
-                ):
-                    errors.append(f"Row {row}: Ki must be 32 hex chars")
-            opc = card.get('OPc', '')
-            if opc:
-                opc_clean = opc.replace(' ', '')
-                if len(opc_clean) != 32 or not all(
-                    c in '0123456789abcdefABCDEF' for c in opc_clean
-                ):
-                    errors.append(f"Row {row}: OPc must be 32 hex chars")
-            adm1 = card.get('ADM1', '')
-            if adm1 and len(adm1) != 8:
-                errors.append(f"Row {row}: ADM1 must be 8 chars")
+            errors.extend(self._validate_card_data(card, f"Row {i + 1}"))
         return errors
 
     def validate_card(self, index: int) -> List[str]:
         """Validate a single card row."""
         if 0 <= index < len(self.cards):
-            mgr = CSVManager()
-            mgr.cards = [self.cards[index]]
-            mgr.columns = self.columns
-            return mgr.validate_all()
+            return self._validate_card_data(self.cards[index], f"Row {index + 1}")
         return [f"Invalid index: {index}"]

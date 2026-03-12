@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 """CSV Editor Panel Widget - Treeview-based CSV table editor"""
 
+import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from theme import ModernTheme
 from managers.csv_manager import CSVManager
+
+logger = logging.getLogger(__name__)
 
 
 class CSVEditorPanel(ttk.Frame):
@@ -14,6 +17,7 @@ class CSVEditorPanel(ttk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         self._csv_manager = CSVManager()
+        self._unsaved_changes = False
         self._create_widgets()
 
     def _create_widgets(self):
@@ -50,6 +54,10 @@ class CSVEditorPanel(ttk.Frame):
 
         self._refresh_table()
 
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return self._unsaved_changes
+
     def get_csv_manager(self) -> CSVManager:
         return self._csv_manager
 
@@ -70,17 +78,23 @@ class CSVEditorPanel(ttk.Frame):
             title="Load CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if fp and self._csv_manager.load_csv(fp):
             self._refresh_table()
+            self._unsaved_changes = False
 
     def _on_save_csv(self):
         fp = filedialog.asksaveasfilename(
             title="Save CSV", defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if fp:
-            self._csv_manager.save_csv(fp)
+            if self._csv_manager.save_csv(fp):
+                self._unsaved_changes = False
+                messagebox.showinfo("Save", f"CSV saved to {fp}")
+            else:
+                messagebox.showerror("Save Error", "Failed to save CSV file.")
 
     def _on_add_row(self):
         self._csv_manager.add_card()
         self._refresh_table()
+        self._unsaved_changes = True
 
     def _on_delete_row(self):
         sel = self.tree.selection()
@@ -88,6 +102,7 @@ class CSVEditorPanel(ttk.Frame):
             idx = int(sel[0])
             self._csv_manager.remove_card(idx)
             self._refresh_table()
+            self._unsaved_changes = True
 
     def _on_validate(self):
         errors = self._csv_manager.validate_all()
@@ -105,8 +120,12 @@ class CSVEditorPanel(ttk.Frame):
         col_name = self._csv_manager.columns[col_idx]
         old_val = self._csv_manager.cards[int(item)].get(col_name, '')
 
-        # Inline edit popup
-        x, y, w, h = self.tree.bbox(item, col_id)
+        # Guard bbox() for non-visible items
+        bbox = self.tree.bbox(item, col_id)
+        if not bbox:
+            return
+        x, y, w, h = bbox
+
         entry = ttk.Entry(self.tree)
         entry.place(x=x, y=y, width=w, height=h)
         entry.insert(0, old_val)
@@ -114,9 +133,12 @@ class CSVEditorPanel(ttk.Frame):
         entry.focus_set()
 
         def _save(e=None):
+            if not entry.winfo_exists():
+                return
             self._csv_manager.update_card(int(item), col_name, entry.get())
             entry.destroy()
             self._refresh_table()
+            self._unsaved_changes = True
 
         entry.bind('<Return>', _save)
         entry.bind('<FocusOut>', _save)

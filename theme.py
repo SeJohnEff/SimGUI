@@ -12,6 +12,39 @@ from tkinter import ttk
 import platform
 
 
+def _platform_fonts():
+    """Return font dict appropriate for the current platform."""
+    system = platform.system()
+    if system == 'Darwin':
+        family, mono = 'SF Pro Text', 'SF Mono'
+        display = 'SF Pro Display'
+        return {
+            'default': (family, 13),
+            'heading': (display, 18, 'bold'),
+            'subheading': (family, 14, 'bold'),
+            'small': (family, 11),
+            'mono': (mono, 11),
+        }
+    elif system == 'Linux':
+        family, mono = 'DejaVu Sans', 'DejaVu Sans Mono'
+        return {
+            'default': (family, 10),
+            'heading': (family, 14, 'bold'),
+            'subheading': (family, 11, 'bold'),
+            'small': (family, 9),
+            'mono': (mono, 9),
+        }
+    else:  # Windows and others
+        family, mono = 'Segoe UI', 'Consolas'
+        return {
+            'default': (family, 10),
+            'heading': (family, 14, 'bold'),
+            'subheading': (family, 11, 'bold'),
+            'small': (family, 9),
+            'mono': (mono, 9),
+        }
+
+
 class ModernTheme:
     """Modern macOS-like theme configuration"""
 
@@ -32,13 +65,7 @@ class ModernTheme:
         'disabled': '#8E8E93',
     }
 
-    FONTS = {
-        'default': ('SF Pro Text', 13) if platform.system() == 'Darwin' else ('Segoe UI', 10),
-        'heading': ('SF Pro Display', 18, 'bold') if platform.system() == 'Darwin' else ('Segoe UI', 14, 'bold'),
-        'subheading': ('SF Pro Text', 14, 'bold') if platform.system() == 'Darwin' else ('Segoe UI', 11, 'bold'),
-        'small': ('SF Pro Text', 11) if platform.system() == 'Darwin' else ('Segoe UI', 9),
-        'mono': ('SF Mono', 11) if platform.system() == 'Darwin' else ('Consolas', 9),
-    }
+    FONTS = _platform_fonts()
 
     PADDING = {
         'small': 4,
@@ -70,9 +97,18 @@ class ModernTheme:
 
         style.configure('TButton', font=cls.FONTS['default'],
                         padding=(cls.PADDING['medium'], cls.PADDING['small']))
+
+        # Accent.TButton (primary action style)
         style.configure('Accent.TButton', foreground='white',
                         background=cls.COLORS['accent'])
         style.map('Accent.TButton',
+                  background=[('active', cls.COLORS['accent_hover']),
+                              ('pressed', cls.COLORS['accent_hover'])])
+
+        # Primary.TButton is an alias for Accent.TButton
+        style.configure('Primary.TButton', foreground='white',
+                        background=cls.COLORS['accent'])
+        style.map('Primary.TButton',
                   background=[('active', cls.COLORS['accent_hover']),
                               ('pressed', cls.COLORS['accent_hover'])])
 
