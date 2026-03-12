@@ -15,9 +15,13 @@ from theme import ModernTheme
 from managers.card_manager import CardManager, CLIBackend
 from managers.csv_manager import CSVManager
 from managers.backup_manager import BackupManager
+from managers.settings_manager import SettingsManager
 from widgets.card_status_panel import CardStatusPanel
 from widgets.csv_editor_panel import CSVEditorPanel
 from widgets.progress_panel import ProgressPanel
+from widgets.read_sim_panel import ReadSIMPanel
+from widgets.program_sim_panel import ProgramSIMPanel
+from widgets.batch_program_panel import BatchProgramPanel
 from dialogs.adm1_dialog import ADM1Dialog
 from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
 
@@ -42,6 +46,7 @@ class SimGUIApp:
         # Managers
         self._card_manager = CardManager()
         self._backup_manager = BackupManager()
+        self._settings = SettingsManager()
 
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
@@ -50,10 +55,18 @@ class SimGUIApp:
         self._build_layout()
         self._bind_shortcuts()
 
+        # Restore window geometry
+        geom = self._settings.get("window_geometry", "")
+        if geom:
+            self.root.geometry(geom)
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Default to simulator mode when no CLI tool is found
-        if self._card_manager.cli_backend == CLIBackend.NONE:
+        # Restore simulator mode from settings
+        if self._settings.get("simulator_mode", False):
+            self._mode_var.set("simulator")
+            self._on_mode_change()
+        elif self._card_manager.cli_backend == CLIBackend.NONE:
             self._mode_var.set("simulator")
             self._on_mode_change()
 
@@ -70,9 +83,20 @@ class SimGUIApp:
         self._card_panel.on_detect_callback = self._on_detect_card
         self._card_panel.on_authenticate_callback = self._on_authenticate
 
-        # Right panel: notebook with CSV editor and progress tabs
+        # Right panel: notebook with workflow tabs
         notebook = ttk.Notebook(container)
         notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Workflow tabs
+        self._read_panel = ReadSIMPanel(notebook, self._card_manager)
+        notebook.add(self._read_panel, text="Read SIM")
+
+        self._program_panel = ProgramSIMPanel(notebook, self._card_manager)
+        notebook.add(self._program_panel, text="Program SIM")
+
+        self._batch_panel = BatchProgramPanel(
+            notebook, self._card_manager, self._settings)
+        notebook.add(self._batch_panel, text="Batch Program")
 
         self._csv_panel = CSVEditorPanel(notebook)
         notebook.add(self._csv_panel, text="CSV Editor")
@@ -155,6 +179,7 @@ class SimGUIApp:
             if mgr.load_csv(fp):
                 self._csv_panel._refresh_table()
                 self._status_var.set(f"Loaded {fp}")
+                self._settings.set("last_csv_path", fp)
             else:
                 messagebox.showerror("Error", f"Failed to load {fp}")
 
@@ -240,6 +265,7 @@ class SimGUIApp:
             self._update_sim_menu_state(tk.DISABLED)
             self._card_panel.set_simulator_info(None, None)
             self._status_var.set("Hardware mode active")
+        self._settings.set("simulator_mode", mode == "simulator")
 
     def _update_sim_menu_state(self, state):
         """Enable or disable simulator-only menu items."""
@@ -302,6 +328,8 @@ class SimGUIApp:
                 return  # Cancel
             if answer:
                 self._on_save_csv()
+        self._settings.set("window_geometry", self.root.geometry())
+        self._settings.save()
         self.root.destroy()
 
     # ---- Run --------------------------------------------------------------
