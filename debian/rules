@@ -1,3 +1,16 @@
 #!/usr/bin/make -f
 %:
 	dh $@
+
+override_dh_auto_install:
+	# Install application files
+	install -d $(CURDIR)/debian/simgui/opt/simgui
+	cp -r main.py theme.py pyproject.toml requirements.txt \
+		managers/ simulator/ widgets/ dialogs/ utils/ \
+		$(CURDIR)/debian/simgui/opt/simgui/
+	# Launcher
+	install -d $(CURDIR)/debian/simgui/usr/bin
+	install -m 755 debian/simgui-launcher $(CURDIR)/debian/simgui/usr/bin/simgui
+	# Desktop entry
+	install -d $(CURDIR)/debian/simgui/usr/share/applications
+	install -m 644 debian/simgui.desktop $(CURDIR)/debian/simgui/usr/share/applications/

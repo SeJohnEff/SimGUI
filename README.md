@@ -32,24 +32,20 @@ Or install with pip directly:
 pip install .
 ```
 
-### Installation on Ubuntu/Debian
-
-Install the `.deb` package:
+### Building from source (.deb)
 
 ```bash
-sudo apt install ./simgui_0.1.0_all.deb
+sudo apt install dpkg-dev debhelper python3-tk
+git clone https://github.com/SeJohnEff/SimGUI.git
+cd SimGUI
+bash scripts/build-deb.sh
+sudo apt install ../simgui_0.2.0_all.deb
+simgui
 ```
 
 This installs SimGUI to `/opt/simgui` with a `/usr/bin/simgui` launcher and a
 desktop entry. Dependencies (`python3`, `python3-tk`) are pulled in
 automatically.
-
-To build the `.deb` from source:
-
-```bash
-sudo apt install build-essential debhelper devscripts
-./scripts/build-deb.sh
-```
 
 ## Usage
 
