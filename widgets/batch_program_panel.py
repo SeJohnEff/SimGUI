@@ -216,15 +216,19 @@ class BatchProgramPanel(ttk.Frame):
     def _on_source_change(self):
         pad = ModernTheme.get_padding("medium")
         is_csv = self._source_var.get() == "csv"
+        # Unpack ALL dynamic sections first to guarantee correct ordering
+        self._csv_section.pack_forget()
+        self._gen_section.pack_forget()
+        self._preview_frame.pack_forget()
+        self._exec_frame.pack_forget()
+        self._summary_frame.pack_forget()
+        # Re-pack in the correct visual order
         if is_csv:
-            self._gen_section.pack_forget()
             self._csv_section.pack(fill=tk.X, padx=pad, pady=pad // 2)
         else:
-            self._csv_section.pack_forget()
             self._gen_section.pack(fill=tk.X, padx=pad, pady=pad // 2)
         self._preview_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad // 2)
         self._exec_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
-        self._summary_frame.pack_forget()
 
     # ---- CSV loading ---------------------------------------------------
 
@@ -330,7 +334,14 @@ class BatchProgramPanel(ttk.Frame):
 
     def _on_start(self):
         if not self._preview_data:
-            messagebox.showinfo("Nothing to do", "Preview the batch first.")
+            is_csv = self._source_var.get() == "csv"
+            if is_csv and not self._csv_path_var.get():
+                msg = "Load a CSV file first using Browse."
+            elif is_csv:
+                msg = "The loaded CSV file has no cards."
+            else:
+                msg = "Preview the batch first."
+            messagebox.showinfo("Nothing to do", msg)
             return
         self._log_clear()
         self._start_btn.configure(state=tk.DISABLED)
