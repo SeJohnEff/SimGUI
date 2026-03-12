@@ -39,7 +39,8 @@ sudo apt install dpkg-dev debhelper python3-tk
 git clone https://github.com/SeJohnEff/SimGUI.git
 cd SimGUI
 bash scripts/build-deb.sh
-sudo apt install ../simgui_0.2.0_all.deb
+sudo dpkg -i ../simgui_*.deb
+sudo apt install -f
 simgui
 ```
 

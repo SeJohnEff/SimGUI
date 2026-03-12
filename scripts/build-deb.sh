@@ -21,4 +21,4 @@ echo "Build complete!"
 ls -lh ../simgui_*.deb 2>/dev/null
 echo ""
 echo "Install with:"
-echo "  sudo apt install ../simgui_*.deb"
+echo "  sudo dpkg -i ../simgui_*.deb && sudo apt install -f"
