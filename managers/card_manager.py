@@ -40,6 +40,7 @@ class CLIBackend(Enum):
     NONE = auto()
     SYSMO = auto()
     PYSIM = auto()
+    SIMULATOR = auto()
 
 
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
@@ -89,6 +90,45 @@ class CardManager:
         self.card_type: CardType = CardType.UNKNOWN
         self.authenticated: bool = False
         self.card_info: Dict[str, str] = {}
+        self._simulator = None  # Optional[SimulatorBackend]
+
+    # ---- simulator ---------------------------------------------------------
+
+    def enable_simulator(self, settings=None):
+        """Enable the simulator backend."""
+        from simulator import SimulatorBackend, SimulatorSettings
+        self._simulator = SimulatorBackend(settings or SimulatorSettings())
+        self.disconnect()
+
+    def disable_simulator(self):
+        """Disable the simulator backend; revert to hardware/CLI."""
+        self._simulator = None
+        self.disconnect()
+
+    @property
+    def is_simulator_active(self) -> bool:
+        return self._simulator is not None
+
+    def next_virtual_card(self) -> Optional[Tuple[int, int]]:
+        if self._simulator:
+            return self._simulator.next_card()
+        return None
+
+    def previous_virtual_card(self) -> Optional[Tuple[int, int]]:
+        if self._simulator:
+            return self._simulator.previous_card()
+        return None
+
+    def get_simulator_info(self) -> Optional[Dict]:
+        if self._simulator is None:
+            return None
+        card = self._simulator._current_card()
+        return {
+            "current_index": self._simulator.current_card_index,
+            "total_cards": len(self._simulator.card_deck),
+            "card": card.get_current_data() if card else None,
+            "card_type": card.card_type if card else None,
+        }
 
     # ---- helpers -------------------------------------------------------
 
@@ -153,11 +193,22 @@ class CardManager:
     # ---- card operations -----------------------------------------------
 
     def detect_card(self) -> Tuple[bool, str]:
-        """Detect a card in the reader.
+        """Detect a card in the reader (or the virtual card if simulator active)."""
+        if self._simulator:
+            ok, msg = self._simulator.detect_card()
+            if ok:
+                card = self._simulator._current_card()
+                if card:
+                    ct = card.card_type
+                    self.card_type = CardType[ct] if ct in CardType.__members__ else CardType.UNKNOWN
+                    data = card.get_current_data()
+                    self.card_info = {
+                        "IMSI": data.get("imsi", ""),
+                        "ICCID": data.get("iccid", ""),
+                    }
+                    self.authenticated = card.authenticated
+            return ok, msg
 
-        Attempts to actually detect a card by running a lightweight read
-        command. Falls back to checking if the CLI tool is available.
-        """
         self.authenticated = False
         self.card_info = {}
         self.card_type = CardType.UNKNOWN
@@ -190,29 +241,33 @@ class CardManager:
         return False, "Could not detect card with any known script"
 
     def authenticate(self, adm1: str, force: bool = False) -> Tuple[bool, str]:
-        """Authenticate with ADM1 key.
+        """Authenticate with ADM1 key."""
+        if self._simulator:
+            ok, msg = self._simulator.authenticate(adm1, force=force)
+            if ok:
+                self.authenticated = True
+            return ok, msg
 
-        NOTE: Full CLI authentication is not yet implemented. This validates
-        the ADM1 format and sets authenticated state for GUI flow purposes.
-        Real implementation would call the CLI tool's verify-adm1 command.
-        """
         err = validate_adm1(adm1)
         if err:
             return False, err
         # TODO: Call actual CLI tool authentication command when available.
-        # e.g. self._run_cli('sysmo_isim_sja2.py', '--adm1', adm1, '--verify')
         logger.warning("authenticate() is a stub -- no real CLI call is made")
         self.authenticated = True
         return True, "Authentication successful (stub -- CLI integration pending)"
 
     def read_card_data(self) -> Optional[Dict[str, str]]:
         """Read basic card data (IMSI, ICCID, etc.)."""
+        if self._simulator:
+            return self._simulator.read_card_data()
         if not self.authenticated:
             return None
         return self.card_info if self.card_info else None
 
     def program_card(self, card_data: Dict[str, str]) -> Tuple[bool, str]:
         """Program a card with the given parameters."""
+        if self._simulator:
+            return self._simulator.program_card(card_data)
         if not self.authenticated:
             return False, "Not authenticated"
         # TODO: Build CLI args from card_data and call appropriate script
@@ -221,15 +276,21 @@ class CardManager:
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""
+        if self._simulator:
+            return self._simulator.verify_card(expected)
         if not self.authenticated:
             return False, ["Not authenticated"]
         return True, []
 
     def get_remaining_attempts(self) -> Optional[int]:
         """Return remaining ADM1 auth attempts, or None if unknown."""
+        if self._simulator:
+            return self._simulator.get_remaining_attempts()
         return None
 
     def disconnect(self):
+        if self._simulator:
+            self._simulator.disconnect()
         self.authenticated = False
         self.card_type = CardType.UNKNOWN
         self.card_info = {}

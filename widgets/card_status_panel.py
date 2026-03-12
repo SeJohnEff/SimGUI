@@ -79,3 +79,15 @@ class CardStatusPanel(ttk.LabelFrame):
 
     def set_auth_status(self, authenticated):
         self._info_vars['auth'].set('Yes' if authenticated else 'No')
+
+    def set_simulator_info(self, card_index, total_cards):
+        """Show or hide the virtual card indicator below the auth row."""
+        if not hasattr(self, '_sim_label'):
+            self._sim_label = ttk.Label(self, text="", style='Small.TLabel')
+        if card_index is not None and total_cards is not None:
+            self._sim_label.configure(
+                text=f"Virtual card {card_index + 1} of {total_cards}")
+            self._sim_label.grid(row=5, column=0, columnspan=2,
+                                 sticky=tk.W, pady=(4, 0))
+        else:
+            self._sim_label.grid_remove()

@@ -12,13 +12,14 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from theme import ModernTheme
-from managers.card_manager import CardManager
+from managers.card_manager import CardManager, CLIBackend
 from managers.csv_manager import CSVManager
 from managers.backup_manager import BackupManager
 from widgets.card_status_panel import CardStatusPanel
 from widgets.csv_editor_panel import CSVEditorPanel
 from widgets.progress_panel import ProgressPanel
 from dialogs.adm1_dialog import ADM1Dialog
+from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,11 +43,19 @@ class SimGUIApp:
         self._card_manager = CardManager()
         self._backup_manager = BackupManager()
 
+        # Mode variable: "hardware" or "simulator"
+        self._mode_var = tk.StringVar(value="hardware")
+
         self._build_menu()
         self._build_layout()
         self._bind_shortcuts()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Default to simulator mode when no CLI tool is found
+        if self._card_manager.cli_backend == CLIBackend.NONE:
+            self._mode_var.set("simulator")
+            self._on_mode_change()
 
     # ---- Layout -----------------------------------------------------------
 
@@ -98,6 +107,26 @@ class SimGUIApp:
         card_menu = tk.Menu(menubar, tearoff=0)
         card_menu.add_command(label="Detect Card", command=self._on_detect_card)
         card_menu.add_command(label="Authenticate...", command=self._on_authenticate)
+        card_menu.add_separator()
+        card_menu.add_radiobutton(label="Hardware Mode",
+                                  variable=self._mode_var, value="hardware",
+                                  command=self._on_mode_change)
+        card_menu.add_radiobutton(label="Simulator Mode",
+                                  variable=self._mode_var, value="simulator",
+                                  command=self._on_mode_change)
+        card_menu.add_separator()
+        self._card_menu = card_menu
+        self._sim_menu_start = card_menu.index(tk.END) + 1
+        card_menu.add_command(label="Next Virtual Card",
+                              command=self._on_next_virtual_card,
+                              accelerator="Ctrl+N")
+        card_menu.add_command(label="Previous Virtual Card",
+                              command=self._on_previous_virtual_card,
+                              accelerator="Ctrl+P")
+        card_menu.add_command(label="Simulator Settings...",
+                              command=self._on_simulator_settings)
+        card_menu.add_command(label="Reset Simulator",
+                              command=self._on_reset_simulator)
         menubar.add_cascade(label="Card", menu=card_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -112,6 +141,8 @@ class SimGUIApp:
         self.root.bind_all('<Control-o>', lambda e: self._on_open_csv())
         self.root.bind_all('<Control-s>', lambda e: self._on_save_csv())
         self.root.bind_all('<Control-q>', lambda e: self._on_close())
+        self.root.bind_all('<Control-n>', lambda e: self._on_next_virtual_card())
+        self.root.bind_all('<Control-p>', lambda e: self._on_previous_virtual_card())
 
     # ---- Callbacks --------------------------------------------------------
 
@@ -150,7 +181,15 @@ class SimGUIApp:
             )
         else:
             self._card_panel.set_status("error", msg)
-        self._status_var.set(msg)
+        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
+        self._status_var.set(f"{prefix}{msg}")
+        # Update virtual card indicator
+        sim_info = self._card_manager.get_simulator_info()
+        if sim_info:
+            self._card_panel.set_simulator_info(
+                sim_info["current_index"], sim_info["total_cards"])
+        else:
+            self._card_panel.set_simulator_info(None, None)
 
     def _on_authenticate(self):
         remaining = self._card_manager.get_remaining_attempts()
@@ -165,7 +204,67 @@ class SimGUIApp:
         else:
             self._card_panel.set_status("error", msg)
             self._card_panel.set_auth_status(False)
-        self._status_var.set(msg)
+        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
+        self._status_var.set(f"{prefix}{msg}")
+
+    def _on_mode_change(self):
+        """Handle switching between hardware and simulator mode."""
+        mode = self._mode_var.get()
+        if mode == "simulator":
+            self._card_manager.enable_simulator()
+            self._update_sim_menu_state(tk.NORMAL)
+            self._status_var.set("[SIM] Simulator mode active")
+            # Auto-detect the first virtual card
+            self._on_detect_card()
+        else:
+            self._card_manager.disable_simulator()
+            self._update_sim_menu_state(tk.DISABLED)
+            self._card_panel.set_simulator_info(None, None)
+            self._status_var.set("Hardware mode active")
+
+    def _update_sim_menu_state(self, state):
+        """Enable or disable simulator-only menu items."""
+        for i in range(self._sim_menu_start,
+                       self._sim_menu_start + 4):
+            try:
+                self._card_menu.entryconfigure(i, state=state)
+            except tk.TclError:
+                pass
+
+    def _on_next_virtual_card(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        result = self._card_manager.next_virtual_card()
+        if result:
+            idx, total = result
+            self._card_panel.set_simulator_info(idx, total)
+            self._on_detect_card()
+
+    def _on_previous_virtual_card(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        result = self._card_manager.previous_virtual_card()
+        if result:
+            idx, total = result
+            self._card_panel.set_simulator_info(idx, total)
+            self._on_detect_card()
+
+    def _on_simulator_settings(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        sim = self._card_manager._simulator
+        old_count = sim.settings.num_cards
+        dlg = SimulatorSettingsDialog(self.root, sim.settings)
+        if dlg.applied and sim.settings.num_cards != old_count:
+            sim.reset()
+            self._on_detect_card()
+
+    def _on_reset_simulator(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        self._card_manager._simulator.reset()
+        self._on_detect_card()
+        self._status_var.set("[SIM] Simulator reset")
 
     def _on_about(self):
         messagebox.showinfo(

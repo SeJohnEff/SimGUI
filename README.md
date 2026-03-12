@@ -60,7 +60,31 @@ SimGUI also checks common locations automatically (`~/sysmo-usim-tool`,
 next to the SimGUI repo).
 
 If neither tool is found, CSV editing and offline preparation still work —
-only card reader operations are disabled.
+only card reader operations are disabled. SimGUI will default to **Simulator
+Mode** so you can still exercise the full workflow (see below).
+
+## Simulator Mode
+
+SimGUI includes a built-in SIM programmer simulator so you can test the full
+GUI workflow without a USB card reader or physical SIM cards.
+
+**Activation** — Open the *Card* menu and select *Simulator Mode*. If no CLI
+tool is detected on startup SimGUI defaults to simulator mode automatically.
+
+**Virtual card deck** — The simulator generates a deck of 10 virtual SIM cards
+(mix of SJA2 and SJA5 types) with realistic ICCID, IMSI, Ki, OPc, and ADM1
+values. Cycle through them with *Next Virtual Card* (`Ctrl+N`) and *Previous
+Virtual Card* (`Ctrl+P`).
+
+**Settings** — Open *Card > Simulator Settings...* to adjust:
+- **Operation Delay** (0–2000 ms) — artificial delay per operation for realism
+- **Error Rate** (0–50 %) — probability of random failures for error-handling
+  testing
+- **Number of Cards** (1–50) — size of the virtual card deck (regenerated on
+  change)
+
+**Use cases** — UI development, automated testing, demos, and training without
+requiring hardware.
 
 ## Architecture
 
@@ -72,12 +96,18 @@ SimGUI/
 │   ├── card_manager.py     # Card detection / auth via CLI subprocess
 │   ├── csv_manager.py      # CSV load / save / validate
 │   └── backup_manager.py   # JSON backup / restore
+├── simulator/
+│   ├── virtual_card.py     # VirtualCard dataclass
+│   ├── card_deck.py        # Card deck generation
+│   ├── simulator_backend.py # SimulatorBackend (in-memory card ops)
+│   └── settings.py         # SimulatorSettings dataclass
 ├── widgets/
 │   ├── card_status_panel.py   # Card info + status indicator
 │   ├── csv_editor_panel.py    # Treeview-based CSV table editor
 │   └── progress_panel.py      # Progress bar + log output
 ├── dialogs/
-│   └── adm1_dialog.py      # ADM1 key entry dialog
+│   ├── adm1_dialog.py      # ADM1 key entry dialog
+│   └── simulator_settings_dialog.py  # Simulator settings dialog
 ├── utils/
 │   └── validation.py        # Shared validation (ADM1, IMSI, ICCID, hex)
 └── tests/                   # pytest test suite
