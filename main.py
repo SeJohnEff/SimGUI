@@ -215,6 +215,8 @@ class SimGUIApp:
                 sim_info["current_index"], sim_info["total_cards"])
         else:
             self._card_panel.set_simulator_info(None, None)
+        # Sync the Read SIM tab
+        self._read_panel.refresh()
 
     def _on_authenticate(self):
         remaining = self._card_manager.get_remaining_attempts()
