@@ -197,15 +197,34 @@ class SimGUIApp:
         adm1, force = dlg.get_adm1()
         if adm1 is None:
             return
-        ok, msg = self._card_manager.authenticate(adm1, force=force)
+        expected_iccid = self._get_expected_iccid()
+        ok, msg = self._card_manager.authenticate(
+            adm1, force=force, expected_iccid=expected_iccid)
         if ok:
             self._card_panel.set_status("authenticated", msg)
             self._card_panel.set_auth_status(True)
         else:
             self._card_panel.set_status("error", msg)
             self._card_panel.set_auth_status(False)
+            if "ICCID mismatch" in msg:
+                messagebox.showwarning("ICCID Mismatch", msg)
         prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
         self._status_var.set(f"{prefix}{msg}")
+
+    def _get_expected_iccid(self):
+        """Get ICCID from the currently selected CSV row, if any."""
+        try:
+            mgr = self._csv_panel.get_csv_manager()
+            tree = self._csv_panel._tree
+            selection = tree.selection()
+            if not selection:
+                return None
+            item = selection[0]
+            idx = tree.index(item)
+            card = mgr.get_card(idx)
+            return card.get("ICCID") if card else None
+        except Exception:
+            return None
 
     def _on_mode_change(self):
         """Handle switching between hardware and simulator mode."""

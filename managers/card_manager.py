@@ -240,8 +240,35 @@ class CardManager:
 
         return False, "Could not detect card with any known script"
 
-    def authenticate(self, adm1: str, force: bool = False) -> Tuple[bool, str]:
-        """Authenticate with ADM1 key."""
+    def read_iccid(self) -> Optional[str]:
+        """Read ICCID from the card without authentication."""
+        if self._simulator:
+            card = self._simulator._current_card()
+            return card.iccid if card else None
+        # Hardware: ICCID is available from card_info after detect
+        return self.card_info.get("ICCID")
+
+    def authenticate(self, adm1: str, force: bool = False,
+                     expected_iccid: Optional[str] = None) -> Tuple[bool, str]:
+        """Authenticate with ADM1 key.
+
+        Args:
+            adm1: The ADM1 key.
+            force: Force auth even with low attempts.
+            expected_iccid: If provided, cross-verify the card's ICCID before
+                authenticating. Prevents wrong-ADM1 lockout from mismatched
+                card/data rows.
+        """
+        # ICCID cross-verification safety check
+        if expected_iccid is not None:
+            card_iccid = self.read_iccid()
+            if card_iccid and card_iccid != expected_iccid:
+                return False, (
+                    f"ICCID mismatch! Card ICCID: {card_iccid} does not match "
+                    f"expected: {expected_iccid}. Wrong card or wrong data row. "
+                    f"Authentication aborted to prevent card lockout."
+                )
+
         if self._simulator:
             ok, msg = self._simulator.authenticate(adm1, force=force)
             if ok:

@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+# Install Python dependencies
+if [ -f /opt/simgui/requirements.txt ]; then
+    pip3 install -r /opt/simgui/requirements.txt 2>/dev/null || true
+fi
+
+# Make launcher executable
+chmod +x /usr/bin/simgui-launcher.sh 2>/dev/null || true
+
+# Create symlink for the simgui command
+ln -sf /usr/bin/simgui-launcher.sh /usr/bin/simgui 2>/dev/null || true
+
+#DEBHELPER#

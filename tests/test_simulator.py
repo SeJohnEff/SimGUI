@@ -356,3 +356,148 @@ class TestCardManagerSimulator:
         """Without simulator, operations fall back to CLI path (which is None in tests)."""
         ok, msg = mgr.detect_card()
         assert ok is False  # No CLI tool available in test env
+
+    def test_iccid_mismatch_blocks_auth(self, mgr):
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        card = mgr._simulator._current_card()
+        ok, msg = mgr.authenticate(
+            card.adm1, expected_iccid="0000000000000000000")
+        assert ok is False
+        assert "ICCID mismatch" in msg
+
+    def test_iccid_match_allows_auth(self, mgr):
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        card = mgr._simulator._current_card()
+        ok, msg = mgr.authenticate(
+            card.adm1, expected_iccid=card.iccid)
+        assert ok is True
+
+    def test_iccid_none_skips_check(self, mgr):
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        card = mgr._simulator._current_card()
+        ok, msg = mgr.authenticate(card.adm1, expected_iccid=None)
+        assert ok is True
+
+    def test_read_iccid_with_simulator(self, mgr):
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        iccid = mgr.read_iccid()
+        assert iccid is not None
+        assert len(iccid) > 0
+
+    def test_read_iccid_without_simulator(self, mgr):
+        iccid = mgr.read_iccid()
+        assert iccid is None or iccid == ""
+
+
+# ---------------------------------------------------------------------------
+# TestCSVLoading
+# ---------------------------------------------------------------------------
+
+class TestCSVLoading:
+    def test_load_bundled_csv(self):
+        """Backend loads bundled sysmocom CSV by default."""
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0)
+        b = SimulatorBackend(settings)
+        assert len(b.card_deck) == 20
+        for card in b.card_deck:
+            assert card.card_type == "SJA5"
+            assert len(card.iccid) > 0
+            assert len(card.imsi) > 0
+            assert len(card.ki) > 0
+            assert len(card.opc) > 0
+            assert len(card.adm1) > 0
+
+    def test_bundled_csv_has_pin_puk_fields(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0)
+        b = SimulatorBackend(settings)
+        card = b.card_deck[0]
+        assert card.pin2 != ""
+        assert card.puk2 != ""
+
+    def test_bundled_csv_unique_iccids(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0)
+        b = SimulatorBackend(settings)
+        iccids = [c.iccid for c in b.card_deck]
+        assert len(set(iccids)) == 20
+
+    def test_load_from_csv_explicit_path(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text(
+            "IMSI,ICCID,ACC,PIN1,PUK1,PIN2,PUK2,Ki,OPC,ADM1\n"
+            "001,1234,0001,1111,22222222,3333,44444444,"
+            + "A" * 32 + "," + "B" * 32 + ",99999999\n"
+        )
+        from simulator.card_deck import load_from_csv
+        cards = load_from_csv(str(csv_file))
+        assert len(cards) == 1
+        assert cards[0].iccid == "1234"
+        assert cards[0].imsi == "001"
+        assert cards[0].pin2 == "3333"
+        assert cards[0].puk2 == "44444444"
+
+    def test_settings_card_data_path(self, tmp_path):
+        csv_file = tmp_path / "custom.csv"
+        csv_file.write_text(
+            "IMSI,ICCID,ACC,PIN1,PUK1,PIN2,PUK2,Ki,OPC,ADM1\n"
+            "002,5678,0001,1111,22222222,,,CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC,"
+            "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD,88888888\n"
+        )
+        settings = SimulatorSettings(
+            delay_ms=0, error_rate=0.0,
+            card_data_path=str(csv_file))
+        b = SimulatorBackend(settings)
+        assert len(b.card_deck) == 1
+        assert b.card_deck[0].iccid == "5678"
+
+    def test_csv_path_constructor_param(self, tmp_path):
+        csv_file = tmp_path / "direct.csv"
+        csv_file.write_text(
+            "IMSI,ICCID,ACC,PIN1,PUK1,PIN2,PUK2,Ki,OPC,ADM1\n"
+            "003,9012,0001,1111,22222222,,,EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE,"
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,77777777\n"
+        )
+        b = SimulatorBackend(
+            SimulatorSettings(delay_ms=0, error_rate=0.0),
+            csv_path=str(csv_file))
+        assert len(b.card_deck) == 1
+        assert b.card_deck[0].iccid == "9012"
+
+
+# ---------------------------------------------------------------------------
+# TestICCIDVerification
+# ---------------------------------------------------------------------------
+
+class TestICCIDVerification:
+    @pytest.fixture
+    def backend(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0, num_cards=5)
+        return SimulatorBackend(settings)
+
+    def test_matching_iccid_allows_auth(self, backend):
+        card = backend._current_card()
+        ok, msg = backend.authenticate(card.adm1, expected_iccid=card.iccid)
+        assert ok is True
+
+    def test_mismatched_iccid_blocks_auth(self, backend):
+        card = backend._current_card()
+        ok, msg = backend.authenticate(
+            card.adm1, expected_iccid="0000000000000000000")
+        assert ok is False
+        assert "ICCID mismatch" in msg
+        # Should NOT consume an attempt
+        assert card.adm1_attempts_remaining == 3
+        assert card.authenticated is False
+
+    def test_none_iccid_skips_check(self, backend):
+        card = backend._current_card()
+        ok, msg = backend.authenticate(card.adm1, expected_iccid=None)
+        assert ok is True
+        assert card.authenticated is True
+
+    def test_mismatch_does_not_decrement_attempts(self, backend):
+        card = backend._current_card()
+        for _ in range(5):
+            backend.authenticate(
+                card.adm1, expected_iccid="wrong_iccid")
+        assert card.adm1_attempts_remaining == 3
+        assert card.adm1_locked is False

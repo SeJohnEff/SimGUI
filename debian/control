@@ -1,0 +1,17 @@
+Source: simgui
+Section: utils
+Priority: optional
+Maintainer: SimGUI Developers <simgui@example.com>
+Build-Depends: debhelper (>= 12)
+Standards-Version: 4.5.0
+
+Package: simgui
+Architecture: all
+Depends: python3 (>= 3.8), python3-tk, python3-pip
+Recommends: python3-venv
+Description: GUI wrapper for SIM card programming tools
+ SimGUI is a lightweight GUI wrapper for sysmo-usim-tool and pySim.
+ It provides a desktop interface for SIM card detection, ADM1
+ authentication, CSV batch editing, and card programming. Includes
+ a built-in simulator mode for hardware-free testing with 20 real
+ sysmoISIM-SJA5 card profiles.

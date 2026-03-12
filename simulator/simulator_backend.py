@@ -1,24 +1,49 @@
 """Simulator backend — drop-in replacement for CLI-based card operations."""
 
 import logging
+import os
 import random
 import time
 from typing import Dict, List, Optional, Tuple
 
-from simulator.card_deck import generate_deck
+from simulator.card_deck import generate_deck, load_from_csv
 from simulator.settings import SimulatorSettings
 from simulator.virtual_card import VirtualCard
 
 logger = logging.getLogger(__name__)
 
+# Bundled test data: 20 real sysmoISIM-SJA5 card profiles from sysmocom
+_BUNDLED_CSV = os.path.join(
+    os.path.dirname(__file__), "data", "sysmocom_test_cards.csv"
+)
+
 
 class SimulatorBackend:
     """In-memory SIM card simulator that mirrors the CardManager interface."""
 
-    def __init__(self, settings: Optional[SimulatorSettings] = None):
+    def __init__(self, settings: Optional[SimulatorSettings] = None,
+                 csv_path: Optional[str] = None):
         self.settings = settings or SimulatorSettings()
-        self.card_deck: List[VirtualCard] = generate_deck(self.settings.num_cards)
+        self.card_deck: List[VirtualCard] = self._load_deck(csv_path)
         self.current_card_index: int = 0
+
+    def _load_deck(self, csv_path: Optional[str] = None) -> List[VirtualCard]:
+        """Load cards from CSV (explicit path, settings path, or bundled), fallback to generate."""
+        path = csv_path or self.settings.card_data_path
+        if path and os.path.isfile(path):
+            try:
+                return load_from_csv(path)
+            except Exception:
+                logger.warning("Failed to load CSV %s, falling back to bundled data", path)
+
+        # Try bundled CSV
+        if os.path.isfile(_BUNDLED_CSV):
+            try:
+                return load_from_csv(_BUNDLED_CSV)
+            except Exception:
+                logger.warning("Failed to load bundled CSV, generating deck")
+
+        return generate_deck(self.settings.num_cards)
 
     # ---- helpers -----------------------------------------------------------
 
@@ -53,7 +78,8 @@ class SimulatorBackend:
             f"Card detected — sysmoISIM-{card.card_type} (virtual)"
         )
 
-    def authenticate(self, adm1: str, force: bool = False) -> Tuple[bool, str]:
+    def authenticate(self, adm1: str, force: bool = False,
+                     expected_iccid: Optional[str] = None) -> Tuple[bool, str]:
         """Authenticate with ADM1 key against the virtual card."""
         self._delay()
         err = self._maybe_inject_error()
@@ -63,6 +89,14 @@ class SimulatorBackend:
         card = self._current_card()
         if card is None:
             return False, "No card in reader"
+
+        # ICCID cross-verification safety check
+        if expected_iccid is not None and card.iccid != expected_iccid:
+            return False, (
+                f"ICCID mismatch! Card ICCID: {card.iccid} does not match "
+                f"expected: {expected_iccid}. Wrong card or wrong data row. "
+                f"Authentication aborted to prevent card lockout."
+            )
 
         if card.adm1_locked:
             return False, "Card permanently locked — no ADM1 attempts remaining"
@@ -163,5 +197,5 @@ class SimulatorBackend:
 
     def reset(self):
         """Regenerate the entire deck."""
-        self.card_deck = generate_deck(self.settings.num_cards)
+        self.card_deck = self._load_deck()
         self.current_card_index = 0

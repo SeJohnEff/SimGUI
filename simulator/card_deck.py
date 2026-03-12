@@ -1,9 +1,13 @@
 """Card deck generation for the simulator."""
 
+import csv
 import hashlib
+import logging
 from typing import List
 
 from simulator.virtual_card import VirtualCard
+
+logger = logging.getLogger(__name__)
 
 
 def generate_deck(count: int = 10) -> List[VirtualCard]:
@@ -40,4 +44,32 @@ def generate_deck(count: int = 10) -> List[VirtualCard]:
             ).hexdigest()[:64]
 
         cards.append(card)
+    return cards
+
+
+def load_from_csv(csv_path: str) -> List[VirtualCard]:
+    """Load virtual cards from a CSV file.
+
+    Expected columns: IMSI, ICCID, ACC, PIN1, PUK1, PIN2, PUK2,
+    Ki, OPC, ADM1 (plus optional KIC/KID/KIK columns which are ignored).
+    """
+    cards: List[VirtualCard] = []
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            card = VirtualCard(
+                card_type="SJA5",
+                iccid=row.get("ICCID", ""),
+                imsi=row.get("IMSI", ""),
+                ki=row.get("Ki", ""),
+                opc=row.get("OPC", ""),
+                adm1=row.get("ADM1", ""),
+                acc=row.get("ACC", "0001"),
+                pin1=row.get("PIN1", "1234"),
+                puk1=row.get("PUK1", "12345678"),
+                pin2=row.get("PIN2", ""),
+                puk2=row.get("PUK2", ""),
+            )
+            cards.append(card)
+    logger.info("Loaded %d cards from %s", len(cards), csv_path)
     return cards

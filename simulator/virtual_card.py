@@ -27,6 +27,8 @@ class VirtualCard:
     acc: str = "0001"
     pin1: str = "1234"
     puk1: str = "12345678"
+    pin2: str = ""
+    puk2: str = ""
     msisdn: str = ""
     mnc_length: str = "02"
 
@@ -49,6 +51,8 @@ class VirtualCard:
             "acc": self.acc,
             "pin1": self.pin1,
             "puk1": self.puk1,
+            "pin2": self.pin2,
+            "puk2": self.puk2,
             "msisdn": self.msisdn,
             "mnc_length": self.mnc_length,
         }

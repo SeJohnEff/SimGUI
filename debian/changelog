@@ -1,0 +1,10 @@
+simgui (0.1.0-1) unstable; urgency=low
+
+  * Initial release.
+  * CSV batch editor for SIM card configurations.
+  * Card detection and ADM1 authentication via sysmo-usim-tool or pySim.
+  * Built-in SIM programmer simulator with 20 real sysmoISIM-SJA5 profiles.
+  * ICCID cross-verification safety check before ADM1 authentication.
+  * Debian packaging for easy installation.
+
+ -- SimGUI Developers <simgui@example.com>  Thu, 12 Mar 2026 12:00:00 +0000
