@@ -11,6 +11,7 @@ from tkinter import ttk, filedialog, messagebox
 from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager
 from theme import ModernTheme
+from widgets.tooltip import add_tooltip
 
 
 # Fields shown in the form.  Tuple: (key, label, editable_when_csv)
@@ -91,14 +92,28 @@ class ProgramSIMPanel(ttk.Frame):
         form_frame = ttk.LabelFrame(self, text="Card Data")
         form_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
 
+        _FIELD_TOOLTIPS = {
+            "ICCID": "Integrated Circuit Card Identifier.\n19-20 digits. Example: 89999880000003010011",
+            "IMSI": "International Mobile Subscriber Identity.\n6-15 digits. Example: 99988000301001",
+            "Ki": "Authentication key (hex).\n32 hex characters. Example: E049AF7D...C03FD919",
+            "OPc": "Operator key (hex).\n32 hex characters. Example: 9EB1A951...D4053A0E",
+            "ADM1": "Admin key for card access.\n8 decimal digits or 16 hex chars.\n\u26a0 3 wrong attempts = permanent lock!",
+            "ACC": "Access Control Class.\n4 hex digits. Example: 0001",
+            "SPN": "Service Provider Name.\nExample: BOLIDEN",
+            "FPLMN": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
+        }
+
         for i, (key, label, _) in enumerate(_FORM_FIELDS):
-            ttk.Label(form_frame, text=f"{label}:").grid(
-                row=i, column=0, sticky=tk.W, padx=pad, pady=2)
+            lbl = ttk.Label(form_frame, text=f"{label}:")
+            lbl.grid(row=i, column=0, sticky=tk.W, padx=pad, pady=2)
             var = tk.StringVar()
             entry = ttk.Entry(form_frame, textvariable=var, width=40)
             entry.grid(row=i, column=1, sticky=(tk.W, tk.E), padx=pad, pady=2)
             self._field_vars[key] = var
             self._field_entries[key] = entry
+            if key in _FIELD_TOOLTIPS:
+                add_tooltip(lbl, _FIELD_TOOLTIPS[key])
+                add_tooltip(entry, _FIELD_TOOLTIPS[key])
         form_frame.columnconfigure(1, weight=1)
 
         # Action buttons

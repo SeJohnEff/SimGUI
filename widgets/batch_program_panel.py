@@ -16,6 +16,7 @@ from managers.csv_manager import CSVManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
 from utils.iccid_utils import generate_iccid, generate_imsi
+from widgets.tooltip import add_tooltip
 
 
 class BatchProgramPanel(ttk.Frame):
@@ -76,6 +77,17 @@ class BatchProgramPanel(ttk.Frame):
         # ---------- Generate Sequence section ----------
         self._gen_section = ttk.LabelFrame(self, text="Batch Template")
 
+        _FIELD_TOOLTIPS = {
+            "mcc_mnc": "Mobile Country Code + Mobile Network Code.\nExample: 99988 (MCC=999, MNC=88)",
+            "customer": "4-digit customer identifier.\nExample: 0003 (Boliden)",
+            "sim_type": "4-digit SIM card type code.\nExample: 0100 (SYSMOCOM)",
+            "start": "First sequence number in the batch.\nExample: 1 \u2192 sequence 001",
+            "count": "Number of SIM cards to generate.\nExample: 20 \u2192 generates 001 to 020",
+            "spn": "Service Provider Name stored on the SIM.\nExample: BOLIDEN",
+            "language": "ISO 639-1 language code for the SIM.\nExample: EN (English), SV (Swedish)",
+            "fplmn": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
+        }
+
         fields = [
             ("mcc_mnc", "MCC+MNC:", "last_mcc_mnc", 10),
             ("customer", "Customer Code:", "last_customer_code", 10),
@@ -90,19 +102,28 @@ class BatchProgramPanel(ttk.Frame):
         inner = ttk.Frame(self._gen_section)
         inner.pack(fill=tk.X, padx=pad, pady=pad)
         for i, (key, label, _, width) in enumerate(fields):
-            ttk.Label(inner, text=label).grid(
-                row=i, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+            lbl = ttk.Label(inner, text=label)
+            lbl.grid(row=i, column=0, sticky=tk.W, padx=(0, pad), pady=2)
             var = tk.StringVar()
-            ttk.Entry(inner, textvariable=var, width=width).grid(
-                row=i, column=1, sticky=tk.W, pady=2)
+            entry = ttk.Entry(inner, textvariable=var, width=width)
+            entry.grid(row=i, column=1, sticky=tk.W, pady=2)
             self._gen_vars[key] = var
+            if key in _FIELD_TOOLTIPS:
+                add_tooltip(lbl, _FIELD_TOOLTIPS[key])
+                add_tooltip(entry, _FIELD_TOOLTIPS[key])
         self._gen_vars["start"].set("1")
         self._gen_vars["count"].set("20")
 
         # ADM1 source
         adm_row = ttk.Frame(self._gen_section)
         adm_row.pack(fill=tk.X, padx=pad, pady=(0, pad))
-        ttk.Label(adm_row, text="ADM1 Source:").pack(side=tk.LEFT)
+        adm1_lbl = ttk.Label(adm_row, text="ADM1 Source:")
+        adm1_lbl.pack(side=tk.LEFT)
+        add_tooltip(adm1_lbl,
+                    "ADM1 key for card authentication.\n"
+                    "'Same for all': one ADM1 for entire batch.\n"
+                    "'From CSV file': per-card ADM1 from data file.\n"
+                    "\u26a0 3 wrong attempts = permanent lock!")
         ttk.Radiobutton(adm_row, text="Same for all:", variable=self._adm1_source_var,
                         value="uniform").pack(side=tk.LEFT, padx=(pad, 0))
         self._uniform_adm1_var = tk.StringVar()
