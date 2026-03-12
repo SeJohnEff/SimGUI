@@ -95,8 +95,8 @@ class SimulatorSettingsDialog:
 
     def _browse_csv(self):
         fp = filedialog.askopenfilename(
-            title="Select Card Data CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Select Card Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if fp:
             self._csv_var.set(fp)
 

@@ -75,7 +75,8 @@ class CSVEditorPanel(ttk.Frame):
 
     def _on_load_csv(self):
         fp = filedialog.askopenfilename(
-            title="Load CSV", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Load SIM Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if fp and self._csv_manager.load_csv(fp):
             self._refresh_table()
             self._unsaved_changes = False

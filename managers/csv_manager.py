@@ -22,6 +22,24 @@ STANDARD_COLUMNS = [
     'USE_OPC', 'HPLMN',
 ]
 
+# Column name normalization: lowercase key -> internal name
+_COLUMN_NORMALIZE = {
+    'adm': 'ADM1',
+    'ki': 'Ki',
+    'opc': 'OPc',
+}
+
+# File dialog filter for SIM data files
+SIM_DATA_FILETYPES = [("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")]
+
+
+def _normalize_column(name: str) -> str:
+    """Normalize a column name to internal standard."""
+    key = name.strip().lower()
+    if key in _COLUMN_NORMALIZE:
+        return _COLUMN_NORMALIZE[key]
+    return name.strip().upper()
+
 
 class CSVManager:
     """Manage CSV data for batch SIM card programming"""
@@ -34,19 +52,61 @@ class CSVManager:
     # ---- I/O -----------------------------------------------------------
 
     def load_csv(self, filepath: str) -> bool:
-        """Load card configurations from a CSV file."""
+        """Load card configurations from a CSV or whitespace-delimited file.
+
+        Auto-detects the format: tries comma-separated first, falls back
+        to whitespace-delimited if the CSV parse yields only one column.
+        Column names are normalized to internal standard (ADM→ADM1, KI→Ki, OPC→OPc).
+        """
         try:
             with open(filepath, 'r', newline='', encoding='utf-8-sig') as f:
-                reader = csv.DictReader(f)
+                content = f.read()
+            if not content.strip():
+                return False
+
+            # Try comma-separated first
+            lines = content.splitlines()
+            header_fields = lines[0].split(',')
+            if len(header_fields) > 1:
+                # Comma-separated CSV
+                import io
+                reader = csv.DictReader(io.StringIO(content))
                 if reader.fieldnames is None:
                     return False
-                self.columns = list(reader.fieldnames)
-                self.cards = [dict(row) for row in reader]
+                raw_columns = list(reader.fieldnames)
+                raw_cards = [dict(row) for row in reader]
+            else:
+                # Fall back to whitespace-delimited
+                raw_columns, raw_cards = self._parse_whitespace(lines)
+                if not raw_columns:
+                    return False
+
+            # Normalize column names
+            col_map = {old: _normalize_column(old) for old in raw_columns}
+            self.columns = [col_map[c] for c in raw_columns]
+            self.cards = [
+                {col_map.get(k, k): v for k, v in card.items()}
+                for card in raw_cards
+            ]
             self.filepath = filepath
             return True
         except Exception as e:
             logger.error("Error loading CSV: %s", e)
             return False
+
+    @staticmethod
+    def _parse_whitespace(lines: List[str]) -> Tuple[List[str], List[Dict[str, str]]]:
+        """Parse whitespace-delimited SIM data lines into columns and card dicts."""
+        non_blank = [ln for ln in lines if ln.strip()]
+        if not non_blank:
+            return [], []
+        headers = non_blank[0].split()
+        cards: List[Dict[str, str]] = []
+        for line in non_blank[1:]:
+            fields = line.split()
+            if len(fields) == len(headers):
+                cards.append(dict(zip(headers, fields)))
+        return headers, cards
 
     def save_csv(self, filepath: str) -> bool:
         """Save card configurations to a CSV file."""

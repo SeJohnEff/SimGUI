@@ -225,8 +225,8 @@ class ReadSIMPanel(ttk.Frame):
                 "so the ICCID is known.")
             return
         path = filedialog.askopenfilename(
-            title="Select CSV with ADM1 data",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Select ADM1 Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
         adm1 = self._lookup_adm1_in_csv(path, self._detected_iccid)

@@ -230,8 +230,8 @@ class BatchProgramPanel(ttk.Frame):
 
     def _on_browse_csv(self):
         path = filedialog.askopenfilename(
-            title="Open CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Open SIM Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
         if not self._csv.load_csv(path):
@@ -249,8 +249,8 @@ class BatchProgramPanel(ttk.Frame):
 
     def _on_browse_adm_csv(self):
         path = filedialog.askopenfilename(
-            title="Select ADM1 CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Select ADM1 Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if path:
             self._adm_csv_path_var.set(path)
 

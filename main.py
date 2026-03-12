@@ -179,8 +179,8 @@ class SimGUIApp:
 
     def _on_open_csv(self):
         fp = filedialog.askopenfilename(
-            title="Open CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Open SIM Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if fp:
             mgr = self._csv_panel.get_csv_manager()
             if mgr.load_csv(fp):

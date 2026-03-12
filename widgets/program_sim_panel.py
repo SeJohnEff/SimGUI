@@ -194,8 +194,8 @@ class ProgramSIMPanel(ttk.Frame):
 
     def _on_browse_csv(self):
         path = filedialog.askopenfilename(
-            title="Open CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title="Open SIM Data File",
+            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
         if not self._csv.load_csv(path):
