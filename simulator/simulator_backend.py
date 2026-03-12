@@ -153,6 +153,20 @@ class SimulatorBackend:
             return False, mismatches
         return True, []
 
+    def read_public_data(self) -> Optional[Dict[str, str]]:
+        """Read public fields without authentication."""
+        card = self._current_card()
+        if card is None:
+            return None
+        return card.get_public_data()
+
+    def read_protected_data(self) -> Optional[Dict[str, str]]:
+        """Read protected fields (requires auth)."""
+        card = self._current_card()
+        if card is None or not card.authenticated:
+            return None
+        return card.get_protected_data()
+
     def read_card_data(self) -> Optional[Dict[str, str]]:
         """Return the virtual card's current data."""
         card = self._current_card()

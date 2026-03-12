@@ -3,6 +3,21 @@
 from dataclasses import dataclass, field
 from typing import Dict
 
+# Public fields — readable without ADM1 authentication
+PUBLIC_FIELDS = {
+    "card_type", "iccid", "imsi", "acc", "msisdn", "mnc_length",
+    "pin1", "puk1", "pin2", "puk2",
+    "suci_protection_scheme", "suci_routing_indicator", "suci_hn_pubkey",
+}
+
+# Protected fields — require ADM1 authentication
+PROTECTED_FIELDS = {
+    "ki", "opc", "adm1",
+    "kic1", "kid1", "kik1",
+    "kic2", "kid2", "kik2",
+    "kic3", "kid3", "kik3",
+}
+
 
 @dataclass
 class VirtualCard:
@@ -62,6 +77,16 @@ class VirtualCard:
             data["suci_hn_pubkey"] = self.suci_hn_pubkey
         data.update(self.programmed_fields)
         return data
+
+    def get_public_data(self) -> Dict[str, str]:
+        """Return fields readable without authentication."""
+        all_data = self.get_current_data()
+        return {k: v for k, v in all_data.items() if k in PUBLIC_FIELDS}
+
+    def get_protected_data(self) -> Dict[str, str]:
+        """Return fields that require ADM1 authentication."""
+        all_data = self.get_current_data()
+        return {k: v for k, v in all_data.items() if k in PROTECTED_FIELDS}
 
     def reset(self):
         """Clear programming and auth state."""

@@ -501,3 +501,139 @@ class TestICCIDVerification:
                 card.adm1, expected_iccid="wrong_iccid")
         assert card.adm1_attempts_remaining == 3
         assert card.adm1_locked is False
+
+
+# ---------------------------------------------------------------------------
+# TestPublicProtectedData
+# ---------------------------------------------------------------------------
+
+class TestPublicProtectedData:
+    """Tests for VirtualCard.get_public_data / get_protected_data
+    and SimulatorBackend.read_public_data / read_protected_data."""
+
+    def _make_sja5_card(self):
+        return VirtualCard(
+            card_type="SJA5", iccid="1234", imsi="5678",
+            ki="A" * 32, opc="B" * 32, adm1="60969281",
+            acc="0001", pin1="1111", puk1="22222222",
+            pin2="3333", puk2="44444444", msisdn="+1234567890",
+            mnc_length="02",
+            suci_protection_scheme="profile_b",
+            suci_routing_indicator="0xff",
+            suci_hn_pubkey="C" * 64,
+        )
+
+    def test_get_public_data_returns_only_public_fields(self):
+        card = self._make_sja5_card()
+        pub = card.get_public_data()
+        from simulator.virtual_card import PUBLIC_FIELDS, PROTECTED_FIELDS
+        for key in pub:
+            assert key in PUBLIC_FIELDS, f"{key} should be a public field"
+        # Should not contain any protected field
+        for key in PROTECTED_FIELDS:
+            assert key not in pub, f"{key} should not be in public data"
+
+    def test_get_public_data_contains_expected_keys(self):
+        card = self._make_sja5_card()
+        pub = card.get_public_data()
+        assert pub["iccid"] == "1234"
+        assert pub["imsi"] == "5678"
+        assert pub["acc"] == "0001"
+        assert pub["pin1"] == "1111"
+        assert pub["msisdn"] == "+1234567890"
+        # SJA5 SUCI fields
+        assert pub["suci_protection_scheme"] == "profile_b"
+        assert pub["suci_hn_pubkey"] == "C" * 64
+
+    def test_get_public_data_sja2_no_suci(self):
+        card = VirtualCard(
+            card_type="SJA2", iccid="1234", imsi="5678",
+            ki="A" * 32, opc="B" * 32, adm1="60969281",
+        )
+        pub = card.get_public_data()
+        assert "suci_protection_scheme" not in pub
+        assert "suci_hn_pubkey" not in pub
+
+    def test_get_protected_data_returns_only_protected_fields(self):
+        card = self._make_sja5_card()
+        prot = card.get_protected_data()
+        from simulator.virtual_card import PUBLIC_FIELDS, PROTECTED_FIELDS
+        for key in prot:
+            assert key in PROTECTED_FIELDS, f"{key} should be a protected field"
+        # Should not contain any public field
+        for key in PUBLIC_FIELDS:
+            assert key not in prot, f"{key} should not be in protected data"
+
+    def test_get_protected_data_contains_ki_opc(self):
+        card = self._make_sja5_card()
+        prot = card.get_protected_data()
+        assert prot["ki"] == "A" * 32
+        assert prot["opc"] == "B" * 32
+
+    def test_backend_read_public_data_no_auth_needed(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0, num_cards=5)
+        b = SimulatorBackend(settings)
+        # No authentication performed
+        card = b._current_card()
+        assert card.authenticated is False
+        pub = b.read_public_data()
+        assert pub is not None
+        assert "iccid" in pub
+        assert "imsi" in pub
+        # Should NOT contain protected keys
+        assert "ki" not in pub
+        assert "opc" not in pub
+
+    def test_backend_read_protected_data_returns_none_without_auth(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0, num_cards=5)
+        b = SimulatorBackend(settings)
+        prot = b.read_protected_data()
+        assert prot is None
+
+    def test_backend_read_protected_data_returns_data_with_auth(self):
+        settings = SimulatorSettings(delay_ms=0, error_rate=0.0, num_cards=5)
+        b = SimulatorBackend(settings)
+        card = b._current_card()
+        b.authenticate(card.adm1)
+        prot = b.read_protected_data()
+        assert prot is not None
+        assert "ki" in prot
+        assert "opc" in prot
+        # Should NOT contain public keys
+        assert "iccid" not in prot
+        assert "imsi" not in prot
+
+    def test_backend_read_public_data_empty_deck(self):
+        settings = SimulatorSettings(delay_ms=0, num_cards=0)
+        b = SimulatorBackend(settings)
+        b.card_deck = []
+        assert b.read_public_data() is None
+
+    def test_backend_read_protected_data_empty_deck(self):
+        settings = SimulatorSettings(delay_ms=0, num_cards=0)
+        b = SimulatorBackend(settings)
+        b.card_deck = []
+        assert b.read_protected_data() is None
+
+    def test_card_manager_read_public_data(self):
+        mgr = CardManager()
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        pub = mgr.read_public_data()
+        assert pub is not None
+        assert "iccid" in pub
+        assert "ki" not in pub
+
+    def test_card_manager_read_protected_data_no_auth(self):
+        mgr = CardManager()
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        prot = mgr.read_protected_data()
+        assert prot is None
+
+    def test_card_manager_read_protected_data_with_auth(self):
+        mgr = CardManager()
+        mgr.enable_simulator(SimulatorSettings(delay_ms=0))
+        card = mgr._simulator._current_card()
+        mgr.authenticate(card.adm1)
+        prot = mgr.read_protected_data()
+        assert prot is not None
+        assert "ki" in prot

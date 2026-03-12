@@ -2,9 +2,9 @@
 Read SIM Panel — Workflow 1.
 
 Reads all accessible data from an inserted SIM card.
-Public fields (ICCID, card type) are shown without authentication.
-Protected fields are revealed after the user provides ADM1 and
-clicking "Read Card".
+Public fields (ICCID, IMSI, ACC, etc.) are shown without authentication.
+Protected fields (Ki, OPc, OTA keys) are revealed after ADM1 auth
+and clicking "Read Card".
 
 Detection is handled by the shared Card Status panel (left side).
 This tab observes the card manager state — call refresh() after
@@ -19,13 +19,47 @@ from managers.card_manager import CardManager
 from theme import ModernTheme
 
 
+# Display order and labels for public fields
+_PUBLIC_DISPLAY = [
+    ("iccid", "ICCID"),
+    ("imsi", "IMSI"),
+    ("acc", "ACC"),
+    ("msisdn", "MSISDN"),
+    ("mnc_length", "MNC Length"),
+    ("pin1", "PIN1"),
+    ("puk1", "PUK1"),
+    ("pin2", "PIN2"),
+    ("puk2", "PUK2"),
+    ("suci_protection_scheme", "SUCI Scheme"),
+    ("suci_routing_indicator", "SUCI Routing Ind."),
+    ("suci_hn_pubkey", "SUCI HN PubKey"),
+]
+
+# Display order and labels for protected fields
+_PROTECTED_DISPLAY = [
+    ("ki", "Ki"),
+    ("opc", "OPc"),
+    ("adm1", "ADM1"),
+    ("kic1", "KIC1"),
+    ("kid1", "KID1"),
+    ("kik1", "KIK1"),
+    ("kic2", "KIC2"),
+    ("kid2", "KID2"),
+    ("kik2", "KIK2"),
+    ("kic3", "KIC3"),
+    ("kid3", "KID3"),
+    ("kik3", "KIK3"),
+]
+
+
 class ReadSIMPanel(ttk.Frame):
     """Tab that guides the user through reading a SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
-        self._card_data: dict = {}
+        self._public_data: dict = {}
+        self._protected_data: dict = {}
         self._detected_iccid: str = ""
         self._authenticated: bool = False
         self._build_ui()
@@ -35,20 +69,28 @@ class ReadSIMPanel(ttk.Frame):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
-        # --- Public fields (populated when card is detected via Card Status panel) ---
-        pub = ttk.LabelFrame(self, text="Public Fields (no auth required)")
-        pub.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
+        # --- Public Fields grid ---
+        pub_frame = ttk.LabelFrame(self, text="Public Fields (no auth required)")
+        pub_frame.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
 
-        inner = ttk.Frame(pub)
-        inner.pack(fill=tk.X, padx=pad, pady=pad)
-        ttk.Label(inner, text="ICCID:").grid(row=0, column=0, sticky=tk.W, pady=2)
-        self._pub_iccid = ttk.Label(inner, text="— detect card from Card Status panel")
-        self._pub_iccid.grid(row=0, column=1, sticky=tk.W, padx=(pad, 0), pady=2)
-        ttk.Label(inner, text="Card Type:").grid(row=1, column=0, sticky=tk.W, pady=2)
-        self._pub_type = ttk.Label(inner, text="-")
-        self._pub_type.grid(row=1, column=1, sticky=tk.W, padx=(pad, 0), pady=2)
+        pub_grid = ttk.Frame(pub_frame)
+        pub_grid.pack(fill=tk.X, padx=pad, pady=pad)
 
-        # --- ADM1 + Authenticate ---
+        self._pub_labels: dict[str, ttk.Label] = {}
+        for i, (key, label) in enumerate(_PUBLIC_DISPLAY):
+            row, col = divmod(i, 2)
+            ttk.Label(pub_grid, text=f"{label}:").grid(
+                row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
+            val_lbl = ttk.Label(pub_grid, text="-")
+            val_lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W,
+                         pady=2, padx=(0, pad * 2))
+            self._pub_labels[key] = val_lbl
+
+        # Make value columns expand
+        pub_grid.columnconfigure(1, weight=1)
+        pub_grid.columnconfigure(3, weight=1)
+
+        # --- Authentication section ---
         auth_frame = ttk.LabelFrame(self, text="Authentication")
         auth_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
 
@@ -75,36 +117,35 @@ class ReadSIMPanel(ttk.Frame):
         self._auth_status.grid(row=2, column=0, columnspan=3,
                                sticky=tk.W, pady=(pad, 0))
 
-        # --- Read Card button (enabled after auth) ---
-        read_frame = ttk.LabelFrame(self, text="Read Card Data")
-        read_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        # --- Protected Fields section ---
+        prot_frame = ttk.LabelFrame(self, text="Protected Fields (requires ADM1)")
+        prot_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad // 2)
 
-        read_inner = ttk.Frame(read_frame)
-        read_inner.pack(fill=tk.X, padx=pad, pady=pad)
+        prot_top = ttk.Frame(prot_frame)
+        prot_top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
         self._read_btn = ttk.Button(
-            read_inner, text="Read Card", command=self._on_read_card)
+            prot_top, text="Read Card", command=self._on_read_card)
         self._read_btn.pack(side=tk.LEFT)
         self._read_btn.configure(state=tk.DISABLED)
-        self._read_status = ttk.Label(read_inner, text="Authenticate first")
+        self._read_status = ttk.Label(prot_top, text="Authenticate first")
         self._read_status.pack(side=tk.LEFT, padx=(pad, 0))
 
-        # --- All card data tree ---
-        data_frame = ttk.LabelFrame(self, text="Card Contents")
-        data_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad // 2)
+        prot_grid = ttk.Frame(prot_frame)
+        prot_grid.pack(fill=tk.X, padx=pad, pady=pad)
 
-        self._data_tree = ttk.Treeview(
-            data_frame, columns=("value",), show="tree headings", height=10)
-        self._data_tree.heading("#0", text="Field")
-        self._data_tree.heading("value", text="Value")
-        self._data_tree.column("#0", width=120, stretch=False)
-        self._data_tree.column("value", width=300)
-        sb = ttk.Scrollbar(data_frame, orient=tk.VERTICAL,
-                           command=self._data_tree.yview)
-        self._data_tree.configure(yscrollcommand=sb.set)
-        self._data_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
-                             padx=(pad, 0), pady=pad)
-        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, pad), pady=pad)
+        self._prot_labels: dict[str, ttk.Label] = {}
+        for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
+            row, col = divmod(i, 2)
+            ttk.Label(prot_grid, text=f"{label}:").grid(
+                row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
+            val_lbl = ttk.Label(prot_grid, text="-")
+            val_lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W,
+                         pady=2, padx=(0, pad * 2))
+            self._prot_labels[key] = val_lbl
+
+        prot_grid.columnconfigure(1, weight=1)
+        prot_grid.columnconfigure(3, weight=1)
 
         # --- Bottom action buttons ---
         btn_row = ttk.Frame(self)
@@ -123,23 +164,27 @@ class ReadSIMPanel(ttk.Frame):
 
         Call this after a card detect or mode change from the main window.
         """
-        iccid = self._cm.read_iccid() or ""
-        self._detected_iccid = iccid
-
-        if iccid:
-            self._pub_iccid.configure(text=iccid)
-            self._pub_type.configure(text=self._cm.card_type.name)
-        else:
-            self._pub_iccid.configure(
-                text="— detect card from Card Status panel")
-            self._pub_type.configure(text="-")
-
-        # Reset auth state when card changes
+        # Reset auth / protected state when card changes
         self._authenticated = False
         self._read_btn.configure(state=tk.DISABLED)
         self._read_status.configure(text="Authenticate first")
-        self._card_data = {}
-        self._data_tree.delete(*self._data_tree.get_children())
+        self._protected_data = {}
+        for lbl in self._prot_labels.values():
+            lbl.configure(text="-")
+
+        # Read public data
+        pub = self._cm.read_public_data()
+        if pub:
+            self._public_data = pub
+            self._detected_iccid = pub.get("iccid", "")
+            for key, lbl in self._pub_labels.items():
+                val = pub.get(key, "")
+                lbl.configure(text=val if val else "-")
+        else:
+            self._public_data = {}
+            self._detected_iccid = ""
+            for lbl in self._pub_labels.values():
+                lbl.configure(text="-")
 
     # ---- actions -------------------------------------------------------
 
@@ -201,47 +246,37 @@ class ReadSIMPanel(ttk.Frame):
         return ""
 
     def _on_read_card(self):
-        """Read all fields from the card after authentication."""
+        """Read protected fields from the card after authentication."""
         if not self._authenticated:
             self._read_status.configure(text="Not authenticated")
             return
-        data = self._cm.read_card_data()
+        data = self._cm.read_protected_data()
         if data is None:
             self._read_status.configure(text="Failed to read card data")
             return
-        self._card_data = data
+        self._protected_data = data
         self._read_status.configure(
-            text=f"Read {len(data)} fields successfully")
-        self._populate_data_tree(data)
-
-    def _populate_data_tree(self, data: dict):
-        self._data_tree.delete(*self._data_tree.get_children())
-        display_order = [
-            "iccid", "imsi", "ki", "opc", "acc",
-            "pin1", "puk1", "pin2", "puk2",
-            "mnc_length", "msisdn",
-        ]
-        shown = set()
-        for key in display_order:
-            if key in data:
-                self._data_tree.insert(
-                    "", tk.END, text=key.upper(), values=(data[key],))
-                shown.add(key)
-        for key, val in sorted(data.items()):
-            if key not in shown and key != "card_type":
-                self._data_tree.insert(
-                    "", tk.END, text=key.upper(), values=(val,))
+            text=f"Read {len(data)} protected field(s)")
+        for key, lbl in self._prot_labels.items():
+            val = data.get(key, "")
+            lbl.configure(text=val if val else "-")
 
     def _on_copy(self):
-        if not self._card_data:
+        combined = {}
+        combined.update(self._public_data)
+        combined.update(self._protected_data)
+        if not combined:
             return
-        lines = [f"{k.upper()}: {v}" for k, v in self._card_data.items()]
+        lines = [f"{k.upper()}: {v}" for k, v in combined.items()]
         text = "\n".join(lines)
         self.clipboard_clear()
         self.clipboard_append(text)
 
     def _on_export(self):
-        if not self._card_data:
+        combined = {}
+        combined.update(self._public_data)
+        combined.update(self._protected_data)
+        if not combined:
             return
         path = filedialog.asksaveasfilename(
             title="Export Card Data", defaultextension=".csv",
@@ -249,10 +284,10 @@ class ReadSIMPanel(ttk.Frame):
         if not path:
             return
         try:
-            keys = list(self._card_data.keys())
+            keys = list(combined.keys())
             with open(path, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(fh, fieldnames=keys)
                 writer.writeheader()
-                writer.writerow(self._card_data)
+                writer.writerow(combined)
         except Exception as exc:
             messagebox.showerror("Export Error", str(exc))

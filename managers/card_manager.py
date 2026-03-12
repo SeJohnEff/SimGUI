@@ -283,6 +283,22 @@ class CardManager:
         self.authenticated = True
         return True, "Authentication successful (stub -- CLI integration pending)"
 
+    def read_public_data(self) -> Optional[Dict[str, str]]:
+        """Read public fields without authentication."""
+        if self._simulator:
+            return self._simulator.read_public_data()
+        # For hardware: return what we have from detect (ICCID, IMSI, etc.)
+        return self.card_info if self.card_info else None
+
+    def read_protected_data(self) -> Optional[Dict[str, str]]:
+        """Read protected fields (requires ADM1 auth)."""
+        if self._simulator:
+            return self._simulator.read_protected_data()
+        if not self.authenticated:
+            return None
+        # TODO: Real CLI read of Ki, OPc, etc.
+        return {}
+
     def read_card_data(self) -> Optional[Dict[str, str]]:
         """Read basic card data (IMSI, ICCID, etc.)."""
         if self._simulator:
