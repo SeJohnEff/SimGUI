@@ -6,13 +6,12 @@ Three-step guided flow: Detect → Authenticate → Program.
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from managers.card_manager import CardManager
-from managers.csv_manager import CSVManager
+from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from theme import ModernTheme
 from widgets.tooltip import add_tooltip
-
 
 # Fields shown in the form.  Tuple: (key, label, editable_when_csv)
 _FORM_FIELDS = [
@@ -204,20 +203,25 @@ class ProgramSIMPanel(ttk.Frame):
     def _on_browse_csv(self):
         path = filedialog.askopenfilename(
             title="Open SIM Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
+            filetypes=SIM_DATA_FILETYPES)
         if not path:
             return
         self.load_csv_file(path)
 
     def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
-        """Load a CSV file and refresh the card tree.
+        """Load a CSV or EML file and refresh the card tree.
 
         Called by Browse button or by cross-tab sync from BatchProgramPanel.
         *_from_sync* prevents infinite callback loops.
         """
-        if not self._csv.load_csv(path):
+        try:
+            if not self._csv.load_file(path):
+                if not _from_sync:
+                    messagebox.showerror("Error", f"No card data found in {path}")
+                return False
+        except ValueError as exc:
             if not _from_sync:
-                messagebox.showerror("Error", f"Failed to load {path}")
+                messagebox.showerror("Import Error", str(exc))
             return False
         self._csv_path_var.set(path)
         import os

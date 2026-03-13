@@ -1,7 +1,7 @@
 """Simulator Settings Dialog."""
 
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog, ttk
 
 from theme import ModernTheme
 
@@ -96,7 +96,10 @@ class SimulatorSettingsDialog:
     def _browse_csv(self):
         fp = filedialog.askopenfilename(
             title="Select Card Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
+            filetypes=[("SIM Data Files", "*.csv *.eml *.txt"),
+                       ("CSV Files", "*.csv *.txt"),
+                       ("Email Files", "*.eml"),
+                       ("All files", "*.*")])
         if fp:
             self._csv_var.set(fp)
 

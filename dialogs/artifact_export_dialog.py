@@ -11,10 +11,10 @@ import csv
 import os
 import tkinter as tk
 from datetime import datetime
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
-from theme import ModernTheme
 from managers.network_storage_manager import NetworkStorageManager
+from theme import ModernTheme
 
 _ALL_FIELDS = [
     "ICCID", "IMSI", "Ki", "OPc", "ADM1",
@@ -152,7 +152,6 @@ class ArtifactExportDialog(tk.Toplevel):
                 for rec in self._records:
                     # Normalise keys to match _ALL_FIELDS casing
                     normalised = {}
-                    key_map = {k.upper(): k for k in rec}
                     for f in fields:
                         normalised[f] = rec.get(f, rec.get(f.upper(),
                                                 rec.get(f.lower(), "")))

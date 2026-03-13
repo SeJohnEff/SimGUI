@@ -4,9 +4,10 @@
 
 import logging
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
+
+from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from theme import ModernTheme
-from managers.csv_manager import CSVManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +77,18 @@ class CSVEditorPanel(ttk.Frame):
     def _on_load_csv(self):
         fp = filedialog.askopenfilename(
             title="Load SIM Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
-        if fp and self._csv_manager.load_csv(fp):
-            self._refresh_table()
-            self._unsaved_changes = False
+            filetypes=SIM_DATA_FILETYPES)
+        if not fp:
+            return
+        try:
+            if self._csv_manager.load_file(fp):
+                self._refresh_table()
+                self._unsaved_changes = False
+            else:
+                messagebox.showerror("Load Error",
+                                     f"No card data found in {fp}")
+        except ValueError as exc:
+            messagebox.showerror("Import Error", str(exc))
 
     def _on_save_csv(self):
         fp = filedialog.asksaveasfilename(

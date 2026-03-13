@@ -30,7 +30,12 @@ _COLUMN_NORMALIZE = {
 }
 
 # File dialog filter for SIM data files
-SIM_DATA_FILETYPES = [("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")]
+SIM_DATA_FILETYPES = [
+    ("SIM Data Files", "*.csv *.eml *.txt"),
+    ("CSV Files", "*.csv *.txt"),
+    ("Email Files", "*.eml"),
+    ("All files", "*.*"),
+]
 
 
 def _normalize_column(name: str) -> str:
@@ -50,6 +55,43 @@ class CSVManager:
         self.filepath: Optional[str] = None
 
     # ---- I/O -----------------------------------------------------------
+
+    def load_file(self, filepath: str) -> bool:
+        """Load card data from CSV, TXT, or EML file.
+
+        Auto-detects format by extension. For ``.eml`` files, delegates
+        to the EML parser and normalises field names to internal standard.
+
+        Returns True on success, False on failure.
+        Raises ValueError for EML parse errors (caller should show to user).
+        """
+        if filepath.lower().endswith(".eml"):
+            return self._load_eml(filepath)
+        return self.load_csv(filepath)
+
+    def _load_eml(self, filepath: str) -> bool:
+        """Load card data from a sysmocom .eml file."""
+        from utils.eml_parser import parse_eml_file
+        # Let ValueError propagate — caller shows it to the user
+        cards, meta = parse_eml_file(filepath)
+        if not cards:
+            return False
+        # Normalise field names from EML to internal standard
+        normalised_cards = []
+        all_cols_ordered: list[str] = []
+        for card in cards:
+            new_card = {}
+            for k, v in card.items():
+                norm_key = _normalize_column(k)
+                new_card[norm_key] = v
+                if norm_key not in all_cols_ordered:
+                    all_cols_ordered.append(norm_key)
+            normalised_cards.append(new_card)
+        self.columns = all_cols_ordered
+        self.cards = normalised_cards
+        self.filepath = filepath
+        self._eml_metadata = meta
+        return True
 
     def load_csv(self, filepath: str) -> bool:
         """Load card configurations from a CSV or whitespace-delimited file.

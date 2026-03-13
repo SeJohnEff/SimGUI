@@ -13,11 +13,10 @@ a detect/mode change from the main window.
 
 import csv
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from managers.card_manager import CardManager
 from theme import ModernTheme
-
 
 # Display order and labels for public fields
 _PUBLIC_DISPLAY = [
@@ -232,29 +231,37 @@ class ReadSIMPanel(ttk.Frame):
                 "Please detect a card first (via Card Status panel) "
                 "so the ICCID is known.")
             return
+        from managers.csv_manager import SIM_DATA_FILETYPES
         path = filedialog.askopenfilename(
             title="Select ADM1 Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
+            filetypes=SIM_DATA_FILETYPES)
         if not path:
             return
-        adm1 = self._lookup_adm1_in_csv(path, self._detected_iccid)
+        adm1 = self._lookup_adm1_in_file(path, self._detected_iccid)
         if adm1:
             self._adm1_var.set(adm1)
             self._auth_status.configure(
-                text=f"ADM1 loaded from CSV (matched ICCID)")
+                text="ADM1 loaded from CSV (matched ICCID)")
         else:
             self._auth_status.configure(
                 text="No matching ICCID found in CSV")
 
     @staticmethod
-    def _lookup_adm1_in_csv(csv_path: str, iccid: str) -> str:
-        """Search *csv_path* for a row whose ICCID matches, return its ADM1."""
+    def _lookup_adm1_in_file(path: str, iccid: str) -> str:
+        """Search *path* (CSV or EML) for a row whose ICCID matches, return its ADM1."""
         try:
-            with open(csv_path, "r", newline="", encoding="utf-8-sig") as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    if row.get("ICCID", "").strip() == iccid:
-                        return row.get("ADM1", "").strip()
+            if path.lower().endswith(".eml"):
+                from utils.eml_parser import parse_eml_file
+                cards, _ = parse_eml_file(path)
+                for card in cards:
+                    if card.get("ICCID", "").strip() == iccid:
+                        return card.get("ADM1", "").strip()
+            else:
+                with open(path, "r", newline="", encoding="utf-8-sig") as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        if row.get("ICCID", "").strip() == iccid:
+                            return row.get("ADM1", "").strip()
         except Exception:
             pass
         return ""
