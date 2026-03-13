@@ -16,49 +16,47 @@ to run card operations from a desktop GUI.
 - **Progress tracking** — thread-safe progress bar and log output for long operations
 - **Modern theme** — platform-aware fonts and macOS-inspired styling (Linux, Windows, macOS)
 
-## Installation
+## Installation (Ubuntu)
 
-Create a virtualenv and install dependencies:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Or install with pip directly:
+On a fresh Ubuntu desktop (22.04+), run these commands:
 
 ```bash
-pip install .
-```
+# 1. Install build tools
+sudo apt update
+sudo apt install -y git dpkg-dev debhelper
 
-### Building from source (.deb)
-
-```bash
-sudo apt install dpkg-dev debhelper python3-tk
+# 2. Clone the repo
 git clone https://github.com/SeJohnEff/SimGUI.git
+
+# 3. Build the .deb
 cd SimGUI
-bash scripts/build-deb.sh
-sudo dpkg -i ../simgui_*.deb
-sudo apt install -f
+dpkg-buildpackage -us -uc -b
+
+# 4. Install it
+sudo dpkg -i ../simgui_0.2.0-1_all.deb; sudo apt install -f -y
+
+# 5. Launch
 simgui
 ```
 
+Step 4 uses `;` (not `&&`) so that `apt install -f` resolves missing
+dependencies even if `dpkg` exits with an error.
+
 This installs SimGUI to `/opt/simgui` with a `/usr/bin/simgui` launcher and a
-desktop entry. Dependencies (`python3`, `python3-tk`) are pulled in
-automatically.
+GNOME desktop entry. Runtime dependencies (`python3`, `python3-tk`,
+`libpcsclite-dev`, `swig`) are pulled in automatically. The `postinst` script
+installs `pyscard` and `pytlv` via pip.
 
 ### Updating to a new version
 
 ```bash
 cd ~/SimGUI
 git pull
-bash scripts/build-deb.sh
-sudo dpkg -i ../simgui_*.deb
+dpkg-buildpackage -us -uc -b
+sudo dpkg -i ../simgui_0.2.0-1_all.deb; sudo apt install -f -y
 ```
 
 The `.deb` file is built one directory above the repo (`../`), not inside it.
-The build script prints the exact filename when done.
 
 ## Usage
 
