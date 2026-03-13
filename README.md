@@ -8,9 +8,15 @@ to run card operations from a desktop GUI.
 ## Features
 
 - **CSV batch editor** — load, edit, validate, and save SIM card configurations
+- **EML import** — parse sysmocom order confirmation emails (.eml) directly, field-order independent
+- **Batch programming** — program multiple SIM cards in sequence with progress tracking
 - **Card detection** — detect inserted cards via sysmo-usim-tool or pySim
+- **Read SIM** — read card data (ICCID, IMSI, Ki, OPc, etc.) from physical cards
 - **ADM1 authentication** — secure key entry with attempt tracking and input validation
 - **ICCID cross-verification** — prevents card lockout by verifying card identity before ADM1 auth
+- **Network storage** — mount NFS and SMB/CIFS shares for reading SIM data files and saving artifacts
+- **Network discovery** — auto-discover SMB servers on the local network via mDNS and NetBIOS
+- **Artifact export** — export programming artifacts to network shares with duplicate detection
 - **Simulator mode** — built-in SIM programmer simulator with 20 real sysmoISIM-SJA5 profiles
 - **Backup / restore** — JSON backups of card data
 - **Progress tracking** — thread-safe progress bar and log output for long operations
@@ -25,8 +31,10 @@ curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/insta
 ```
 
 That's it. The script installs build dependencies, builds the `.deb` package,
-installs it, and cleans up. Launch with `simgui` or find **SimGUI** in the
-applications menu.
+installs it (including runtime dependencies like `smbclient`, `avahi-utils`,
+`cifs-utils`, and `nfs-common`), and cleans up.
+
+Launch with `simgui` or find **SimGUI** in the applications menu.
 
 ### Manual install
 
@@ -53,11 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/insta
 
 ## Usage
 
-```bash
-python main.py
-```
-
-Or, if installed via pip:
+After installation, launch from the terminal or the applications menu:
 
 ```bash
 simgui
@@ -130,36 +134,74 @@ selected CSV data row *before* sending the ADM1 key:
 This catches the most common cause of card lockout: authenticating with the
 wrong card inserted or the wrong data row selected.
 
+## Development
+
+### Running tests
+
+```bash
+make test          # run all tests
+make lint          # check for lint errors (ruff)
+make coverage      # tests with coverage report
+make check         # lint + coverage in one command
+```
+
+Or use the all-in-one quality gate script:
+
+```bash
+bash scripts/check.sh
+```
+
+### Project configuration
+
+- `pyproject.toml` — pytest, coverage, and ruff configuration
+- `Makefile` — convenience targets for test, lint, coverage, check
+
 ## Architecture
 
 ```
 SimGUI/
-├── main.py                 # Entry point — SimGUIApp class
-├── theme.py                # ModernTheme (colors, fonts, ttk styles)
+├── main.py                          # Entry point — SimGUIApp class
+├── theme.py                         # ModernTheme (colors, fonts, ttk styles)
+├── pyproject.toml                   # pytest, coverage, ruff config
+├── Makefile                         # make test / lint / coverage / check
 ├── managers/
-│   ├── card_manager.py     # Card detection / auth via CLI subprocess
-│   ├── csv_manager.py      # CSV load / save / validate
-│   └── backup_manager.py   # JSON backup / restore
+│   ├── batch_manager.py             # Batch SIM programming orchestration
+│   ├── card_manager.py              # Card detection / auth via CLI subprocess
+│   ├── csv_manager.py               # CSV + EML load / save / validate
+│   ├── backup_manager.py            # JSON backup / restore
+│   ├── network_storage_manager.py   # NFS / SMB mount / unmount / profiles
+│   └── settings_manager.py          # Persistent app settings (JSON)
 ├── simulator/
-│   ├── virtual_card.py     # VirtualCard dataclass
-│   ├── card_deck.py        # Card deck generation + CSV loading
-│   ├── simulator_backend.py # SimulatorBackend (in-memory card ops)
-│   ├── settings.py         # SimulatorSettings dataclass
+│   ├── virtual_card.py              # VirtualCard dataclass
+│   ├── card_deck.py                 # Card deck generation + CSV loading
+│   ├── simulator_backend.py         # SimulatorBackend (in-memory card ops)
+│   ├── settings.py                  # SimulatorSettings dataclass
 │   └── data/
 │       └── sysmocom_test_cards.csv  # 20 bundled sysmoISIM-SJA5 profiles
 ├── widgets/
-│   ├── card_status_panel.py   # Card info + status indicator
-│   ├── csv_editor_panel.py    # Treeview-based CSV table editor
-│   └── progress_panel.py      # Progress bar + log output
+│   ├── batch_program_panel.py       # Batch programming UI panel
+│   ├── card_status_panel.py         # Card info + status indicator
+│   ├── csv_editor_panel.py          # Treeview-based CSV table editor
+│   ├── program_sim_panel.py         # Single-card programming panel
+│   ├── progress_panel.py            # Progress bar + log output
+│   ├── read_sim_panel.py            # Read SIM data panel
+│   └── tooltip.py                   # Hover tooltip widget
 ├── dialogs/
-│   ├── adm1_dialog.py      # ADM1 key entry dialog
-│   └── simulator_settings_dialog.py  # Simulator settings dialog
+│   ├── adm1_dialog.py               # ADM1 key entry dialog
+│   ├── artifact_export_dialog.py    # Export artifacts to network share
+│   ├── network_storage_dialog.py    # Network storage connection manager
+│   └── simulator_settings_dialog.py # Simulator settings dialog
 ├── utils/
-│   └── validation.py        # Shared validation (ADM1, IMSI, ICCID, hex)
-├── tests/                   # pytest test suite
-├── debian/                  # Debian packaging files
+│   ├── eml_parser.py                # sysmocom .eml order email parser
+│   ├── iccid_utils.py               # ICCID validation and Luhn check
+│   ├── network_scanner.py           # SMB/NFS server auto-discovery
+│   └── validation.py                # Shared validation (ADM1, IMSI, ICCID, hex)
+├── tests/                           # pytest test suite (500+ tests)
+├── debian/                          # Debian packaging files
 └── scripts/
-    └── build-deb.sh         # .deb build script
+    ├── build-deb.sh                 # .deb build script
+    ├── check.sh                     # One-command quality gate (lint + tests + coverage)
+    └── install.sh                   # One-line installer for Ubuntu
 ```
 
 ## License
