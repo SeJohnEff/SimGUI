@@ -15,7 +15,10 @@ from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
-from utils.iccid_utils import generate_iccid, generate_imsi
+from utils.iccid_utils import (
+    generate_iccid, generate_imsi,
+    COUNTRY_CODES, SITE_CODES, FPLMN_BY_COUNTRY,
+)
 from widgets.tooltip import add_tooltip
 
 
@@ -79,10 +82,23 @@ class BatchProgramPanel(ttk.Frame):
 
         _FIELD_TOOLTIPS = {
             "mcc_mnc": "Mobile Country Code + Mobile Network Code.\nExample: 99988 (MCC=999, MNC=88)",
-            "customer": "4-digit customer identifier.\nExample: 0003 (Boliden)",
-            "sim_type": "4-digit SIM card type code.\nExample: 0100 (SYSMOCOM)",
-            "start": "First sequence number in the batch.\nExample: 1 \u2192 sequence 001",
-            "count": "Number of SIM cards to generate.\nExample: 20 \u2192 generates 001 to 020",
+            "country_code": (
+                "3-digit E.164 country code, zero-padded.\n"
+                "Example: 044 (UK), 046 (Sweden), 001 (US)"
+            ),
+            "site_index": (
+                "3-digit site number within country.\n"
+                "Example: 001 (primary DC), 002 (DR site)\n"
+                "Maps to DC Naming Standard: uk1=044 001"
+            ),
+            "customer_id": (
+                "2-digit customer/tenant identifier.\n"
+                "00=Internal, 01-79=Enterprise, 80-89=IoT,\n"
+                "90-98=Partners, 99=Demo\n"
+                "Example: 03 (Boliden)"
+            ),
+            "start": "First SIM sequence number.\nExample: 1 \u2192 SIM 01",
+            "count": "Number of SIMs to generate (max 100).\nExample: 20 \u2192 SIMs 01 to 20",
             "spn": "Service Provider Name stored on the SIM.\nExample: BOLIDEN",
             "language": "ISO 639-1 language code for the SIM.\nExample: EN (English), SV (Swedish)",
             "fplmn": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
@@ -90,8 +106,9 @@ class BatchProgramPanel(ttk.Frame):
 
         fields = [
             ("mcc_mnc", "MCC+MNC:", "last_mcc_mnc", 10),
-            ("customer", "Customer Code:", "last_customer_code", 10),
-            ("sim_type", "SIM Type Code:", "last_sim_type_code", 10),
+            ("country_code", "Country Code:", "last_country_code", 6),
+            ("site_index", "Site Index:", "last_site_index", 6),
+            ("customer_id", "Customer ID:", "last_customer_id", 6),
             ("start", "Start Number:", None, 6),
             ("count", "Count:", "last_batch_size", 6),
             ("spn", "SPN:", "last_spn", 20),
@@ -111,6 +128,26 @@ class BatchProgramPanel(ttk.Frame):
             if key in _FIELD_TOOLTIPS:
                 add_tooltip(lbl, _FIELD_TOOLTIPS[key])
                 add_tooltip(entry, _FIELD_TOOLTIPS[key])
+            # Bind change events for country_code and site_index
+            if key == "country_code":
+                var.trace_add("write", self._on_country_code_change)
+            if key == "site_index":
+                var.trace_add("write", self._on_site_field_change)
+
+        # Site Code read-only label (shows DC Naming Standard code)
+        site_code_row_idx = len(fields)
+        site_code_lbl = ttk.Label(inner, text="Site Code:")
+        site_code_lbl.grid(row=site_code_row_idx, column=0, sticky=tk.W,
+                           padx=(0, pad), pady=2)
+        self._site_code_var = tk.StringVar(value="")
+        site_code_val = ttk.Label(inner, textvariable=self._site_code_var,
+                                  font=("TkDefaultFont", 10, "bold"))
+        site_code_val.grid(row=site_code_row_idx, column=1, sticky=tk.W, pady=2)
+        add_tooltip(site_code_lbl,
+                    "DC Naming Standard site code.\n"
+                    "Auto-derived from Country Code + Site Index.\n"
+                    "Example: uk1 (044 + 001)")
+
         self._gen_vars["start"].set("1")
         self._gen_vars["count"].set("20")
 
@@ -145,14 +182,16 @@ class BatchProgramPanel(ttk.Frame):
         self._preview_frame = ttk.LabelFrame(self, text="Batch Preview")
         self._preview_tree = ttk.Treeview(
             self._preview_frame,
-            columns=("imsi", "iccid", "spn", "adm1"),
+            columns=("imsi", "iccid", "site_code", "spn", "adm1"),
             show="headings", height=8)
         self._preview_tree.heading("imsi", text="IMSI")
         self._preview_tree.heading("iccid", text="ICCID")
+        self._preview_tree.heading("site_code", text="Site Code")
         self._preview_tree.heading("spn", text="SPN")
         self._preview_tree.heading("adm1", text="ADM1")
         self._preview_tree.column("imsi", width=140)
         self._preview_tree.column("iccid", width=180)
+        self._preview_tree.column("site_code", width=70)
         self._preview_tree.column("spn", width=80)
         self._preview_tree.column("adm1", width=90)
         sb = ttk.Scrollbar(self._preview_frame, orient=tk.VERTICAL,
@@ -211,6 +250,25 @@ class BatchProgramPanel(ttk.Frame):
         ttk.Button(self._summary_frame, text="Export Results CSV...",
                    command=self._on_export_results).pack(side=tk.LEFT)
 
+    # ---- country/site auto-population -----------------------------------
+
+    def _on_country_code_change(self, *_args):
+        """Auto-populate FPLMN and update site code when country changes."""
+        cc = self._gen_vars["country_code"].get().strip()
+        if cc in FPLMN_BY_COUNTRY:
+            self._gen_vars["fplmn"].set(FPLMN_BY_COUNTRY[cc])
+        self._update_site_code()
+
+    def _on_site_field_change(self, *_args):
+        """Update site code label when site index changes."""
+        self._update_site_code()
+
+    def _update_site_code(self):
+        cc = self._gen_vars["country_code"].get().strip()
+        si = self._gen_vars["site_index"].get().strip()
+        key = cc + si
+        self._site_code_var.set(SITE_CODES.get(key, ""))
+
     # ---- source toggle --------------------------------------------------
 
     def _on_source_change(self):
@@ -263,8 +321,9 @@ class BatchProgramPanel(ttk.Frame):
     def _on_preview(self):
         try:
             mcc_mnc = self._gen_vars["mcc_mnc"].get().strip()
-            customer = self._gen_vars["customer"].get().strip()
-            sim_type = self._gen_vars["sim_type"].get().strip()
+            country_code = self._gen_vars["country_code"].get().strip()
+            site_index = self._gen_vars["site_index"].get().strip()
+            customer_id = self._gen_vars["customer_id"].get().strip()
             start = int(self._gen_vars["start"].get().strip())
             count = int(self._gen_vars["count"].get().strip())
             spn = self._gen_vars["spn"].get().strip()
@@ -274,10 +333,18 @@ class BatchProgramPanel(ttk.Frame):
             messagebox.showerror("Error", "Start and Count must be integers")
             return
 
-        if not mcc_mnc or not customer or not sim_type:
+        if not mcc_mnc or not country_code or not site_index or not customer_id:
             messagebox.showerror("Error",
-                                 "MCC+MNC, Customer Code, and SIM Type Code are required")
+                                 "MCC+MNC, Country Code, Site Index, and Customer ID are required")
             return
+
+        if count > 100:
+            messagebox.showerror("Error",
+                                 "Count cannot exceed 100 (SIM sequence range is 00-99)")
+            return
+
+        # Resolve site code for display
+        site_code = SITE_CODES.get(country_code + site_index, "")
 
         # Load ADM1 from CSV if applicable
         adm1_map: dict[str, str] = {}
@@ -289,12 +356,13 @@ class BatchProgramPanel(ttk.Frame):
 
         self._preview_data = []
         for seq in range(start, start + count):
-            imsi = generate_imsi(mcc_mnc, customer, sim_type, seq)
-            iccid = generate_iccid(mcc_mnc, customer, sim_type, seq)
+            imsi = generate_imsi(mcc_mnc, country_code, site_index, customer_id, seq)
+            iccid = generate_iccid(mcc_mnc, country_code, site_index, customer_id, seq)
             adm1 = uniform_adm1 or adm1_map.get(iccid, "")
             self._preview_data.append({
                 "IMSI": imsi,
                 "ICCID": iccid,
+                "SITE_CODE": site_code,
                 "SPN": spn,
                 "FPLMN": fplmn,
                 "ADM1": adm1,
@@ -310,6 +378,7 @@ class BatchProgramPanel(ttk.Frame):
             self._preview_tree.insert("", tk.END, iid=str(i), values=(
                 row.get("IMSI", ""),
                 row.get("ICCID", ""),
+                row.get("SITE_CODE", ""),
                 row.get("SPN", ""),
                 row.get("ADM1", ""),
             ))
@@ -459,8 +528,9 @@ class BatchProgramPanel(ttk.Frame):
     def _load_settings(self):
         for key, skey in [
             ("mcc_mnc", "last_mcc_mnc"),
-            ("customer", "last_customer_code"),
-            ("sim_type", "last_sim_type_code"),
+            ("country_code", "last_country_code"),
+            ("site_index", "last_site_index"),
+            ("customer_id", "last_customer_id"),
             ("spn", "last_spn"),
             ("language", "last_language"),
             ("fplmn", "last_fplmn"),
@@ -475,8 +545,9 @@ class BatchProgramPanel(ttk.Frame):
     def _save_settings(self):
         for key, skey in [
             ("mcc_mnc", "last_mcc_mnc"),
-            ("customer", "last_customer_code"),
-            ("sim_type", "last_sim_type_code"),
+            ("country_code", "last_country_code"),
+            ("site_index", "last_site_index"),
+            ("customer_id", "last_customer_id"),
             ("spn", "last_spn"),
             ("language", "last_language"),
             ("fplmn", "last_fplmn"),

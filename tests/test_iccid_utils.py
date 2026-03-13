@@ -1,12 +1,14 @@
-"""Tests for utils.iccid_utils module."""
+"""Tests for utils.iccid_utils module — Teleaura PLMN Numbering Standard v1.0."""
 
 import pytest
-from utils.iccid_utils import compute_luhn_check, validate_luhn, generate_imsi, generate_iccid
+from utils.iccid_utils import (
+    compute_luhn_check, validate_luhn, generate_imsi, generate_iccid,
+    COUNTRY_CODES, SITE_CODES, FPLMN_BY_COUNTRY, CUSTOMER_RANGES,
+)
 
 
 class TestComputeLuhnCheck:
     def test_known_value(self):
-        # ICCID 89001012345678901 -> check digit for this prefix
         digits = "89001012345678901"
         check = compute_luhn_check(digits)
         assert check.isdigit()
@@ -30,7 +32,6 @@ class TestComputeLuhnCheck:
     def test_different_prefixes_differ(self):
         c1 = compute_luhn_check("12345678901234567")
         c2 = compute_luhn_check("12345678901234568")
-        # They may or may not differ, but both must be valid digits
         assert c1.isdigit()
         assert c2.isdigit()
 
@@ -63,65 +64,117 @@ class TestValidateLuhn:
 
 
 class TestGenerateImsi:
-    def test_basic_generation(self):
-        imsi = generate_imsi("99988", "0003", "0100", 1)
-        assert imsi == "9998800030100001"
+    def test_boliden_uk1(self):
+        """Worked example: Boliden at uk1, SIM 01."""
+        imsi = generate_imsi("99988", "044", "001", "03", 1)
+        assert imsi == "999880440010301"
 
-    def test_sequence_padding(self):
-        imsi = generate_imsi("99988", "0003", "0100", 5)
-        assert imsi.endswith("005")
+    def test_boliden_se1(self):
+        """Worked example: Boliden at se1, SIM 05."""
+        imsi = generate_imsi("99988", "046", "001", "03", 5)
+        assert imsi == "999880460010305"
 
-    def test_sequence_triple_digit(self):
-        imsi = generate_imsi("99988", "0003", "0100", 100)
-        assert imsi.endswith("100")
+    def test_fifteen_digits(self):
+        imsi = generate_imsi("99988", "044", "001", "03", 1)
+        assert len(imsi) == 15
+        assert imsi.isdigit()
 
-    def test_different_mcc_mnc(self):
-        imsi = generate_imsi("31026", "0001", "0200", 42)
-        assert imsi.startswith("31026")
-        assert imsi.endswith("042")
+    def test_sequence_two_digit_padding(self):
+        imsi = generate_imsi("99988", "044", "001", "00", 5)
+        assert imsi.endswith("05")
+
+    def test_sequence_zero(self):
+        imsi = generate_imsi("99988", "044", "001", "00", 0)
+        assert imsi.endswith("00")
+
+    def test_sequence_99(self):
+        imsi = generate_imsi("99988", "044", "001", "00", 99)
+        assert imsi.endswith("99")
 
     def test_structure(self):
-        """IMSI = MCC+MNC + Customer + Type + Seq(3)."""
-        imsi = generate_imsi("99988", "0003", "0100", 1)
-        assert imsi[:5] == "99988"
-        assert imsi[5:9] == "0003"
-        assert imsi[9:13] == "0100"
-        assert imsi[13:] == "001"
-        assert len(imsi) == len("99988") + len("0003") + len("0100") + 3
+        """IMSI = MCC+MNC(5) + Country(3) + Site(3) + Customer(2) + Seq(2)."""
+        imsi = generate_imsi("99988", "044", "001", "03", 1)
+        assert imsi[:5] == "99988"     # MCC+MNC
+        assert imsi[5:8] == "044"      # Country
+        assert imsi[8:11] == "001"     # Site
+        assert imsi[11:13] == "03"     # Customer
+        assert imsi[13:15] == "01"     # Sequence
+
+    def test_different_mcc_mnc(self):
+        imsi = generate_imsi("99989", "001", "001", "00", 0)
+        assert imsi.startswith("99989")
+        assert len(imsi) == 15
 
 
 class TestGenerateIccid:
     def test_starts_with_89(self):
-        iccid = generate_iccid("99988", "0003", "0100", 1)
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
         assert iccid.startswith("89")
 
     def test_contains_mcc_mnc(self):
-        iccid = generate_iccid("99988", "0003", "0100", 1)
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
         assert iccid[2:7] == "99988"
 
+    def test_four_zeros_padding(self):
+        """ICCID uses 4 zeros padding, not 5."""
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
+        assert iccid[7:11] == "0000"
+
+    def test_iccid_length(self):
+        """ICCID = 89(2) + MCC_MNC(5) + 0000(4) + MSIN(10) + Luhn(1) = 22 digits."""
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
+        assert len(iccid) == 22
+        assert iccid.isdigit()
+
     def test_valid_luhn(self):
-        iccid = generate_iccid("99988", "0003", "0100", 1)
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
         assert validate_luhn(iccid)
 
     def test_valid_luhn_multiple(self):
         """Every generated ICCID must have a valid Luhn check digit."""
-        for seq in range(1, 50):
-            iccid = generate_iccid("99988", "0003", "0100", seq)
+        for seq in range(0, 100):
+            iccid = generate_iccid("99988", "044", "001", "03", seq)
             assert validate_luhn(iccid), f"ICCID {iccid} has invalid Luhn"
 
-    def test_structure(self):
-        """ICCID = 89 + MCC+MNC + 00000 + Customer + Type + Seq(3) + Check."""
-        iccid = generate_iccid("99988", "0003", "0100", 1)
+    def test_boliden_uk1_structure(self):
+        """Worked example: Boliden at uk1, SIM 01.
+        ICCID = 89 + 99988 + 0000 + 0440010301 + Luhn.
+        """
+        iccid = generate_iccid("99988", "044", "001", "03", 1)
         assert iccid[:2] == "89"
         assert iccid[2:7] == "99988"
-        assert iccid[7:12] == "00000"
-        assert iccid[12:16] == "0003"
-        assert iccid[16:20] == "0100"
-        # seq=1 padded to 3 digits
-        assert iccid[20:23] == "001"
+        assert iccid[7:11] == "0000"
+        # MSIN = country(3) + site(3) + customer(2) + seq(2) = 10 digits
+        assert iccid[11:21] == "0440010301"
         # Last digit is Luhn check
-        assert len(iccid) == 24
+        assert len(iccid) == 22
+        assert validate_luhn(iccid)
 
     def test_unique_iccids(self):
-        iccids = {generate_iccid("99988", "0003", "0100", i) for i in range(1, 20)}
-        assert len(iccids) == 19
+        iccids = {generate_iccid("99988", "044", "001", "03", i) for i in range(0, 20)}
+        assert len(iccids) == 20
+
+
+class TestConstants:
+    def test_country_codes(self):
+        assert COUNTRY_CODES["044"] == "UK"
+        assert COUNTRY_CODES["046"] == "Sweden"
+        assert COUNTRY_CODES["001"] == "US"
+        assert COUNTRY_CODES["061"] == "Australia"
+        assert COUNTRY_CODES["049"] == "Germany"
+
+    def test_site_codes(self):
+        assert SITE_CODES["044001"] == "uk1"
+        assert SITE_CODES["044002"] == "uk2"
+        assert SITE_CODES["046001"] == "se1"
+        assert SITE_CODES["046002"] == "se2"
+        assert SITE_CODES["061001"] == "au1"
+        assert SITE_CODES["001001"] == "us1"
+
+    def test_fplmn_by_country(self):
+        assert "23415" in FPLMN_BY_COUNTRY["044"]
+        assert "24007" in FPLMN_BY_COUNTRY["046"]
+
+    def test_customer_ranges(self):
+        assert CUSTOMER_RANGES["00"] == "Internal"
+        assert CUSTOMER_RANGES["99"] == "Demo"

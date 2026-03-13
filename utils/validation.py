@@ -64,6 +64,33 @@ def validate_hex_field(value: str, expected_len: int, field_name: str) -> Option
     return None
 
 
+def validate_country_code(value: str) -> Optional[str]:
+    """Validate a 3-digit country code. Returns None if valid, or an error message."""
+    if not value:
+        return "Country code is required"
+    if not value.isdigit() or len(value) != 3:
+        return "Country code must be exactly 3 digits"
+    return None
+
+
+def validate_site_index(value: str) -> Optional[str]:
+    """Validate a 3-digit site index. Returns None if valid, or an error message."""
+    if not value:
+        return "Site index is required"
+    if not value.isdigit() or len(value) != 3:
+        return "Site index must be exactly 3 digits"
+    return None
+
+
+def validate_customer_id(value: str) -> Optional[str]:
+    """Validate a 2-digit customer ID (00-99). Returns None if valid, or an error message."""
+    if not value:
+        return "Customer ID is required"
+    if not value.isdigit() or len(value) != 2:
+        return "Customer ID must be exactly 2 digits (00-99)"
+    return None
+
+
 def validate_card_data(card: dict) -> List[str]:
     """Validate a single card data dict. Returns list of error strings."""
     errors: List[str] = []

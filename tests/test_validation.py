@@ -4,6 +4,7 @@ import pytest
 from utils.validation import (
     validate_adm1, validate_imsi, validate_iccid,
     validate_hex_field, validate_card_data,
+    validate_country_code, validate_site_index, validate_customer_id,
 )
 
 
@@ -110,3 +111,58 @@ class TestValidateCardData:
     def test_multiple_errors(self):
         errors = validate_card_data({'IMSI': 'x', 'ICCID': 'y', 'ADM1': 'z'})
         assert len(errors) >= 3
+
+
+class TestValidateCountryCode:
+    def test_valid(self):
+        assert validate_country_code("044") is None
+        assert validate_country_code("001") is None
+
+    def test_empty(self):
+        assert validate_country_code("") is not None
+
+    def test_too_short(self):
+        assert validate_country_code("04") is not None
+
+    def test_too_long(self):
+        assert validate_country_code("0044") is not None
+
+    def test_non_digit(self):
+        assert validate_country_code("abc") is not None
+
+
+class TestValidateSiteIndex:
+    def test_valid(self):
+        assert validate_site_index("001") is None
+        assert validate_site_index("999") is None
+
+    def test_empty(self):
+        assert validate_site_index("") is not None
+
+    def test_too_short(self):
+        assert validate_site_index("01") is not None
+
+    def test_too_long(self):
+        assert validate_site_index("0001") is not None
+
+    def test_non_digit(self):
+        assert validate_site_index("abc") is not None
+
+
+class TestValidateCustomerId:
+    def test_valid(self):
+        assert validate_customer_id("00") is None
+        assert validate_customer_id("99") is None
+        assert validate_customer_id("03") is None
+
+    def test_empty(self):
+        assert validate_customer_id("") is not None
+
+    def test_too_short(self):
+        assert validate_customer_id("0") is not None
+
+    def test_too_long(self):
+        assert validate_customer_id("000") is not None
+
+    def test_non_digit(self):
+        assert validate_customer_id("ab") is not None
