@@ -53,7 +53,12 @@ git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$BUILD_DIR/SimGUI" 2>&1 | ta
 # --- Build .deb -------------------------------------------------
 info "Building .deb package..."
 cd "$BUILD_DIR/SimGUI"
-dpkg-buildpackage -us -uc -b > /dev/null 2>&1
+BUILD_LOG="$BUILD_DIR/build.log"
+if ! dpkg-buildpackage -us -uc -b > "$BUILD_LOG" 2>&1; then
+    error "Build failed. Last 30 lines of build log:"
+    tail -30 "$BUILD_LOG" >&2
+    exit 1
+fi
 
 DEB=$(ls "$BUILD_DIR"/simgui_*.deb 2>/dev/null | head -1)
 if [ -z "$DEB" ]; then
