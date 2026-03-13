@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from theme import ModernTheme
+from utils import get_browse_initial_dir
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,11 @@ logger = logging.getLogger(__name__)
 class CSVEditorPanel(ttk.Frame):
     """Panel for editing CSV card configurations"""
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, *, ns_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._csv_manager = CSVManager()
+        self._ns_manager = ns_manager
+        self._last_browse_dir: str | None = None
         self._unsaved_changes = False
         self._create_widgets()
 
@@ -48,23 +51,20 @@ class CSVEditorPanel(ttk.Frame):
         self.tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
 
-        self.tree.bind('<Double-1>', self._on_cell_edit)
+        # Status bar
+        self._status = ttk.Label(self, text="", style='Small.TLabel')
+        self._status.pack(fill=tk.X, pady=(pad, 0))
 
-        self._refresh_table()
-
-    @property
-    def has_unsaved_changes(self) -> bool:
-        return self._unsaved_changes
-
-    def get_csv_manager(self) -> CSVManager:
+    def get_csv_manager(self):
         return self._csv_manager
 
     def _refresh_table(self):
-        self.tree.delete(*self.tree.get_children())
-        cols = self._csv_manager.columns
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        cols = self._csv_manager.get_columns()
         self.tree['columns'] = cols
         for col in cols:
             self.tree.heading(col, text=col)
@@ -75,11 +75,15 @@ class CSVEditorPanel(ttk.Frame):
         self.count_label.configure(text=f"{self._csv_manager.get_card_count()} cards")
 
     def _on_load_csv(self):
-        fp = filedialog.askopenfilename(
-            title="Load SIM Data File",
-            filetypes=SIM_DATA_FILETYPES)
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {"title": "Load SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.askopenfilename(**kwargs)
         if not fp:
             return
+        import os
+        self._last_browse_dir = os.path.dirname(fp)
         try:
             if self._csv_manager.load_file(fp):
                 self._refresh_table()
@@ -91,9 +95,14 @@ class CSVEditorPanel(ttk.Frame):
             messagebox.showerror("Import Error", str(exc))
 
     def _on_save_csv(self):
-        fp = filedialog.asksaveasfilename(
-            title="Save CSV", defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {
+            "title": "Save CSV", "defaultextension": ".csv",
+            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
+        }
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.asksaveasfilename(**kwargs)
         if fp:
             if self._csv_manager.save_csv(fp):
                 self._unsaved_changes = False
@@ -102,54 +111,38 @@ class CSVEditorPanel(ttk.Frame):
                 messagebox.showerror("Save Error", "Failed to save CSV file.")
 
     def _on_add_row(self):
-        self._csv_manager.add_card()
+        self._csv_manager.add_empty_card()
         self._refresh_table()
         self._unsaved_changes = True
 
     def _on_delete_row(self):
         sel = self.tree.selection()
-        if sel:
-            idx = int(sel[0])
-            self._csv_manager.remove_card(idx)
-            self._refresh_table()
-            self._unsaved_changes = True
+        if not sel:
+            return
+        idx = int(sel[0])
+        self._csv_manager.delete_card(idx)
+        self._refresh_table()
+        self._unsaved_changes = True
 
     def _on_validate(self):
         errors = self._csv_manager.validate_all()
         if errors:
-            messagebox.showwarning("Validation", "\n".join(errors))
+            msg = "\n".join(errors[:20])
+            if len(errors) > 20:
+                msg += f"\n... and {len(errors) - 20} more"
+            messagebox.showwarning("Validation", msg)
         else:
-            messagebox.showinfo("Validation", "All rows valid!")
+            messagebox.showinfo("Validation", "All cards valid.")
 
-    def _on_cell_edit(self, event):
-        item = self.tree.identify_row(event.y)
-        col_id = self.tree.identify_column(event.x)
-        if not item or not col_id:
-            return
-        col_idx = int(col_id.replace('#', '')) - 1
-        col_name = self._csv_manager.columns[col_idx]
-        old_val = self._csv_manager.cards[int(item)].get(col_name, '')
+    def _on_cell_edit(self, row, col, value):
+        self._csv_manager.update_card(row, col, value)
+        self._unsaved_changes = True
 
-        # Guard bbox() for non-visible items
-        bbox = self.tree.bbox(item, col_id)
-        if not bbox:
-            return
-        x, y, w, h = bbox
+    def has_unsaved_changes(self):
+        return self._unsaved_changes
 
-        entry = ttk.Entry(self.tree)
-        entry.place(x=x, y=y, width=w, height=h)
-        entry.insert(0, old_val)
-        entry.select_range(0, tk.END)
-        entry.focus_set()
+    def get_card_count(self):
+        return self._csv_manager.get_card_count()
 
-        def _save(e=None):
-            if not entry.winfo_exists():
-                return
-            self._csv_manager.update_card(int(item), col_name, entry.get())
-            entry.destroy()
-            self._refresh_table()
-            self._unsaved_changes = True
-
-        entry.bind('<Return>', _save)
-        entry.bind('<FocusOut>', _save)
-        entry.bind('<Escape>', lambda e: entry.destroy())
+    def get_cards(self):
+        return self._csv_manager.cards
