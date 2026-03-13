@@ -22,6 +22,7 @@ from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
+from utils import get_browse_initial_dir
 from widgets.batch_program_panel import BatchProgramPanel
 from widgets.card_status_panel import CardStatusPanel
 from widgets.csv_editor_panel import CSVEditorPanel
@@ -113,12 +114,14 @@ class SimGUIApp:
         # Workflow tabs
         self._read_panel = ReadSIMPanel(
             notebook, self._card_manager,
-            last_read_data=self.last_read_data)
+            last_read_data=self.last_read_data,
+            ns_manager=self._ns_manager)
         notebook.add(self._read_panel, text="Read SIM")
 
         self._program_panel = ProgramSIMPanel(
             notebook, self._card_manager,
-            last_read_data=self.last_read_data)
+            last_read_data=self.last_read_data,
+            ns_manager=self._ns_manager)
         notebook.add(self._program_panel, text="Program SIM")
 
         self._batch_panel = BatchProgramPanel(
@@ -134,7 +137,7 @@ class SimGUIApp:
             lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
         )
 
-        self._csv_panel = CSVEditorPanel(notebook)
+        self._csv_panel = CSVEditorPanel(notebook, ns_manager=self._ns_manager)
         notebook.add(self._csv_panel, text="CSV Editor")
 
         self._progress_panel = ProgressPanel(notebook)
@@ -212,9 +215,11 @@ class SimGUIApp:
     # ---- Callbacks --------------------------------------------------------
 
     def _on_open_csv(self):
-        fp = filedialog.askopenfilename(
-            title="Open SIM Data File",
-            filetypes=SIM_DATA_FILETYPES)
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.askopenfilename(**kwargs)
         if not fp:
             return
         mgr = self._csv_panel.get_csv_manager()
@@ -229,9 +234,14 @@ class SimGUIApp:
             messagebox.showerror("Import Error", str(exc))
 
     def _on_save_csv(self):
-        fp = filedialog.asksaveasfilename(
-            title="Save CSV", defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        kwargs = {
+            "title": "Save CSV", "defaultextension": ".csv",
+            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
+        }
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.asksaveasfilename(**kwargs)
         if fp:
             mgr = self._csv_panel.get_csv_manager()
             if mgr.save_csv(fp):
