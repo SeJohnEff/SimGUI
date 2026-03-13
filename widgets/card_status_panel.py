@@ -42,9 +42,12 @@ class CardStatusPanel(ttk.LabelFrame):
             ttk.Label(self, text=label_text, style='Subheading.TLabel').grid(
                 row=i, column=0, sticky=tk.W, padx=(0, pad_s), pady=2)
             var = tk.StringVar(value='-')
-            lbl = ttk.Label(self, textvariable=var)
-            lbl.grid(row=i, column=1, sticky=tk.W, pady=2)
+            entry = ttk.Entry(self, textvariable=var,
+                              state="readonly", style="Copyable.TEntry")
+            entry.grid(row=i, column=1, sticky=(tk.W, tk.E), pady=2)
             self._info_vars[key] = var
+
+        self.columnconfigure(1, weight=1)
 
         # Buttons
         btn_frame = ttk.Frame(self)

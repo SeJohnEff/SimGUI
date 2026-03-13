@@ -78,15 +78,19 @@ class ReadSIMPanel(ttk.Frame):
         pub_grid = ttk.Frame(pub_frame)
         pub_grid.pack(fill=tk.X, padx=pad, pady=pad)
 
-        self._pub_labels: dict[str, ttk.Label] = {}
+        self._pub_vars: dict[str, tk.StringVar] = {}
+        self._pub_entries: dict[str, ttk.Entry] = {}
         for i, (key, label) in enumerate(_PUBLIC_DISPLAY):
             row, col = divmod(i, 2)
             ttk.Label(pub_grid, text=f"{label}:").grid(
                 row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
-            val_lbl = ttk.Label(pub_grid, text="-")
-            val_lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W,
-                         pady=2, padx=(0, pad * 2))
-            self._pub_labels[key] = val_lbl
+            var = tk.StringVar(value="-")
+            entry = ttk.Entry(pub_grid, textvariable=var,
+                              state="readonly", style="Copyable.TEntry")
+            entry.grid(row=row, column=col * 2 + 1, sticky=(tk.W, tk.E),
+                       pady=2, padx=(0, pad * 2))
+            self._pub_vars[key] = var
+            self._pub_entries[key] = entry
 
         # Make value columns expand
         pub_grid.columnconfigure(1, weight=1)
@@ -136,15 +140,19 @@ class ReadSIMPanel(ttk.Frame):
         prot_grid = ttk.Frame(prot_frame)
         prot_grid.pack(fill=tk.X, padx=pad, pady=pad)
 
-        self._prot_labels: dict[str, ttk.Label] = {}
+        self._prot_vars: dict[str, tk.StringVar] = {}
+        self._prot_entries: dict[str, ttk.Entry] = {}
         for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
             row, col = divmod(i, 2)
             ttk.Label(prot_grid, text=f"{label}:").grid(
                 row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
-            val_lbl = ttk.Label(prot_grid, text="-")
-            val_lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W,
-                         pady=2, padx=(0, pad * 2))
-            self._prot_labels[key] = val_lbl
+            var = tk.StringVar(value="-")
+            entry = ttk.Entry(prot_grid, textvariable=var,
+                              state="readonly", style="Copyable.TEntry")
+            entry.grid(row=row, column=col * 2 + 1, sticky=(tk.W, tk.E),
+                       pady=2, padx=(0, pad * 2))
+            self._prot_vars[key] = var
+            self._prot_entries[key] = entry
 
         prot_grid.columnconfigure(1, weight=1)
         prot_grid.columnconfigure(3, weight=1)
@@ -171,24 +179,24 @@ class ReadSIMPanel(ttk.Frame):
         self._read_btn.configure(state=tk.DISABLED)
         self._read_status.configure(text="Authenticate first")
         self._protected_data = {}
-        for lbl in self._prot_labels.values():
-            lbl.configure(text="-")
+        for var in self._prot_vars.values():
+            var.set("-")
 
         # Read public data
         pub = self._cm.read_public_data()
         if pub:
             self._public_data = pub
             self._detected_iccid = pub.get("iccid", "")
-            for key, lbl in self._pub_labels.items():
+            for key, var in self._pub_vars.items():
                 val = pub.get(key, "")
-                lbl.configure(text=val if val else "-")
+                var.set(val if val else "-")
             # Store public data in shared state for Program SIM tab
             self._update_shared_read_data()
         else:
             self._public_data = {}
             self._detected_iccid = ""
-            for lbl in self._pub_labels.values():
-                lbl.configure(text="-")
+            for var in self._pub_vars.values():
+                var.set("-")
             # Clear shared state when no card
             self._last_read_data.clear()
 
@@ -263,9 +271,9 @@ class ReadSIMPanel(ttk.Frame):
         self._protected_data = data
         self._read_status.configure(
             text=f"Read {len(data)} protected field(s)")
-        for key, lbl in self._prot_labels.items():
+        for key, var in self._prot_vars.items():
             val = data.get(key, "")
-            lbl.configure(text=val if val else "-")
+            var.set(val if val else "-")
         # Update shared state with protected fields
         self._update_shared_read_data()
 

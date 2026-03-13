@@ -121,6 +121,15 @@ class ModernTheme:
         style.configure('TEntry', fieldbackground=cls.COLORS['input_bg'],
                         foreground=cls.COLORS['fg'])
 
+        # Read-only entry that looks like a label but allows text selection
+        # and Ctrl+C copying.
+        style.configure('Copyable.TEntry',
+                        fieldbackground=cls.COLORS['bg'],
+                        foreground=cls.COLORS['fg'],
+                        borderwidth=0, relief='flat')
+        style.map('Copyable.TEntry',
+                  fieldbackground=[('readonly', cls.COLORS['bg'])])
+
         style.configure('Treeview', background=cls.COLORS['panel_bg'],
                         foreground=cls.COLORS['fg'],
                         fieldbackground=cls.COLORS['panel_bg'],
