@@ -3,17 +3,22 @@ Network Storage Dialog — Configure and connect NFS / SMB shares.
 
 Allows the user to create, edit, test, connect, and disconnect
 network storage profiles.  Profiles are persisted across sessions.
+
+UX principles:
+- User enters plain hostname / IP — never ``smb://`` or ``nfs://``
+- Server field is a combobox with history of previously used servers
+- "Remember credentials" checkbox controls secure credential file
+- All input is sanitised (protocol prefixes stripped automatically)
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, ttk
 
-from theme import ModernTheme
 from managers.network_storage_manager import (
     NetworkStorageManager,
     StorageProfile,
 )
-
+from theme import ModernTheme
 
 _ALL_EXPORT_FIELDS = [
     "ICCID", "IMSI", "Ki", "OPc", "ADM1",
@@ -26,13 +31,41 @@ _ALL_EXPORT_FIELDS = [
 ]
 
 
+def _sanitise_server(raw: str) -> str:
+    """Strip protocol prefixes and trailing slashes from a server entry.
+
+    Users might paste ``smb://nas.local/share`` or ``nfs://10.0.0.1/data``.
+    We only want the hostname / IP part.
+    """
+    s = raw.strip()
+    for prefix in ("smb://", "cifs://", "nfs://", "//"):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+    # If they pasted a full path, take only the first component
+    s = s.split("/")[0]
+    return s.strip()
+
+
+def _sanitise_share(raw: str, protocol: str) -> str:
+    """Clean up share / export path input."""
+    s = raw.strip()
+    if protocol == "smb":
+        # Remove any leading slashes for SMB share name
+        s = s.strip("/")
+    else:
+        # NFS: ensure leading slash
+        if s and not s.startswith("/"):
+            s = "/" + s
+    return s
+
+
 class NetworkStorageDialog(tk.Toplevel):
     """Modal dialog for managing network storage connections."""
 
     def __init__(self, parent, ns_manager: NetworkStorageManager):
         super().__init__(parent)
         self.title("Network Storage")
-        self.geometry("620x560")
+        self.geometry("620x580")
         self.resizable(True, True)
         self.transient(parent)
         self.grab_set()
@@ -42,12 +75,35 @@ class NetworkStorageDialog(tk.Toplevel):
         self._current_idx: int | None = None
         self._field_vars: dict[str, tk.BooleanVar] = {}
 
+        # Build server history from saved profiles
+        self._server_history: list[str] = self._build_server_history()
+
         self._build_ui()
         self._refresh_profile_list()
 
         if self._profiles:
             self._profile_list.selection_set(0)
             self._on_profile_select(None)
+
+    # ---- helpers -------------------------------------------------------
+
+    def _build_server_history(self) -> list[str]:
+        """Collect unique servers from saved profiles for the combobox."""
+        seen = set()
+        servers = []
+        for p in self._profiles:
+            s = p.server.strip()
+            if s and s not in seen:
+                seen.add(s)
+                servers.append(s)
+        return servers
+
+    def _update_server_history(self, server: str):
+        """Add a server to the history if not already present."""
+        server = server.strip()
+        if server and server not in self._server_history:
+            self._server_history.append(server)
+            self._server_combo["values"] = self._server_history
 
     # ---- UI construction -----------------------------------------------
 
@@ -103,17 +159,27 @@ class NetworkStorageDialog(tk.Toplevel):
                         command=self._on_proto_change).pack(side=tk.LEFT,
                                                             padx=(pad, 0))
 
-        # Server
+        # Server (combobox with history)
         row += 1
         ttk.Label(form_inner, text="Server:").grid(
             row=row, column=0, sticky=tk.W, pady=2)
         self._server_var = tk.StringVar()
-        ttk.Entry(form_inner, textvariable=self._server_var, width=30).grid(
+        self._server_combo = ttk.Combobox(
+            form_inner, textvariable=self._server_var, width=28,
+            values=self._server_history)
+        self._server_combo.grid(
             row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))
+        # Sanitise on focus-out (strip smb:// etc.)
+        self._server_combo.bind("<FocusOut>", self._on_server_focus_out)
+
+        # Hint below server
+        ttk.Label(form_inner, text="Hostname or IP address (e.g. 192.168.1.10)",
+                  style="Small.TLabel").grid(
+            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))
 
         # Share
-        row += 1
-        self._share_label = ttk.Label(form_inner, text="Share:")
+        row += 2
+        self._share_label = ttk.Label(form_inner, text="Share name:")
         self._share_label.grid(row=row, column=0, sticky=tk.W, pady=2)
         self._share_var = tk.StringVar()
         ttk.Entry(form_inner, textvariable=self._share_var, width=30).grid(
@@ -135,9 +201,14 @@ class NetworkStorageDialog(tk.Toplevel):
         self._pass_label.grid(row=row, column=0, sticky=tk.W, pady=2)
         self._pass_var = tk.StringVar()
         self._pass_entry = ttk.Entry(form_inner, textvariable=self._pass_var,
-                                      width=30, show="•")
-        self._pass_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW,
+                                      width=30, show="\u2022")
+        self._pass_entry.grid(row=row, column=1, sticky=tk.EW,
                                pady=2, padx=(4, 0))
+        # Remember credentials checkbox
+        self._remember_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(form_inner, text="Remember",
+                        variable=self._remember_var).grid(
+            row=row, column=2, sticky=tk.W, padx=(4, 0))
 
         # Domain (SMB only)
         row += 1
@@ -193,12 +264,21 @@ class NetworkStorageDialog(tk.Toplevel):
         ttk.Button(actions, text="Close", width=8,
                    command=self.destroy).pack(side=tk.LEFT, padx=2)
 
+    # ---- Event handlers ------------------------------------------------
+
+    def _on_server_focus_out(self, _event):
+        """Sanitise server input when user leaves the field."""
+        raw = self._server_var.get()
+        clean = _sanitise_server(raw)
+        if clean != raw:
+            self._server_var.set(clean)
+
     # ---- Profile list management ---------------------------------------
 
     def _refresh_profile_list(self):
         self._profile_list.delete(0, tk.END)
         for p in self._profiles:
-            mounted = " ✓" if self._ns.is_mounted(p) else ""
+            mounted = " \u2713" if self._ns.is_mounted(p) else ""
             self._profile_list.insert(tk.END,
                                        f"{p.label} ({p.protocol}){mounted}")
 
@@ -217,6 +297,8 @@ class NetworkStorageDialog(tk.Toplevel):
         self._pass_var.set(p.password)
         self._domain_var.set(p.domain)
         self._export_dir_var.set(p.export_subdir)
+        # Remember checkbox: True if password was saved
+        self._remember_var.set(bool(p.password))
         for fname, var in self._field_vars.items():
             var.set(fname in p.export_fields)
         self._update_connect_btn(p)
@@ -248,7 +330,7 @@ class NetworkStorageDialog(tk.Toplevel):
         self._pass_entry.configure(state=state)
         self._domain_entry.configure(state=state)
         self._share_label.configure(
-            text="Share:" if is_smb else "Export path:")
+            text="Share name:" if is_smb else "Export path:")
 
     def _update_connect_btn(self, profile: StorageProfile):
         if self._ns.is_mounted(profile):
@@ -261,21 +343,27 @@ class NetworkStorageDialog(tk.Toplevel):
     def _form_to_profile(self) -> StorageProfile | None:
         """Read form into a StorageProfile (validates required fields)."""
         label = self._label_var.get().strip()
-        server = self._server_var.get().strip()
-        share = self._share_var.get().strip()
+        server = _sanitise_server(self._server_var.get())
+        proto = self._proto_var.get()
+        share = _sanitise_share(self._share_var.get(), proto)
+
         if not label or not server or not share:
             messagebox.showwarning("Missing fields",
                                    "Name, Server, and Share are required.",
                                    parent=self)
             return None
+
+        # If "Remember" is unchecked, don't persist the password
+        password = self._pass_var.get() if self._remember_var.get() else ""
+
         fields = [f for f, v in self._field_vars.items() if v.get()]
         return StorageProfile(
             label=label,
-            protocol=self._proto_var.get(),
+            protocol=proto,
             server=server,
             share=share,
             username=self._user_var.get().strip(),
-            password=self._pass_var.get(),
+            password=password,
             domain=self._domain_var.get().strip(),
             export_subdir=self._export_dir_var.get().strip() or "artifacts",
             export_fields=fields,
@@ -289,6 +377,7 @@ class NetworkStorageDialog(tk.Toplevel):
             self._profiles[self._current_idx] = p
         else:
             self._profiles.append(p)
+        self._update_server_history(p.server)
         self._ns.save_profiles(self._profiles)
         self._refresh_profile_list()
         self._status_label.configure(text="Profile saved")
@@ -297,6 +386,9 @@ class NetworkStorageDialog(tk.Toplevel):
         p = self._form_to_profile()
         if p is None:
             return
+        # For testing, we need the password even if "Remember" is unchecked
+        if not p.password:
+            p.password = self._pass_var.get()
         self._status_label.configure(text="Testing connection...")
         self.update_idletasks()
         ok, msg = self._ns.test_connection(p)
@@ -317,7 +409,12 @@ class NetworkStorageDialog(tk.Toplevel):
             updated = self._form_to_profile()
             if updated is None:
                 return
+            # For mounting, always use the entered password
+            # (even if "Remember" is unchecked)
+            if not updated.password:
+                updated.password = self._pass_var.get()
             self._profiles[self._current_idx] = updated
+            self._update_server_history(updated.server)
             self._ns.save_profiles(self._profiles)
             p = updated
 
