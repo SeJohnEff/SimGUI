@@ -37,15 +37,25 @@ class SimGUIApp:
     """Main application class."""
 
     def __init__(self):
-        self.root = tk.Tk()
+        self.root = tk.Tk(className="simgui")
         self.root.title("SimGUI - SIM Card Programmer")
         self.root.geometry("1024x700")
         self.root.minsize(800, 500)
 
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "simgui.png")
-        if os.path.exists(icon_path):
-            icon = tk.PhotoImage(file=icon_path)
-            self.root.iconphoto(True, icon)
+        # Load multiple icon sizes so the WM picks the best match for
+        # taskbar, title-bar, and alt-tab.  The first image is the
+        # "default" size; extras are alternates.
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+        icon_sizes = ["simgui-256.png", "simgui-128.png", "simgui-64.png",
+                      "simgui-48.png", "simgui-32.png", "simgui-16.png"]
+        icons = []
+        for name in icon_sizes:
+            p = os.path.join(assets_dir, name)
+            if os.path.exists(p):
+                icons.append(tk.PhotoImage(file=p))
+        if icons:
+            self.root.iconphoto(True, *icons)
+            self._icons = icons          # prevent garbage collection
 
         ModernTheme.apply_theme(self.root)
 
