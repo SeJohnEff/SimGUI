@@ -22,6 +22,43 @@ from utils.iccid_utils import (
 from widgets.tooltip import add_tooltip
 
 
+def apply_imsi_override(cards: list[dict[str, str]], imsi_base: str,
+                        start_seq: int = 1) -> list[dict[str, str]]:
+    """Return copies of *cards* with IMSI replaced by base + 2-digit seq.
+
+    Args:
+        cards: List of card data dicts.
+        imsi_base: First 13 digits of the IMSI (everything except the
+                   2-digit sequence number at the end).
+        start_seq: Sequence number for the first card (default 1).
+
+    Returns:
+        New list of card dicts — ICCID and all other fields are untouched.
+    """
+    result: list[dict[str, str]] = []
+    for i, card in enumerate(cards):
+        new_card = dict(card)
+        new_card["IMSI"] = f"{imsi_base}{(start_seq + i):02d}"
+        result.append(new_card)
+    return result
+
+
+def apply_range_filter(cards: list[dict[str, str]], start: int,
+                       count: int) -> list[dict[str, str]]:
+    """Return a slice of *cards* using 1-based *start* and *count*.
+
+    Args:
+        cards: Full list of card data dicts.
+        start: 1-based start row.
+        count: Number of cards to include.
+
+    Returns:
+        Sublist (shallow copies of dicts).
+    """
+    idx = max(start - 1, 0)
+    return [dict(c) for c in cards[idx:idx + count]]
+
+
 class BatchProgramPanel(ttk.Frame):
     """Tab for batch-programming multiple SIM cards."""
 
@@ -32,10 +69,14 @@ class BatchProgramPanel(ttk.Frame):
         self._settings = settings
         self._batch_mgr = BatchManager(card_manager)
         self._csv = CSVManager()
+        self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV
         self._preview_data: list[dict[str, str]] = []
 
         self._source_var = tk.StringVar(value="generate")
         self._adm1_source_var = tk.StringVar(value="csv")
+
+        # Callback set by main.py for cross-tab sync
+        self.on_csv_loaded_callback = None
 
         # Wire callbacks
         self._batch_mgr.on_progress = self._on_progress
@@ -67,7 +108,7 @@ class BatchProgramPanel(ttk.Frame):
         # ---------- CSV section ----------
         self._csv_section = ttk.LabelFrame(self, text="CSV File")
         csv_bar = ttk.Frame(self._csv_section)
-        csv_bar.pack(fill=tk.X, padx=pad, pady=pad)
+        csv_bar.pack(fill=tk.X, padx=pad, pady=(pad, 0))
         self._csv_path_var = tk.StringVar()
         ttk.Entry(csv_bar, textvariable=self._csv_path_var,
                   state="readonly", width=40).pack(
@@ -76,6 +117,64 @@ class BatchProgramPanel(ttk.Frame):
                    command=self._on_browse_csv).pack(side=tk.LEFT, padx=(pad, 0))
         self._csv_count_lbl = ttk.Label(csv_bar, text="")
         self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+
+        # Filename label
+        self._csv_filename_lbl = ttk.Label(self._csv_section, text="",
+                                           style="Small.TLabel")
+        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
+
+        # -- Range selection row --
+        range_row = ttk.Frame(self._csv_section)
+        range_row.pack(fill=tk.X, padx=pad, pady=(pad // 2, 0))
+        ttk.Label(range_row, text="Start Row:").pack(side=tk.LEFT)
+        self._range_start_var = tk.StringVar(value="1")
+        self._range_start_spin = ttk.Spinbox(
+            range_row, textvariable=self._range_start_var,
+            from_=1, to=9999, width=6, command=self._on_range_change)
+        self._range_start_spin.pack(side=tk.LEFT, padx=(4, pad))
+        self._range_start_spin.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._range_start_spin,
+                    "1-based row to start from in the CSV.\n"
+                    "Example: 5 = start from the 5th card.")
+
+        ttk.Label(range_row, text="Count:").pack(side=tk.LEFT)
+        self._range_count_var = tk.StringVar(value="0")
+        self._range_count_spin = ttk.Spinbox(
+            range_row, textvariable=self._range_count_var,
+            from_=0, to=9999, width=6, command=self._on_range_change)
+        self._range_count_spin.pack(side=tk.LEFT, padx=(4, pad))
+        self._range_count_spin.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._range_count_spin,
+                    "Number of cards to program.\n"
+                    "0 = all remaining cards from start row.")
+
+        self._range_info_lbl = ttk.Label(range_row, text="")
+        self._range_info_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+
+        # -- IMSI Override row --
+        imsi_row = ttk.Frame(self._csv_section)
+        imsi_row.pack(fill=tk.X, padx=pad, pady=(pad // 2, pad))
+        self._imsi_override_var = tk.BooleanVar(value=False)
+        self._imsi_override_chk = ttk.Checkbutton(
+            imsi_row, text="Override IMSI base:",
+            variable=self._imsi_override_var,
+            command=self._on_range_change)
+        self._imsi_override_chk.pack(side=tk.LEFT)
+        add_tooltip(self._imsi_override_chk,
+                    "Replace the IMSI for each card with a custom base\n"
+                    "+ 2-digit sequence number (01, 02, 03...).\n"
+                    "ICCID is never modified.")
+        self._imsi_base_var = tk.StringVar()
+        self._imsi_base_entry = ttk.Entry(
+            imsi_row, textvariable=self._imsi_base_var, width=16)
+        self._imsi_base_entry.pack(side=tk.LEFT, padx=(4, pad))
+        self._imsi_base_entry.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._imsi_base_entry,
+                    "First 13 digits of the IMSI.\n"
+                    "The last 2 digits (sequence) are auto-generated.\n"
+                    "Example: 9998804400103")
+        ttk.Button(imsi_row, text="Apply",
+                   command=self._on_range_change).pack(side=tk.LEFT)
 
         # ---------- Generate Sequence section ----------
         self._gen_section = ttk.LabelFrame(self, text="Batch Template")
@@ -296,17 +395,77 @@ class BatchProgramPanel(ttk.Frame):
             filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
+        self.load_csv_file(path)
+
+    def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
+        """Load a CSV file and refresh the preview.
+
+        Called by Browse button or by cross-tab sync from ProgramSIMPanel.
+        *_from_sync* prevents infinite callback loops.
+        """
         if not self._csv.load_csv(path):
-            messagebox.showerror("Error", f"Failed to load {path}")
-            return
+            if not _from_sync:
+                messagebox.showerror("Error", f"Failed to load {path}")
+            return False
         self._csv_path_var.set(path)
-        self._csv_count_lbl.configure(
-            text=f"({self._csv.get_card_count()} cards)")
-        self._preview_data = []
-        for i in range(self._csv.get_card_count()):
+        import os
+        self._csv_filename_lbl.configure(text=os.path.basename(path))
+        n = self._csv.get_card_count()
+        self._csv_count_lbl.configure(text=f"({n} cards)")
+        # Store all cards and reset range
+        self._all_csv_cards = []
+        for i in range(n):
             card = self._csv.get_card(i)
             if card:
-                self._preview_data.append(dict(card))
+                self._all_csv_cards.append(dict(card))
+        self._range_start_var.set("1")
+        self._range_count_var.set("0")
+        self._apply_csv_filters()
+        # Cross-tab sync
+        if not _from_sync and callable(self.on_csv_loaded_callback):
+            self.on_csv_loaded_callback(path)
+        return True
+
+    def _on_range_change(self):
+        """Called when start row, count, or IMSI override changes."""
+        self._apply_csv_filters()
+
+    def _apply_csv_filters(self):
+        """Rebuild _preview_data from _all_csv_cards with range + IMSI override."""
+        if not self._all_csv_cards:
+            self._preview_data = []
+            self._range_info_lbl.configure(text="")
+            self._refresh_preview()
+            return
+
+        total = len(self._all_csv_cards)
+
+        # Parse range
+        try:
+            start = max(1, int(self._range_start_var.get()))
+        except ValueError:
+            start = 1
+        try:
+            count = max(0, int(self._range_count_var.get()))
+        except ValueError:
+            count = 0
+        if count == 0:
+            count = total - (start - 1)
+
+        # Apply range filter
+        filtered = apply_range_filter(self._all_csv_cards, start, count)
+
+        # Apply IMSI override if enabled
+        if self._imsi_override_var.get():
+            base = self._imsi_base_var.get().strip()
+            if len(base) == 13 and base.isdigit():
+                filtered = apply_imsi_override(filtered, base, start_seq=start)
+
+        self._preview_data = filtered
+        actual = len(filtered)
+        end_row = start + actual - 1 if actual else start
+        self._range_info_lbl.configure(
+            text=f"Rows {start}\u2013{end_row} of {total} ({actual} cards)")
         self._refresh_preview()
 
     def _on_browse_adm_csv(self):

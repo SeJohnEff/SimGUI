@@ -105,6 +105,14 @@ class SimGUIApp:
             notebook, self._card_manager, self._settings)
         notebook.add(self._batch_panel, text="Batch Program")
 
+        # Cross-tab CSV sync: browsing in one tab updates the other
+        self._program_panel.on_csv_loaded_callback = (
+            lambda path: self._batch_panel.load_csv_file(path, _from_sync=True)
+        )
+        self._batch_panel.on_csv_loaded_callback = (
+            lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
+        )
+
         self._csv_panel = CSVEditorPanel(notebook)
         notebook.add(self._csv_panel, text="CSV Editor")
 
