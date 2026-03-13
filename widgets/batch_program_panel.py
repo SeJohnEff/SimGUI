@@ -15,6 +15,7 @@ from managers.card_manager import CardManager
 from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
+from utils import get_browse_initial_dir
 from utils.iccid_utils import (
     FPLMN_BY_COUNTRY,
     SIM_TYPES,
@@ -72,6 +73,7 @@ class BatchProgramPanel(ttk.Frame):
         self._cm = card_manager
         self._settings = settings
         self._ns_manager = ns_manager
+        self._last_browse_dir: str | None = None
         self._batch_mgr = BatchManager(card_manager)
         self._csv = CSVManager()
         self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV
@@ -442,11 +444,15 @@ class BatchProgramPanel(ttk.Frame):
     # ---- CSV loading ---------------------------------------------------
 
     def _on_browse_csv(self):
-        path = filedialog.askopenfilename(
-            title="Open SIM Data File",
-            filetypes=SIM_DATA_FILETYPES)
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        path = filedialog.askopenfilename(**kwargs)
         if not path:
             return
+        import os
+        self._last_browse_dir = os.path.dirname(path)
         self.load_csv_file(path)
 
     def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
@@ -526,10 +532,14 @@ class BatchProgramPanel(ttk.Frame):
         self._refresh_preview()
 
     def _on_browse_adm_csv(self):
-        path = filedialog.askopenfilename(
-            title="Select ADM1 Data File",
-            filetypes=SIM_DATA_FILETYPES)
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {"title": "Select ADM1 Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        path = filedialog.askopenfilename(**kwargs)
         if path:
+            import os
+            self._last_browse_dir = os.path.dirname(path)
             self._adm_csv_path_var.set(path)
 
     # ---- preview -------------------------------------------------------
@@ -780,9 +790,14 @@ class BatchProgramPanel(ttk.Frame):
     def _on_export_results(self):
         if not self._batch_mgr.results:
             return
-        path = filedialog.asksaveasfilename(
-            title="Export Results", defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {
+            "title": "Export Results", "defaultextension": ".csv",
+            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
+        }
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        path = filedialog.asksaveasfilename(**kwargs)
         if not path:
             return
         try:
