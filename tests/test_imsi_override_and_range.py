@@ -12,8 +12,8 @@ def _make_cards(n: int = 5) -> list[dict[str, str]]:
     cards = []
     for i in range(n):
         cards.append({
-            "ICCID": f"8999988000440010{i:04d}",
-            "IMSI": f"9998804400103{i:02d}",
+            "ICCID": f"8999988000010{i:06d}",
+            "IMSI": f"9998800010{i:05d}",
             "Ki": f"{'A' * 32}",
             "OPc": f"{'B' * 32}",
             "ADM1": "3838383838383838",
@@ -81,59 +81,66 @@ class TestApplyRangeFilter:
 # ---- apply_imsi_override ------------------------------------------------
 
 class TestApplyIMSIOverride:
-    """Tests for apply_imsi_override()."""
+    """Tests for apply_imsi_override() — v2.0: 10-digit base + 5-digit seq."""
 
     def test_basic_override(self):
         cards = _make_cards(3)
-        result = apply_imsi_override(cards, "9998804600101")
-        assert result[0]["IMSI"] == "999880460010101"
-        assert result[1]["IMSI"] == "999880460010102"
-        assert result[2]["IMSI"] == "999880460010103"
+        result = apply_imsi_override(cards, "9998800020")
+        assert result[0]["IMSI"] == "999880002000001"
+        assert result[1]["IMSI"] == "999880002000002"
+        assert result[2]["IMSI"] == "999880002000003"
 
     def test_custom_start_seq(self):
         cards = _make_cards(3)
-        result = apply_imsi_override(cards, "9998804600101", start_seq=5)
-        assert result[0]["IMSI"] == "999880460010105"
-        assert result[1]["IMSI"] == "999880460010106"
-        assert result[2]["IMSI"] == "999880460010107"
+        result = apply_imsi_override(cards, "9998800020", start_seq=5)
+        assert result[0]["IMSI"] == "999880002000005"
+        assert result[1]["IMSI"] == "999880002000006"
+        assert result[2]["IMSI"] == "999880002000007"
 
     def test_iccid_untouched(self):
         """ICCID must NEVER be modified by IMSI override."""
         cards = _make_cards(3)
         original_iccids = [c["ICCID"] for c in cards]
-        result = apply_imsi_override(cards, "9998804600101")
+        result = apply_imsi_override(cards, "9998800020")
         for orig_iccid, new_card in zip(original_iccids, result):
             assert new_card["ICCID"] == orig_iccid
 
     def test_other_fields_untouched(self):
         cards = _make_cards(2)
-        result = apply_imsi_override(cards, "9998804600101")
+        result = apply_imsi_override(cards, "9998800020")
         assert result[0]["Ki"] == cards[0]["Ki"]
         assert result[0]["ADM1"] == cards[0]["ADM1"]
         assert result[1]["OPc"] == cards[1]["OPc"]
 
     def test_returns_copies(self):
         cards = _make_cards(2)
-        result = apply_imsi_override(cards, "9998804600101")
+        result = apply_imsi_override(cards, "9998800020")
         result[0]["IMSI"] = "MODIFIED"
         # Original should be unchanged
         assert cards[0]["IMSI"] != "MODIFIED"
 
     def test_empty_cards(self):
-        result = apply_imsi_override([], "9998804600101")
+        result = apply_imsi_override([], "9998800020")
         assert result == []
 
-    def test_two_digit_seq_padding(self):
-        """Sequence numbers below 10 should be zero-padded."""
+    def test_five_digit_seq_padding(self):
+        """Sequence numbers below 10000 should be zero-padded to 5 digits."""
         cards = _make_cards(1)
-        result = apply_imsi_override(cards, "9998804600101", start_seq=3)
-        assert result[0]["IMSI"].endswith("03")
+        result = apply_imsi_override(cards, "9998800020", start_seq=3)
+        assert result[0]["IMSI"].endswith("00003")
 
-    def test_seq_above_99(self):
-        """Sequence numbers above 99 get 3+ digits — not ideal but shouldn't crash."""
+    def test_imsi_is_15_digits(self):
+        """10-digit base + 5-digit seq = 15-digit IMSI."""
         cards = _make_cards(1)
-        result = apply_imsi_override(cards, "9998804600101", start_seq=100)
-        assert result[0]["IMSI"] == "9998804600101100"
+        result = apply_imsi_override(cards, "9998800010", start_seq=1)
+        assert len(result[0]["IMSI"]) == 15
+        assert result[0]["IMSI"].isdigit()
+
+    def test_large_sequence(self):
+        """Sequence at upper bound of 5-digit range."""
+        cards = _make_cards(1)
+        result = apply_imsi_override(cards, "9998800010", start_seq=99999)
+        assert result[0]["IMSI"] == "999880001099999"
 
 
 # ---- Combined workflows ------------------------------------------------
@@ -147,9 +154,9 @@ class TestCombinedWorkflows:
         filtered = apply_range_filter(cards, start=3, count=5)
         assert len(filtered) == 5
         # Override IMSI with start_seq matching the start row
-        result = apply_imsi_override(filtered, "9998804600201", start_seq=3)
-        assert result[0]["IMSI"] == "999880460020103"
-        assert result[4]["IMSI"] == "999880460020107"
+        result = apply_imsi_override(filtered, "9998800020", start_seq=3)
+        assert result[0]["IMSI"] == "999880002000003"
+        assert result[4]["IMSI"] == "999880002000007"
         # ICCID from original row 3 (index 2) should be preserved
         assert result[0]["ICCID"] == cards[2]["ICCID"]
 

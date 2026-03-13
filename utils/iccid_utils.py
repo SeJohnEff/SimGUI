@@ -2,40 +2,43 @@
 ICCID and IMSI generation utilities.
 
 Provides Luhn check-digit computation, IMSI/ICCID generation per the
-Teleaura SIM PLMN Numbering Standard v1.0, and validation.
+Teleaura SIM PLMN Numbering Standard v2.0, and validation.
 """
 
-# -- Teleaura Numbering Standard constants ----------------------------------
+# -- Teleaura Numbering Standard v2.0 constants ------------------------------
 
-COUNTRY_CODES = {
-    "044": "UK",
-    "046": "Sweden",
-    "001": "US",
-    "061": "Australia",
-    "049": "Germany",
+# Site Register — maps SSSS to DC Naming Standard site code
+SITE_REGISTER = {
+    "0001": {"code": "uk1", "country": "United Kingdom", "description": "Primary UK data centre / lab", "status": "Active"},
+    "0002": {"code": "se1", "country": "Sweden", "description": "Primary Sweden data centre", "status": "Active"},
+    "0003": {"code": "se2", "country": "Sweden", "description": "Sweden DR site", "status": "Active"},
+    "0004": {"code": "au1", "country": "Australia", "description": "Primary Australia site", "status": "Reserved"},
 }
 
-SITE_CODES = {
-    "044001": "uk1",
-    "044002": "uk2",
-    "046001": "se1",
-    "046002": "se2",
-    "061001": "au1",
-    "001001": "us1",
+# Reverse lookup: site code -> SSSS
+SITE_CODE_TO_ID = {v["code"]: k for k, v in SITE_REGISTER.items()}
+
+# SIM Types (T digit)
+SIM_TYPES = {
+    "0": "USIM",
+    "1": "USIM+SUCI",
+    "2": "eSIM",
+    "9": "Test/Dev",
 }
 
+# FPLMN by country (determined by site's country, NOT encoded in IMSI)
 FPLMN_BY_COUNTRY = {
-    "044": "23415;23410;23420;23430",
-    "046": "24007;24024;24001;24008;24002",
+    "United Kingdom": "23415;23410;23420;23430",
+    "Sweden": "24007;24024;24001;24008;24002",
 }
 
-CUSTOMER_RANGES = {
-    "00": "Internal",
-    "01-79": "Enterprise",
-    "80-89": "IoT",
-    "90-98": "Partners",
-    "99": "Demo",
-}
+
+def get_fplmn_for_site(site_id: str) -> str:
+    """Return the FPLMN string for a site based on its country."""
+    site = SITE_REGISTER.get(site_id)
+    if site:
+        return FPLMN_BY_COUNTRY.get(site["country"], "")
+    return ""
 
 
 def compute_luhn_check(digits: str) -> str:
@@ -66,37 +69,30 @@ def validate_luhn(iccid: str) -> bool:
     return compute_luhn_check(iccid[:-1]) == iccid[-1]
 
 
-def generate_imsi(mcc_mnc: str, country_code: str, site_index: str,
-                  customer_id: str, seq: int) -> str:
-    """Generate an IMSI per Teleaura SIM PLMN Numbering Standard.
+def generate_imsi(mcc_mnc: str, site_id: str, sim_type: str, seq: int) -> str:
+    """Generate an IMSI per Teleaura SIM PLMN Numbering Standard v2.0.
 
-    IMSI = MCC+MNC(5) + Country(3) + Site(3) + Customer(2) + Seq(2) = 15 digits.
+    IMSI = MCC+MNC(5) + SSSS(4) + T(1) + NNNNN(5) = 15 digits.
+
+    Args:
+        mcc_mnc: MCC+MNC string (e.g. "99988").
+        site_id: 4-digit site ID from register (e.g. "0001").
+        sim_type: 1-digit SIM type (e.g. "0" for USIM).
+        seq: Sequence number (0-99999).
 
     Example:
-        generate_imsi("99988", "044", "001", "03", 1) -> "999880440010301"
+        generate_imsi("99988", "0001", "0", 1) -> "999880001000001"
     """
-    return f"{mcc_mnc}{country_code}{site_index}{customer_id}{seq:02d}"
+    return f"{mcc_mnc}{site_id}{sim_type}{seq:05d}"
 
 
-def generate_iccid(mcc_mnc: str, country_code: str, site_index: str,
-                   customer_id: str, seq: int) -> str:
-    """Generate an ICCID per Teleaura SIM PLMN Numbering Standard.
+def generate_iccid(mcc_mnc: str, site_id: str, sim_type: str, seq: int) -> str:
+    """Generate an ICCID per Teleaura SIM PLMN Numbering Standard v2.0.
 
     ICCID = 89 + MCC_MNC(5) + 00 + MSIN(10) + Luhn = 20 digits.
-
-    Structure:
-        89      (2)  MII — telecom industry identifier
-        99988   (5)  MCC + MNC
-        00      (2)  Padding — fixed, ensures 20-digit total
-        MSIN   (10)  CCC+SSS+GG+NN — matches IMSI MSIN exactly
-        C       (1)  Luhn check digit (ISO/IEC 7812-1)
-
-    Example:
-        generate_iccid("99988", "044", "001", "03", 1)
-        -> "89" + "99988" + "00" + "0440010301" + check
-        -> "89999880004400103010" (20 digits)
+    Note: ICCID is normally factory-assigned. This is for preview only.
     """
-    msin = f"{country_code}{site_index}{customer_id}{seq:02d}"
+    msin = f"{site_id}{sim_type}{seq:05d}"
     base = f"89{mcc_mnc}00{msin}"
     check = compute_luhn_check(base)
     return base + check

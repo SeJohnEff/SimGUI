@@ -8,6 +8,7 @@ widgets, managers, and dialogs.
 """
 
 import logging
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -40,6 +41,11 @@ class SimGUIApp:
         self.root.title("SimGUI - SIM Card Programmer")
         self.root.geometry("1024x700")
         self.root.minsize(800, 500)
+
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "simgui.png")
+        if os.path.exists(icon_path):
+            icon = tk.PhotoImage(file=icon_path)
+            self.root.iconphoto(True, icon)
 
         ModernTheme.apply_theme(self.root)
 
