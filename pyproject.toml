@@ -1,28 +1,39 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
-
-[project]
-name = "simgui"
-version = "0.1.0"
-description = "Lightweight GUI wrapper for SIM card CLI tools"
-readme = "README.md"
-requires-python = ">=3.9"
-license = "MIT"
-
-dependencies = []
-
-[project.optional-dependencies]
-card = [
-    "pyscard>=2.0.0",
-    "pytlv>=0.3",
-]
-dev = [
-    "pytest>=7.0",
-]
-
-[project.scripts]
-simgui = "main:main"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-v"
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "htmlcov/*",
+    "debian/*",
+    "scripts/*",
+    "setup.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 35
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "pass",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line length — handled by formatter if desired
+    "E402",   # module-level import not at top (needed for sys.path hacks in tests)
+    "F401",   # imported but unused — some __init__.py re-exports
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F401", "F811"]
+"__init__.py" = ["F401"]

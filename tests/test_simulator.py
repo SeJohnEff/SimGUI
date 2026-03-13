@@ -7,12 +7,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from simulator.virtual_card import VirtualCard
-from simulator.card_deck import generate_deck
-from simulator.simulator_backend import SimulatorBackend
-from simulator.settings import SimulatorSettings
 from managers.card_manager import CardManager
-
+from simulator.card_deck import generate_deck
+from simulator.settings import SimulatorSettings
+from simulator.simulator_backend import SimulatorBackend
+from simulator.virtual_card import VirtualCard
 
 # ---------------------------------------------------------------------------
 # TestVirtualCard
@@ -199,7 +198,7 @@ class TestSimulatorBackend:
         assert mismatches == []
 
     def test_verify_card_mismatch(self, backend):
-        card = backend._current_card()
+        backend._current_card()  # ensure card is loaded
         ok, mismatches = backend.verify_card({"imsi": "wrong_value"})
         assert ok is False
         assert len(mismatches) > 0
@@ -526,7 +525,7 @@ class TestPublicProtectedData:
     def test_get_public_data_returns_only_public_fields(self):
         card = self._make_sja5_card()
         pub = card.get_public_data()
-        from simulator.virtual_card import PUBLIC_FIELDS, PROTECTED_FIELDS
+        from simulator.virtual_card import PROTECTED_FIELDS, PUBLIC_FIELDS
         for key in pub:
             assert key in PUBLIC_FIELDS, f"{key} should be a public field"
         # Should not contain any protected field
@@ -557,7 +556,7 @@ class TestPublicProtectedData:
     def test_get_protected_data_returns_only_protected_fields(self):
         card = self._make_sja5_card()
         prot = card.get_protected_data()
-        from simulator.virtual_card import PUBLIC_FIELDS, PROTECTED_FIELDS
+        from simulator.virtual_card import PROTECTED_FIELDS, PUBLIC_FIELDS
         for key in prot:
             assert key in PROTECTED_FIELDS, f"{key} should be a protected field"
         # Should not contain any public field
