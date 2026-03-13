@@ -8,6 +8,7 @@ widgets, managers, and dialogs.
 """
 
 import logging
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -40,6 +41,11 @@ class SimGUIApp:
         self.root.title("SimGUI - SIM Card Programmer")
         self.root.geometry("1024x700")
         self.root.minsize(800, 500)
+
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "simgui.png")
+        if os.path.exists(icon_path):
+            icon = tk.PhotoImage(file=icon_path)
+            self.root.iconphoto(True, icon)
 
         ModernTheme.apply_theme(self.root)
 
@@ -104,6 +110,14 @@ class SimGUIApp:
         self._batch_panel = BatchProgramPanel(
             notebook, self._card_manager, self._settings)
         notebook.add(self._batch_panel, text="Batch Program")
+
+        # Cross-tab CSV sync: browsing in one tab updates the other
+        self._program_panel.on_csv_loaded_callback = (
+            lambda path: self._batch_panel.load_csv_file(path, _from_sync=True)
+        )
+        self._batch_panel.on_csv_loaded_callback = (
+            lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
+        )
 
         self._csv_panel = CSVEditorPanel(notebook)
         notebook.add(self._csv_panel, text="CSV Editor")

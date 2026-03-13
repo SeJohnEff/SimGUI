@@ -40,6 +40,10 @@ class ProgramSIMPanel(ttk.Frame):
         self._field_vars: dict[str, tk.StringVar] = {}
         self._field_entries: dict[str, ttk.Entry] = {}
         self._step = 0  # 0=ready, 1=detected, 2=authenticated
+
+        # Callback set by main.py for cross-tab sync
+        self.on_csv_loaded_callback = None
+
         self._build_ui()
         self._on_mode_change()
 
@@ -75,6 +79,11 @@ class ProgramSIMPanel(ttk.Frame):
                    command=self._on_browse_csv).pack(side=tk.LEFT, padx=(pad, 0))
         self._csv_count_lbl = ttk.Label(csv_bar, text="")
         self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+
+        # Filename label
+        self._csv_filename_lbl = ttk.Label(self._csv_frame, text="",
+                                           style="Small.TLabel")
+        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
 
         self._card_tree = ttk.Treeview(
             self._csv_frame, columns=("iccid", "imsi", "adm1"),
@@ -198,13 +207,28 @@ class ProgramSIMPanel(ttk.Frame):
             filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
+        self.load_csv_file(path)
+
+    def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
+        """Load a CSV file and refresh the card tree.
+
+        Called by Browse button or by cross-tab sync from BatchProgramPanel.
+        *_from_sync* prevents infinite callback loops.
+        """
         if not self._csv.load_csv(path):
-            messagebox.showerror("Error", f"Failed to load {path}")
-            return
+            if not _from_sync:
+                messagebox.showerror("Error", f"Failed to load {path}")
+            return False
         self._csv_path_var.set(path)
+        import os
+        self._csv_filename_lbl.configure(text=os.path.basename(path))
         self._csv_count_lbl.configure(
             text=f"({self._csv.get_card_count()} cards)")
         self._refresh_card_tree()
+        # Cross-tab sync
+        if not _from_sync and callable(self.on_csv_loaded_callback):
+            self.on_csv_loaded_callback(path)
+        return True
 
     def _refresh_card_tree(self):
         self._card_tree.delete(*self._card_tree.get_children())

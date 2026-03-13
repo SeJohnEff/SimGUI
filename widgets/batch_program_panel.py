@@ -16,10 +16,46 @@ from managers.csv_manager import CSVManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
 from utils.iccid_utils import (
-    generate_iccid, generate_imsi,
-    COUNTRY_CODES, SITE_CODES, FPLMN_BY_COUNTRY,
+    generate_iccid, generate_imsi, get_fplmn_for_site,
+    SITE_REGISTER, SIM_TYPES, FPLMN_BY_COUNTRY,
 )
 from widgets.tooltip import add_tooltip
+
+
+def apply_imsi_override(cards: list[dict[str, str]], imsi_base: str,
+                        start_seq: int = 1) -> list[dict[str, str]]:
+    """Return copies of *cards* with IMSI replaced by base + 5-digit seq.
+
+    Args:
+        cards: List of card data dicts.
+        imsi_base: First 10 digits of the IMSI (MCC+MNC + SSSS + T).
+        start_seq: Sequence number for the first card (default 1).
+
+    Returns:
+        New list of card dicts — ICCID and all other fields are untouched.
+    """
+    result: list[dict[str, str]] = []
+    for i, card in enumerate(cards):
+        new_card = dict(card)
+        new_card["IMSI"] = f"{imsi_base}{(start_seq + i):05d}"
+        result.append(new_card)
+    return result
+
+
+def apply_range_filter(cards: list[dict[str, str]], start: int,
+                       count: int) -> list[dict[str, str]]:
+    """Return a slice of *cards* using 1-based *start* and *count*.
+
+    Args:
+        cards: Full list of card data dicts.
+        start: 1-based start row.
+        count: Number of cards to include.
+
+    Returns:
+        Sublist (shallow copies of dicts).
+    """
+    idx = max(start - 1, 0)
+    return [dict(c) for c in cards[idx:idx + count]]
 
 
 class BatchProgramPanel(ttk.Frame):
@@ -32,10 +68,14 @@ class BatchProgramPanel(ttk.Frame):
         self._settings = settings
         self._batch_mgr = BatchManager(card_manager)
         self._csv = CSVManager()
+        self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV
         self._preview_data: list[dict[str, str]] = []
 
         self._source_var = tk.StringVar(value="generate")
         self._adm1_source_var = tk.StringVar(value="csv")
+
+        # Callback set by main.py for cross-tab sync
+        self.on_csv_loaded_callback = None
 
         # Wire callbacks
         self._batch_mgr.on_progress = self._on_progress
@@ -67,7 +107,7 @@ class BatchProgramPanel(ttk.Frame):
         # ---------- CSV section ----------
         self._csv_section = ttk.LabelFrame(self, text="CSV File")
         csv_bar = ttk.Frame(self._csv_section)
-        csv_bar.pack(fill=tk.X, padx=pad, pady=pad)
+        csv_bar.pack(fill=tk.X, padx=pad, pady=(pad, 0))
         self._csv_path_var = tk.StringVar()
         ttk.Entry(csv_bar, textvariable=self._csv_path_var,
                   state="readonly", width=40).pack(
@@ -77,79 +117,191 @@ class BatchProgramPanel(ttk.Frame):
         self._csv_count_lbl = ttk.Label(csv_bar, text="")
         self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
 
+        # Filename label
+        self._csv_filename_lbl = ttk.Label(self._csv_section, text="",
+                                           style="Small.TLabel")
+        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
+
+        # -- Range selection row --
+        range_row = ttk.Frame(self._csv_section)
+        range_row.pack(fill=tk.X, padx=pad, pady=(pad // 2, 0))
+        ttk.Label(range_row, text="Start Row:").pack(side=tk.LEFT)
+        self._range_start_var = tk.StringVar(value="1")
+        self._range_start_spin = ttk.Spinbox(
+            range_row, textvariable=self._range_start_var,
+            from_=1, to=9999, width=6, command=self._on_range_change)
+        self._range_start_spin.pack(side=tk.LEFT, padx=(4, pad))
+        self._range_start_spin.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._range_start_spin,
+                    "1-based row to start from in the CSV.\n"
+                    "Example: 5 = start from the 5th card.")
+
+        ttk.Label(range_row, text="Count:").pack(side=tk.LEFT)
+        self._range_count_var = tk.StringVar(value="0")
+        self._range_count_spin = ttk.Spinbox(
+            range_row, textvariable=self._range_count_var,
+            from_=0, to=9999, width=6, command=self._on_range_change)
+        self._range_count_spin.pack(side=tk.LEFT, padx=(4, pad))
+        self._range_count_spin.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._range_count_spin,
+                    "Number of cards to program.\n"
+                    "0 = all remaining cards from start row.")
+
+        self._range_info_lbl = ttk.Label(range_row, text="")
+        self._range_info_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+
+        # -- IMSI Override row --
+        imsi_row = ttk.Frame(self._csv_section)
+        imsi_row.pack(fill=tk.X, padx=pad, pady=(pad // 2, pad))
+        self._imsi_override_var = tk.BooleanVar(value=False)
+        self._imsi_override_chk = ttk.Checkbutton(
+            imsi_row, text="Override IMSI base:",
+            variable=self._imsi_override_var,
+            command=self._on_range_change)
+        self._imsi_override_chk.pack(side=tk.LEFT)
+        add_tooltip(self._imsi_override_chk,
+                    "Replace the IMSI for each card with a custom base\n"
+                    "+ 5-digit sequence number (00001, 00002, 00003...).\n"
+                    "ICCID is never modified.")
+        self._imsi_base_var = tk.StringVar()
+        self._imsi_base_entry = ttk.Entry(
+            imsi_row, textvariable=self._imsi_base_var, width=16)
+        self._imsi_base_entry.pack(side=tk.LEFT, padx=(4, pad))
+        self._imsi_base_entry.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(self._imsi_base_entry,
+                    "First 10 digits of the IMSI.\n"
+                    "The last 5 digits (sequence) are auto-generated.\n"
+                    "Example: 9998800010")
+        ttk.Button(imsi_row, text="Apply",
+                   command=self._on_range_change).pack(side=tk.LEFT)
+
         # ---------- Generate Sequence section ----------
         self._gen_section = ttk.LabelFrame(self, text="Batch Template")
 
         _FIELD_TOOLTIPS = {
             "mcc_mnc": "Mobile Country Code + Mobile Network Code.\nExample: 99988 (MCC=999, MNC=88)",
-            "country_code": (
-                "3-digit E.164 country code, zero-padded.\n"
-                "Example: 044 (UK), 046 (Sweden), 001 (US)"
+            "site": (
+                "Site from the Teleaura Site Register.\n"
+                "Select from dropdown or type a 4-digit site ID.\n"
+                "Example: 0001 = uk1, 0002 = se1"
             ),
-            "site_index": (
-                "3-digit site number within country.\n"
-                "Example: 001 (primary DC), 002 (DR site)\n"
-                "Maps to DC Naming Standard: uk1=044 001"
+            "sim_type": (
+                "SIM type digit.\n"
+                "Select from dropdown or type a digit (0-9).\n"
+                "0=USIM, 1=USIM+SUCI, 2=eSIM, 9=Test/Dev"
             ),
-            "customer_id": (
-                "2-digit customer/tenant identifier.\n"
-                "00=Internal, 01-79=Enterprise, 80-89=IoT,\n"
-                "90-98=Partners, 99=Demo\n"
-                "Example: 03 (Boliden)"
-            ),
-            "start": "First SIM sequence number.\nExample: 1 \u2192 SIM 01",
-            "count": "Number of SIMs to generate (max 100).\nExample: 20 \u2192 SIMs 01 to 20",
+            "start": "First SIM sequence number (0-99999).\nExample: 1 \u2192 SIM 00001",
+            "count": "Number of SIMs to generate (max 100000).\nExample: 20 \u2192 SIMs 00001 to 00020",
             "spn": "Service Provider Name stored on the SIM.\nExample: BOLIDEN",
             "language": "ISO 639-1 language code for the SIM.\nExample: EN (English), SV (Swedish)",
-            "fplmn": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
+            "fplmn": "Forbidden PLMNs, semicolon-separated.\nAuto-populated from site's country, editable.\nExample: 24007;24024;24001;24008;24002",
         }
 
-        fields = [
-            ("mcc_mnc", "MCC+MNC:", "last_mcc_mnc", 10),
-            ("country_code", "Country Code:", "last_country_code", 6),
-            ("site_index", "Site Index:", "last_site_index", 6),
-            ("customer_id", "Customer ID:", "last_customer_id", 6),
-            ("start", "Start Number:", None, 6),
-            ("count", "Count:", "last_batch_size", 6),
-            ("spn", "SPN:", "last_spn", 20),
-            ("language", "Language:", "last_language", 6),
-            ("fplmn", "FPLMN:", "last_fplmn", 40),
-        ]
         self._gen_vars: dict[str, tk.StringVar] = {}
         inner = ttk.Frame(self._gen_section)
         inner.pack(fill=tk.X, padx=pad, pady=pad)
-        for i, (key, label, _, width) in enumerate(fields):
-            lbl = ttk.Label(inner, text=label)
-            lbl.grid(row=i, column=0, sticky=tk.W, padx=(0, pad), pady=2)
-            var = tk.StringVar()
-            entry = ttk.Entry(inner, textvariable=var, width=width)
-            entry.grid(row=i, column=1, sticky=tk.W, pady=2)
-            self._gen_vars[key] = var
-            if key in _FIELD_TOOLTIPS:
-                add_tooltip(lbl, _FIELD_TOOLTIPS[key])
-                add_tooltip(entry, _FIELD_TOOLTIPS[key])
-            # Bind change events for country_code and site_index
-            if key == "country_code":
-                var.trace_add("write", self._on_country_code_change)
-            if key == "site_index":
-                var.trace_add("write", self._on_site_field_change)
 
-        # Site Code read-only label (shows DC Naming Standard code)
-        site_code_row_idx = len(fields)
-        site_code_lbl = ttk.Label(inner, text="Site Code:")
-        site_code_lbl.grid(row=site_code_row_idx, column=0, sticky=tk.W,
-                           padx=(0, pad), pady=2)
-        self._site_code_var = tk.StringVar(value="")
-        site_code_val = ttk.Label(inner, textvariable=self._site_code_var,
-                                  font=("TkDefaultFont", 10, "bold"))
-        site_code_val.grid(row=site_code_row_idx, column=1, sticky=tk.W, pady=2)
-        add_tooltip(site_code_lbl,
-                    "DC Naming Standard site code.\n"
-                    "Auto-derived from Country Code + Site Index.\n"
-                    "Example: uk1 (044 + 001)")
+        row_idx = 0
 
-        self._gen_vars["start"].set("1")
-        self._gen_vars["count"].set("20")
+        # MCC+MNC entry
+        lbl = ttk.Label(inner, text="MCC+MNC:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar()
+        entry = ttk.Entry(inner, textvariable=var, width=10)
+        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["mcc_mnc"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["mcc_mnc"])
+        add_tooltip(entry, _FIELD_TOOLTIPS["mcc_mnc"])
+        row_idx += 1
+
+        # Site combobox
+        lbl = ttk.Label(inner, text="Site:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        site_values = [
+            f"{sid} \u2014 {info['code']} ({info['country']})"
+            for sid, info in SITE_REGISTER.items()
+        ]
+        self._site_var = tk.StringVar()
+        self._site_combo = ttk.Combobox(
+            inner, textvariable=self._site_var,
+            values=site_values, width=30)
+        self._site_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["site"] = self._site_var
+        self._site_combo.bind("<<ComboboxSelected>>", self._on_site_change)
+        self._site_combo.bind("<FocusOut>", self._on_site_change)
+        add_tooltip(lbl, _FIELD_TOOLTIPS["site"])
+        add_tooltip(self._site_combo, _FIELD_TOOLTIPS["site"])
+        row_idx += 1
+
+        # SIM Type combobox
+        lbl = ttk.Label(inner, text="SIM Type:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        sim_type_values = [
+            f"{k} \u2014 {v}" for k, v in SIM_TYPES.items()
+        ]
+        self._sim_type_var = tk.StringVar()
+        self._sim_type_combo = ttk.Combobox(
+            inner, textvariable=self._sim_type_var,
+            values=sim_type_values, width=20)
+        self._sim_type_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["sim_type"] = self._sim_type_var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["sim_type"])
+        add_tooltip(self._sim_type_combo, _FIELD_TOOLTIPS["sim_type"])
+        row_idx += 1
+
+        # Start Sequence spinbox
+        lbl = ttk.Label(inner, text="Start Sequence:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar(value="1")
+        spinbox = ttk.Spinbox(inner, textvariable=var, from_=0, to=99999, width=8)
+        spinbox.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["start"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["start"])
+        add_tooltip(spinbox, _FIELD_TOOLTIPS["start"])
+        row_idx += 1
+
+        # Count spinbox
+        lbl = ttk.Label(inner, text="Count:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar(value="20")
+        spinbox = ttk.Spinbox(inner, textvariable=var, from_=1, to=100000, width=8)
+        spinbox.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["count"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["count"])
+        add_tooltip(spinbox, _FIELD_TOOLTIPS["count"])
+        row_idx += 1
+
+        # SPN entry
+        lbl = ttk.Label(inner, text="SPN:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar()
+        entry = ttk.Entry(inner, textvariable=var, width=20)
+        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["spn"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["spn"])
+        add_tooltip(entry, _FIELD_TOOLTIPS["spn"])
+        row_idx += 1
+
+        # Language entry
+        lbl = ttk.Label(inner, text="Language:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar()
+        entry = ttk.Entry(inner, textvariable=var, width=6)
+        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["language"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["language"])
+        add_tooltip(entry, _FIELD_TOOLTIPS["language"])
+        row_idx += 1
+
+        # FPLMN entry
+        lbl = ttk.Label(inner, text="FPLMN:")
+        lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
+        var = tk.StringVar()
+        entry = ttk.Entry(inner, textvariable=var, width=40)
+        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["fplmn"] = var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["fplmn"])
+        add_tooltip(entry, _FIELD_TOOLTIPS["fplmn"])
 
         # ADM1 source
         adm_row = ttk.Frame(self._gen_section)
@@ -229,7 +381,7 @@ class BatchProgramPanel(ttk.Frame):
 
         # Card-ready button (for hardware mode prompts)
         self._card_ready_btn = ttk.Button(
-            self._exec_frame, text="Card Inserted — Continue",
+            self._exec_frame, text="Card Inserted \u2014 Continue",
             command=self._on_card_ready, state=tk.DISABLED)
         self._card_ready_btn.pack(anchor=tk.W, padx=pad, pady=pad // 2)
 
@@ -250,24 +402,17 @@ class BatchProgramPanel(ttk.Frame):
         ttk.Button(self._summary_frame, text="Export Results CSV...",
                    command=self._on_export_results).pack(side=tk.LEFT)
 
-    # ---- country/site auto-population -----------------------------------
+    # ---- site change auto-population ------------------------------------
 
-    def _on_country_code_change(self, *_args):
-        """Auto-populate FPLMN and update site code when country changes."""
-        cc = self._gen_vars["country_code"].get().strip()
-        if cc in FPLMN_BY_COUNTRY:
-            self._gen_vars["fplmn"].set(FPLMN_BY_COUNTRY[cc])
-        self._update_site_code()
-
-    def _on_site_field_change(self, *_args):
-        """Update site code label when site index changes."""
-        self._update_site_code()
-
-    def _update_site_code(self):
-        cc = self._gen_vars["country_code"].get().strip()
-        si = self._gen_vars["site_index"].get().strip()
-        key = cc + si
-        self._site_code_var.set(SITE_CODES.get(key, ""))
+    def _on_site_change(self, *_args):
+        """Auto-populate FPLMN when site selection changes."""
+        selected = self._site_var.get()
+        if not selected:
+            return
+        site_id = selected.split()[0]  # e.g. "0001"
+        fplmn = get_fplmn_for_site(site_id)
+        if fplmn:
+            self._gen_vars["fplmn"].set(fplmn)
 
     # ---- source toggle --------------------------------------------------
 
@@ -296,17 +441,77 @@ class BatchProgramPanel(ttk.Frame):
             filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
         if not path:
             return
+        self.load_csv_file(path)
+
+    def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
+        """Load a CSV file and refresh the preview.
+
+        Called by Browse button or by cross-tab sync from ProgramSIMPanel.
+        *_from_sync* prevents infinite callback loops.
+        """
         if not self._csv.load_csv(path):
-            messagebox.showerror("Error", f"Failed to load {path}")
-            return
+            if not _from_sync:
+                messagebox.showerror("Error", f"Failed to load {path}")
+            return False
         self._csv_path_var.set(path)
-        self._csv_count_lbl.configure(
-            text=f"({self._csv.get_card_count()} cards)")
-        self._preview_data = []
-        for i in range(self._csv.get_card_count()):
+        import os
+        self._csv_filename_lbl.configure(text=os.path.basename(path))
+        n = self._csv.get_card_count()
+        self._csv_count_lbl.configure(text=f"({n} cards)")
+        # Store all cards and reset range
+        self._all_csv_cards = []
+        for i in range(n):
             card = self._csv.get_card(i)
             if card:
-                self._preview_data.append(dict(card))
+                self._all_csv_cards.append(dict(card))
+        self._range_start_var.set("1")
+        self._range_count_var.set("0")
+        self._apply_csv_filters()
+        # Cross-tab sync
+        if not _from_sync and callable(self.on_csv_loaded_callback):
+            self.on_csv_loaded_callback(path)
+        return True
+
+    def _on_range_change(self):
+        """Called when start row, count, or IMSI override changes."""
+        self._apply_csv_filters()
+
+    def _apply_csv_filters(self):
+        """Rebuild _preview_data from _all_csv_cards with range + IMSI override."""
+        if not self._all_csv_cards:
+            self._preview_data = []
+            self._range_info_lbl.configure(text="")
+            self._refresh_preview()
+            return
+
+        total = len(self._all_csv_cards)
+
+        # Parse range
+        try:
+            start = max(1, int(self._range_start_var.get()))
+        except ValueError:
+            start = 1
+        try:
+            count = max(0, int(self._range_count_var.get()))
+        except ValueError:
+            count = 0
+        if count == 0:
+            count = total - (start - 1)
+
+        # Apply range filter
+        filtered = apply_range_filter(self._all_csv_cards, start, count)
+
+        # Apply IMSI override if enabled
+        if self._imsi_override_var.get():
+            base = self._imsi_base_var.get().strip()
+            if len(base) == 10 and base.isdigit():
+                filtered = apply_imsi_override(filtered, base, start_seq=start)
+
+        self._preview_data = filtered
+        actual = len(filtered)
+        end_row = start + actual - 1 if actual else start
+        self._range_info_lbl.configure(
+            text=f"Rows {start}\u2013{end_row} of {total} ({actual} cards)")
         self._refresh_preview()
 
     def _on_browse_adm_csv(self):
@@ -321,9 +526,6 @@ class BatchProgramPanel(ttk.Frame):
     def _on_preview(self):
         try:
             mcc_mnc = self._gen_vars["mcc_mnc"].get().strip()
-            country_code = self._gen_vars["country_code"].get().strip()
-            site_index = self._gen_vars["site_index"].get().strip()
-            customer_id = self._gen_vars["customer_id"].get().strip()
             start = int(self._gen_vars["start"].get().strip())
             count = int(self._gen_vars["count"].get().strip())
             spn = self._gen_vars["spn"].get().strip()
@@ -333,18 +535,27 @@ class BatchProgramPanel(ttk.Frame):
             messagebox.showerror("Error", "Start and Count must be integers")
             return
 
-        if not mcc_mnc or not country_code or not site_index or not customer_id:
-            messagebox.showerror("Error",
-                                 "MCC+MNC, Country Code, Site Index, and Customer ID are required")
+        # Extract site_id from combo selection
+        site_sel = self._site_var.get()
+        if not site_sel:
+            messagebox.showerror("Error", "Please select a Site")
             return
+        site_id = site_sel.split()[0]
 
-        if count > 100:
-            messagebox.showerror("Error",
-                                 "Count cannot exceed 100 (SIM sequence range is 00-99)")
+        # Extract sim_type from combo selection
+        sim_type_sel = self._sim_type_var.get()
+        if not sim_type_sel:
+            messagebox.showerror("Error", "Please select a SIM Type")
+            return
+        sim_type = sim_type_sel.split()[0]
+
+        if not mcc_mnc:
+            messagebox.showerror("Error", "MCC+MNC is required")
             return
 
         # Resolve site code for display
-        site_code = SITE_CODES.get(country_code + site_index, "")
+        site_info = SITE_REGISTER.get(site_id, {})
+        site_code = site_info.get("code", "")
 
         # Load ADM1 from CSV if applicable
         adm1_map: dict[str, str] = {}
@@ -356,8 +567,8 @@ class BatchProgramPanel(ttk.Frame):
 
         self._preview_data = []
         for seq in range(start, start + count):
-            imsi = generate_imsi(mcc_mnc, country_code, site_index, customer_id, seq)
-            iccid = generate_iccid(mcc_mnc, country_code, site_index, customer_id, seq)
+            imsi = generate_imsi(mcc_mnc, site_id, sim_type, seq)
+            iccid = generate_iccid(mcc_mnc, site_id, sim_type, seq)
             adm1 = uniform_adm1 or adm1_map.get(iccid, "")
             self._preview_data.append({
                 "IMSI": imsi,
@@ -447,7 +658,7 @@ class BatchProgramPanel(ttk.Frame):
             self._progress_bar["maximum"] = total
             self._progress_bar["value"] = current
             self._progress_lbl.configure(
-                text=f"Card {current + 1} of {total} — {msg}")
+                text=f"Card {current + 1} of {total} \u2014 {msg}")
         self.after(0, _do)
 
     def _on_card_result(self, result: CardResult):
@@ -526,11 +737,28 @@ class BatchProgramPanel(ttk.Frame):
     # ---- settings persistence ------------------------------------------
 
     def _load_settings(self):
+        # MCC+MNC
+        val = self._settings.get("last_mcc_mnc", "")
+        if val:
+            self._gen_vars["mcc_mnc"].set(str(val))
+
+        # Site — match by site_id prefix
+        last_site = self._settings.get("last_site", "")
+        if last_site:
+            for i, (sid, info) in enumerate(SITE_REGISTER.items()):
+                if sid == last_site:
+                    self._site_combo.current(i)
+                    break
+
+        # SIM Type — match by type digit prefix
+        last_sim_type = self._settings.get("last_sim_type", "")
+        if last_sim_type:
+            sim_type_keys = list(SIM_TYPES.keys())
+            if last_sim_type in sim_type_keys:
+                self._sim_type_combo.current(sim_type_keys.index(last_sim_type))
+
+        # SPN, Language, FPLMN
         for key, skey in [
-            ("mcc_mnc", "last_mcc_mnc"),
-            ("country_code", "last_country_code"),
-            ("site_index", "last_site_index"),
-            ("customer_id", "last_customer_id"),
             ("spn", "last_spn"),
             ("language", "last_language"),
             ("fplmn", "last_fplmn"),
@@ -538,16 +766,25 @@ class BatchProgramPanel(ttk.Frame):
             val = self._settings.get(skey, "")
             if val and key in self._gen_vars:
                 self._gen_vars[key].set(str(val))
+
         batch_size = self._settings.get("last_batch_size", 20)
         if batch_size:
             self._gen_vars["count"].set(str(batch_size))
 
     def _save_settings(self):
+        self._settings.set("last_mcc_mnc", self._gen_vars["mcc_mnc"].get().strip())
+
+        # Save site_id (first token from combo)
+        site_sel = self._site_var.get()
+        if site_sel:
+            self._settings.set("last_site", site_sel.split()[0])
+
+        # Save sim_type digit (first token from combo)
+        sim_type_sel = self._sim_type_var.get()
+        if sim_type_sel:
+            self._settings.set("last_sim_type", sim_type_sel.split()[0])
+
         for key, skey in [
-            ("mcc_mnc", "last_mcc_mnc"),
-            ("country_code", "last_country_code"),
-            ("site_index", "last_site_index"),
-            ("customer_id", "last_customer_id"),
             ("spn", "last_spn"),
             ("language", "last_language"),
             ("fplmn", "last_fplmn"),
