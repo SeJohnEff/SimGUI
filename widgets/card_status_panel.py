@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from theme import ModernTheme
+from widgets.tooltip import add_tooltip
 
 
 class CardStatusPanel(ttk.LabelFrame):
@@ -54,12 +55,14 @@ class CardStatusPanel(ttk.LabelFrame):
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=len(info_labels) + 1, column=0, columnspan=2,
                        sticky=(tk.W, tk.E), pady=(pad_m, 0))
-        ttk.Button(btn_frame, text="Detect Card",
-                   command=lambda: self.on_detect_callback and self.on_detect_callback()
-                   ).pack(side=tk.LEFT, padx=(0, pad_s))
-        ttk.Button(btn_frame, text="Authenticate",
-                   command=lambda: self.on_authenticate_callback and self.on_authenticate_callback()
-                   ).pack(side=tk.LEFT)
+        _detect_btn = ttk.Button(btn_frame, text="Detect Card",
+                   command=lambda: self.on_detect_callback and self.on_detect_callback())
+        _detect_btn.pack(side=tk.LEFT, padx=(0, pad_s))
+        add_tooltip(_detect_btn, "Detect an inserted SIM card")
+        _auth_btn = ttk.Button(btn_frame, text="Authenticate",
+                   command=lambda: self.on_authenticate_callback and self.on_authenticate_callback())
+        _auth_btn.pack(side=tk.LEFT)
+        add_tooltip(_auth_btn, "Enter ADM1 to authenticate")
 
     def set_status(self, state, message=""):
         colors = {

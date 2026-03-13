@@ -15,6 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from managers.network_storage_manager import NetworkStorageManager
 from theme import ModernTheme
+from widgets.tooltip import add_tooltip
 
 _ALL_FIELDS = [
     "ICCID", "IMSI", "Ki", "OPc", "ADM1",
@@ -76,17 +77,22 @@ class ArtifactExportDialog(tk.Toplevel):
                 value=fname in self._default_fields)
             self._field_vars[fname] = var
             r, c = divmod(i, 3)
-            ttk.Checkbutton(fields_inner, text=fname,
-                            variable=var).grid(
+            _chk = ttk.Checkbutton(fields_inner, text=fname, variable=var)
+            _chk.grid(
                 row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)
+            add_tooltip(_chk, f"Include {fname} in the export file")
 
         # Select all / none
         sel_row = ttk.Frame(fields_frame)
         sel_row.pack(fill=tk.X, padx=pad, pady=(0, pad))
-        ttk.Button(sel_row, text="Select All",
-                   command=self._select_all).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(sel_row, text="Select None",
-                   command=self._select_none).pack(side=tk.LEFT)
+        _sel_all_btn = ttk.Button(sel_row, text="Select All",
+                   command=self._select_all)
+        _sel_all_btn.pack(side=tk.LEFT, padx=(0, 4))
+        add_tooltip(_sel_all_btn, "Select all fields for export")
+        _sel_none_btn = ttk.Button(sel_row, text="Select None",
+                   command=self._select_none)
+        _sel_none_btn.pack(side=tk.LEFT)
+        add_tooltip(_sel_none_btn, "Deselect all fields")
 
         # Destination
         dest_frame = ttk.LabelFrame(self, text="Save to")
@@ -94,19 +100,22 @@ class ArtifactExportDialog(tk.Toplevel):
         dest_inner = ttk.Frame(dest_frame)
         dest_inner.pack(fill=tk.X, padx=pad, pady=pad)
 
-        ttk.Button(dest_inner, text="Browse local...",
-                   command=self._save_local).pack(
-            side=tk.LEFT, padx=(0, pad))
+        _browse_btn = ttk.Button(dest_inner, text="Browse local...",
+                   command=self._save_local)
+        _browse_btn.pack(side=tk.LEFT, padx=(0, pad))
+        add_tooltip(_browse_btn, "Choose a local folder to save the artifact CSV")
 
         # Network share quick-save buttons
         if self._ns:
             for label, mount_path in self._ns.get_active_mount_paths():
-                ttk.Button(
+                _net_btn = ttk.Button(
                     dest_inner,
                     text=f"Save to {label}",
                     command=lambda mp=mount_path, lbl=label: self._save_network(
                         mp, lbl),
-                ).pack(side=tk.LEFT, padx=(0, pad))
+                )
+                _net_btn.pack(side=tk.LEFT, padx=(0, pad))
+                add_tooltip(_net_btn, "Save directly to the mounted network share")
 
         if not (self._ns and self._ns.get_active_mount_paths()):
             ttk.Label(dest_inner, text="No network shares connected",
@@ -117,8 +126,9 @@ class ArtifactExportDialog(tk.Toplevel):
         bottom.pack(fill=tk.X, padx=pad, pady=(0, pad))
         self._status = ttk.Label(bottom, text="", style="Small.TLabel")
         self._status.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(bottom, text="Close",
-                   command=self.destroy).pack(side=tk.RIGHT)
+        _close_btn = ttk.Button(bottom, text="Close", command=self.destroy)
+        _close_btn.pack(side=tk.RIGHT)
+        add_tooltip(_close_btn, "Close this dialog")
 
     # ---- Helpers -------------------------------------------------------
 

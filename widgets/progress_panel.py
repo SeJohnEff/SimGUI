@@ -7,6 +7,8 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk
 
+from widgets.tooltip import add_tooltip
+
 
 class ProgressPanel(ttk.Frame):
     """Panel that displays progress bars and log output for long-running operations."""
@@ -49,8 +51,10 @@ class ProgressPanel(ttk.Frame):
 
         self._cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self.cancel)
         self._cancel_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        add_tooltip(self._cancel_btn, "Stop the current operation")
         self._clear_btn = ttk.Button(btn_frame, text="Clear Log", command=self.clear_log)
         self._clear_btn.pack(side=tk.RIGHT)
+        add_tooltip(self._clear_btn, "Remove all log entries")
 
     # ---- Thread-safe public API ----------------------------------------
 

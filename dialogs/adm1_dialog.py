@@ -10,6 +10,7 @@ from tkinter import messagebox, ttk
 
 from theme import ModernTheme
 from utils.validation import validate_adm1
+from widgets.tooltip import add_tooltip
 
 
 class ADM1Dialog(tk.Toplevel):
@@ -80,6 +81,9 @@ class ADM1Dialog(tk.Toplevel):
         self.adm1_entry = ttk.Entry(main_frame, width=18, font=entry_font)
         self.adm1_entry.grid(row=row, column=1, sticky='ew', pady=(0, pad('small')))
         self.adm1_entry.bind('<Return>', lambda e: self._on_ok())
+        add_tooltip(self.adm1_entry,
+                    "Enter the ADM1 admin key (8 decimal digits or 16 hex characters)\n"
+                    "\u26a0 3 wrong attempts = permanent card lock!")
         row += 1
 
         # Validation label
@@ -93,10 +97,12 @@ class ADM1Dialog(tk.Toplevel):
 
         # Force checkbox
         if self.remaining_attempts < 3:
-            ttk.Checkbutton(
+            _force_chk = ttk.Checkbutton(
                 main_frame, text="Force authentication (risky!)",
                 variable=self.force_auth
-            ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=pad('small'))
+            )
+            _force_chk.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=pad('small'))
+            add_tooltip(_force_chk, "Skip the safety confirmation prompt")
             row += 1
 
         # Buttons
@@ -106,7 +112,10 @@ class ADM1Dialog(tk.Toplevel):
             btn_frame, text="Authenticate", command=self._on_ok,
             state=tk.DISABLED, style='Accent.TButton')
         self.ok_button.grid(row=0, column=0, padx=(0, pad('small')))
-        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).grid(row=0, column=1)
+        add_tooltip(self.ok_button, "Send the ADM1 key to the card")
+        _cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self._on_cancel)
+        _cancel_btn.grid(row=0, column=1)
+        add_tooltip(_cancel_btn, "Close without authenticating")
         row += 1
 
         # Help text

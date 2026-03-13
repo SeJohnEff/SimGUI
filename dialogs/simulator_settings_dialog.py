@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from theme import ModernTheme
+from widgets.tooltip import add_tooltip
 
 
 class SimulatorSettingsDialog:
@@ -39,8 +40,11 @@ class SimulatorSettingsDialog:
         self._csv_var = tk.StringVar(value=settings.card_data_path or "")
         csv_entry = ttk.Entry(csv_row, textvariable=self._csv_var, width=30)
         csv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(csv_row, text="Browse...",
-                   command=self._browse_csv).pack(side=tk.LEFT, padx=(4, 0))
+        add_tooltip(csv_entry, "Path to a CSV file with card data for the simulator")
+        _browse_csv_btn = ttk.Button(csv_row, text="Browse...",
+                   command=self._browse_csv)
+        _browse_csv_btn.pack(side=tk.LEFT, padx=(4, 0))
+        add_tooltip(_browse_csv_btn, "Select a CSV file with SIM card profiles")
 
         # Operation Delay
         ttk.Label(frame, text="Operation Delay (ms):",
@@ -55,6 +59,7 @@ class SimulatorSettingsDialog:
                                 command=lambda v: self._delay_label.configure(
                                     text=str(int(float(v)))))
         delay_scale.grid(row=1, column=1, sticky=tk.EW, pady=(0, 4))
+        add_tooltip(delay_scale, "Artificial delay per operation (ms) — simulates real card timing")
 
         # Error Rate
         ttk.Label(frame, text="Error Rate (%):",
@@ -70,6 +75,7 @@ class SimulatorSettingsDialog:
                                 command=lambda v: self._error_label.configure(
                                     text=str(int(float(v)))))
         error_scale.grid(row=2, column=1, sticky=tk.EW, pady=(0, 4))
+        add_tooltip(error_scale, "Probability of random failures — tests error handling")
 
         # Number of Cards
         ttk.Label(frame, text="Number of Cards:",
@@ -79,17 +85,24 @@ class SimulatorSettingsDialog:
         num_spin = ttk.Spinbox(frame, from_=1, to=50, width=5,
                                textvariable=self._num_var)
         num_spin.grid(row=3, column=1, sticky=tk.W, pady=(0, 4))
+        add_tooltip(num_spin, "Size of the virtual card deck")
 
         # Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=4, column=0, columnspan=3, sticky=tk.EW,
                        pady=(pad, 0))
-        ttk.Button(btn_frame, text="Reset Defaults",
-                   command=self._reset_defaults).pack(side=tk.LEFT)
-        ttk.Button(btn_frame, text="Cancel",
-                   command=self._dlg.destroy).pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Button(btn_frame, text="Apply",
-                   command=self._apply).pack(side=tk.RIGHT)
+        _reset_btn = ttk.Button(btn_frame, text="Reset Defaults",
+                   command=self._reset_defaults)
+        _reset_btn.pack(side=tk.LEFT)
+        add_tooltip(_reset_btn, "Restore all settings to factory defaults")
+        _cancel_btn = ttk.Button(btn_frame, text="Cancel",
+                   command=self._dlg.destroy)
+        _cancel_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        add_tooltip(_cancel_btn, "Discard changes and close")
+        _apply_btn = ttk.Button(btn_frame, text="Apply",
+                   command=self._apply)
+        _apply_btn.pack(side=tk.RIGHT)
+        add_tooltip(_apply_btn, "Save settings and close")
 
         self._dlg.wait_window()
 
