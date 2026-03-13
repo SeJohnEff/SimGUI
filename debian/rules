@@ -12,3 +12,16 @@ override_dh_auto_install:
 	# Desktop entry
 	install -d $(CURDIR)/debian/simgui/usr/share/applications
 	install -m 644 debian/simgui.desktop $(CURDIR)/debian/simgui/usr/share/applications/
+	# Icons into hicolor theme (required for GNOME launcher)
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps
+	install -m 644 assets/simgui-16.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps
+	install -m 644 assets/simgui-32.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps
+	install -m 644 assets/simgui-48.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps
+	install -m 644 assets/simgui-64.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps
+	install -m 644 assets/simgui-128.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps
+	install -m 644 assets/simgui-256.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps/simgui.png
