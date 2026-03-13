@@ -5,9 +5,7 @@
 override_dh_auto_install:
 	# Install application files
 	install -d $(CURDIR)/debian/simgui/opt/simgui
-	cp -r main.py theme.py pyproject.toml requirements.txt \
-		managers/ simulator/ widgets/ dialogs/ utils/ assets/ \
-		$(CURDIR)/debian/simgui/opt/simgui/
+	cp -r main.py theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ $(CURDIR)/debian/simgui/opt/simgui/
 	# Launcher
 	install -d $(CURDIR)/debian/simgui/usr/bin
 	install -m 755 debian/simgui-launcher $(CURDIR)/debian/simgui/usr/bin/simgui
