@@ -63,7 +63,16 @@ fi
 
 # --- Install ----------------------------------------------------
 info "Installing $(basename "$DEB")..."
-dpkg -i "$DEB" 2>/dev/null; apt-get install -f -y -qq > /dev/null
+# dpkg -i will exit non-zero when dependencies are missing — that is
+# expected.  apt-get install -f resolves them immediately after.
+dpkg -i "$DEB" 2>&1 | grep -v "^dpkg:" || true
+apt-get install -f -y -qq
+
+# Verify the package is fully installed
+if ! dpkg -s simgui >/dev/null 2>&1; then
+    error "Installation failed. Run 'sudo apt install -f' manually and check for errors."
+    exit 1
+fi
 
 # --- Done -------------------------------------------------------
 VERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo "unknown")
