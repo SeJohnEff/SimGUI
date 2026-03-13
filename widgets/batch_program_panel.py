@@ -182,18 +182,19 @@ class BatchProgramPanel(ttk.Frame):
             "mcc_mnc": "Mobile Country Code + Mobile Network Code.\nExample: 99988 (MCC=999, MNC=88)",
             "site": (
                 "Site from the Teleaura Site Register.\n"
-                "4-digit site ID mapping to DC Naming Standard code.\n"
-                "Example: 0001 — uk1 (United Kingdom)"
+                "Select from dropdown or type a 4-digit site ID.\n"
+                "Example: 0001 = uk1, 0002 = se1"
             ),
             "sim_type": (
                 "SIM type digit.\n"
+                "Select from dropdown or type a digit (0-9).\n"
                 "0=USIM, 1=USIM+SUCI, 2=eSIM, 9=Test/Dev"
             ),
             "start": "First SIM sequence number (0-99999).\nExample: 1 \u2192 SIM 00001",
             "count": "Number of SIMs to generate (max 100000).\nExample: 20 \u2192 SIMs 00001 to 00020",
             "spn": "Service Provider Name stored on the SIM.\nExample: BOLIDEN",
             "language": "ISO 639-1 language code for the SIM.\nExample: EN (English), SV (Swedish)",
-            "fplmn": "Forbidden PLMNs, semicolon-separated.\nAuto-populated from site's country.\nExample: 24007;24024;24001;24008;24002",
+            "fplmn": "Forbidden PLMNs, semicolon-separated.\nAuto-populated from site's country, editable.\nExample: 24007;24024;24001;24008;24002",
         }
 
         self._gen_vars: dict[str, tk.StringVar] = {}
@@ -223,10 +224,11 @@ class BatchProgramPanel(ttk.Frame):
         self._site_var = tk.StringVar()
         self._site_combo = ttk.Combobox(
             inner, textvariable=self._site_var,
-            values=site_values, state="readonly", width=30)
+            values=site_values, width=30)
         self._site_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
         self._gen_vars["site"] = self._site_var
         self._site_combo.bind("<<ComboboxSelected>>", self._on_site_change)
+        self._site_combo.bind("<FocusOut>", self._on_site_change)
         add_tooltip(lbl, _FIELD_TOOLTIPS["site"])
         add_tooltip(self._site_combo, _FIELD_TOOLTIPS["site"])
         row_idx += 1
@@ -240,7 +242,7 @@ class BatchProgramPanel(ttk.Frame):
         self._sim_type_var = tk.StringVar()
         self._sim_type_combo = ttk.Combobox(
             inner, textvariable=self._sim_type_var,
-            values=sim_type_values, state="readonly", width=20)
+            values=sim_type_values, width=20)
         self._sim_type_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
         self._gen_vars["sim_type"] = self._sim_type_var
         add_tooltip(lbl, _FIELD_TOOLTIPS["sim_type"])
