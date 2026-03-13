@@ -1,9 +1,12 @@
 """Utility functions for SimGUI."""
 
-from utils.validation import validate_adm1, validate_imsi, validate_iccid, validate_hex_field
 from utils.iccid_utils import (
-    compute_luhn_check, validate_luhn, generate_imsi, generate_iccid,
+    compute_luhn_check,
+    generate_iccid,
+    generate_imsi,
+    validate_luhn,
 )
+from utils.validation import validate_adm1, validate_hex_field, validate_iccid, validate_imsi
 
 __all__ = ['validate_adm1', 'validate_imsi', 'validate_iccid', 'validate_hex_field',
            'compute_luhn_check', 'validate_luhn', 'generate_imsi', 'generate_iccid']

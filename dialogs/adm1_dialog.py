@@ -6,7 +6,7 @@ with input validation and attempt tracking.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, ttk
 
 from theme import ModernTheme
 from utils.validation import validate_adm1

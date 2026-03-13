@@ -7,9 +7,9 @@ import tempfile
 import pytest
 
 from managers.network_storage_manager import (
+    MOUNT_BASE,
     NetworkStorageManager,
     StorageProfile,
-    MOUNT_BASE,
 )
 from managers.settings_manager import SettingsManager
 

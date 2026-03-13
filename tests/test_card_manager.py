@@ -1,6 +1,7 @@
 """Tests for managers.card_manager module."""
 
 import pytest
+
 from managers.card_manager import CardManager, CardType, CLIBackend
 
 

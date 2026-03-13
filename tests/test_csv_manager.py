@@ -4,7 +4,8 @@ import os
 import tempfile
 
 import pytest
-from managers.csv_manager import CSVManager, STANDARD_COLUMNS
+
+from managers.csv_manager import STANDARD_COLUMNS, CSVManager
 
 
 class TestCSVManagerInit:

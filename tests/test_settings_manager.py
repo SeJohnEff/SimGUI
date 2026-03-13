@@ -5,7 +5,8 @@ import os
 import tempfile
 
 import pytest
-from managers.settings_manager import SettingsManager, _DEFAULTS
+
+from managers.settings_manager import _DEFAULTS, SettingsManager
 
 
 @pytest.fixture

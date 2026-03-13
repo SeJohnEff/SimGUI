@@ -8,7 +8,6 @@ import pytest
 
 from managers.csv_manager import CSVManager, _normalize_column
 
-
 # -- Test data ---------------------------------------------------------------
 
 WHITESPACE_HEADER = "PIN1 PUK1 PIN2 PUK2 ADM ICCID IMSI ACC MSISDN KI OPC"

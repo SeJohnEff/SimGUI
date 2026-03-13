@@ -9,9 +9,9 @@ import pytest
 # Ensure the project root is on sys.path so imports work
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from managers.csv_manager import CSVManager, STANDARD_COLUMNS
-from managers.card_manager import CardManager
 from managers.backup_manager import BackupManager
+from managers.card_manager import CardManager
+from managers.csv_manager import STANDARD_COLUMNS, CSVManager
 
 
 @pytest.fixture

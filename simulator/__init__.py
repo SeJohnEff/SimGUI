@@ -1,9 +1,9 @@
 """SIM programmer simulator package."""
 
-from simulator.virtual_card import VirtualCard
 from simulator.card_deck import generate_deck, load_from_csv
-from simulator.simulator_backend import SimulatorBackend
 from simulator.settings import SimulatorSettings
+from simulator.simulator_backend import SimulatorBackend
+from simulator.virtual_card import VirtualCard
 
 __all__ = [
     "VirtualCard",

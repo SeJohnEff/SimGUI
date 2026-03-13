@@ -12,10 +12,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_manager import CardManager
-from simulator.simulator_backend import SimulatorBackend
 from simulator.settings import SimulatorSettings
+from simulator.simulator_backend import SimulatorBackend
 from simulator.virtual_card import VirtualCard
-
 
 # ---------------------------------------------------------------------------
 # Helpers

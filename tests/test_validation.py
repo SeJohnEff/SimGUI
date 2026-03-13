@@ -1,10 +1,16 @@
 """Tests for utils.validation module."""
 
 import pytest
+
 from utils.validation import (
-    validate_adm1, validate_imsi, validate_iccid,
-    validate_hex_field, validate_card_data,
-    validate_country_code, validate_site_index, validate_customer_id,
+    validate_adm1,
+    validate_card_data,
+    validate_country_code,
+    validate_customer_id,
+    validate_hex_field,
+    validate_iccid,
+    validate_imsi,
+    validate_site_index,
 )
 
 

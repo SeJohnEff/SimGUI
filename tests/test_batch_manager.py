@@ -4,6 +4,7 @@ import threading
 import time
 
 import pytest
+
 from managers.batch_manager import BatchManager, BatchState, CardResult
 from managers.card_manager import CardManager
 

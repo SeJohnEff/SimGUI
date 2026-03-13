@@ -7,9 +7,9 @@ Provides a consistent look and feel across the application.
 Self-contained: no dependency on the CLI tool.
 """
 
+import platform
 import tkinter as tk
 from tkinter import ttk
-import platform
 
 
 def _platform_fonts():

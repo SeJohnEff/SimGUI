@@ -4,7 +4,6 @@ import pytest
 
 from widgets.batch_program_panel import apply_imsi_override, apply_range_filter
 
-
 # ---- Sample data --------------------------------------------------------
 
 def _make_cards(n: int = 5) -> list[dict[str, str]]:
