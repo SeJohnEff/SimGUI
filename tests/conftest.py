@@ -7,6 +7,7 @@ import tempfile
 import pytest
 
 # Ensure the project root is on sys.path so imports work
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.backup_manager import BackupManager
