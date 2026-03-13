@@ -4,11 +4,19 @@ Network Storage Dialog — Configure and connect NFS / SMB shares.
 Allows the user to create, edit, test, connect, and disconnect
 network storage profiles.  Profiles are persisted across sessions.
 
+UX flow:
+  1. Fill in the form (or pick a discovered server).
+  2. Click **Save & Connect** — profile is saved and mounted in one step.
+  3. To tweak an existing profile, select it, edit, click **Update** or
+     **Save & Connect** again.
+
 UX principles:
 - User enters plain hostname / IP — never ``smb://`` or ``nfs://``
 - Server field is a combobox with history of previously used servers
 - "Remember credentials" checkbox controls secure credential file
 - All input is sanitised (protocol prefixes stripped automatically)
+- No phantom profiles — "New" just clears the form, nothing is persisted
+  until the user explicitly saves.
 """
 
 import threading
@@ -65,6 +73,15 @@ def _sanitise_share(raw: str, protocol: str) -> str:
     return s
 
 
+def _auto_name(server: str, share: str, protocol: str) -> str:
+    """Generate a human-friendly profile name from server + share."""
+    if server and share:
+        return f"{share} on {server} ({protocol.upper()})"
+    if server:
+        return f"{server} ({protocol.upper()})"
+    return "New connection"
+
+
 class NetworkStorageDialog(tk.Toplevel):
     """Modal dialog for managing network storage connections."""
 
@@ -82,6 +99,7 @@ class NetworkStorageDialog(tk.Toplevel):
         self._current_idx: int | None = None
         self._field_vars: dict[str, tk.BooleanVar] = {}
         self._tooltip_win: tk.Toplevel | None = None
+        self._dirty: bool = False  # True when form has unsaved changes
 
         # Build server history from saved profiles
         self._server_history: list[str] = self._build_server_history()
@@ -92,6 +110,9 @@ class NetworkStorageDialog(tk.Toplevel):
         if self._profiles:
             self._profile_list.selection_set(0)
             self._on_profile_select(None)
+        else:
+            # First-time: form is blank, ready to fill
+            self._enter_new_mode()
 
     # ---- helpers -------------------------------------------------------
 
@@ -138,7 +159,7 @@ class NetworkStorageDialog(tk.Toplevel):
         self._canvas.bind_all("<Button-4>", self._on_mousewheel)
         self._canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-        # Top: profile list + add/remove buttons
+        # ── Saved connections ──────────────────────────────────────────
         top = ttk.Frame(self._body)
         top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
@@ -147,32 +168,36 @@ class NetworkStorageDialog(tk.Toplevel):
 
         btn_row = ttk.Frame(top)
         btn_row.pack(side=tk.RIGHT)
-        ttk.Button(btn_row, text="Add", width=6,
-                   command=self._on_add).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_row, text="Remove", width=8,
-                   command=self._on_remove).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_row, text="New", width=6,
+                   command=self._on_new).pack(side=tk.LEFT, padx=2)
+        self._remove_btn = ttk.Button(btn_row, text="Remove", width=8,
+                                       command=self._on_remove)
+        self._remove_btn.pack(side=tk.LEFT, padx=2)
 
         self._profile_list = tk.Listbox(self._body, height=4,
                                          exportselection=False)
         self._profile_list.pack(fill=tk.X, padx=pad, pady=(4, pad))
         self._profile_list.bind("<<ListboxSelect>>", self._on_profile_select)
 
-        # Middle: connection details form
+        # ── Connection Details form ────────────────────────────────────
         form = ttk.LabelFrame(self._body, text="Connection Details")
         form.pack(fill=tk.X, padx=pad, pady=(0, pad))
         form_inner = ttk.Frame(form)
         form_inner.pack(fill=tk.X, padx=pad, pady=pad)
 
         row = 0
-        # Label
+        # Name (auto-generated if left blank)
         ttk.Label(form_inner, text="Name:").grid(
             row=row, column=0, sticky=tk.W, pady=2)
         self._label_var = tk.StringVar()
         ttk.Entry(form_inner, textvariable=self._label_var, width=30).grid(
             row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))
+        ttk.Label(form_inner, text="(auto-generated if blank)",
+                  style="Small.TLabel").grid(
+            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))
 
         # Protocol
-        row += 1
+        row += 2
         ttk.Label(form_inner, text="Protocol:").grid(
             row=row, column=0, sticky=tk.W, pady=2)
         self._proto_var = tk.StringVar(value="smb")
@@ -318,7 +343,7 @@ class NetworkStorageDialog(tk.Toplevel):
 
         form_inner.columnconfigure(1, weight=1)
 
-        # Export fields selection
+        # ── Export fields selection ────────────────────────────────────
         fields_frame = ttk.LabelFrame(self._body, text="Artifact Export Fields")
         fields_frame.pack(fill=tk.X, padx=pad, pady=(0, pad))
         fields_inner = ttk.Frame(fields_frame)
@@ -332,7 +357,7 @@ class NetworkStorageDialog(tk.Toplevel):
                             variable=var).grid(
                 row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)
 
-        # Bottom action buttons
+        # ── Bottom action buttons ──────────────────────────────────────
         actions = ttk.Frame(self._body)
         actions.pack(fill=tk.X, padx=pad, pady=(0, pad))
 
@@ -341,11 +366,16 @@ class NetworkStorageDialog(tk.Toplevel):
 
         ttk.Button(actions, text="Test", width=8,
                    command=self._on_test).pack(side=tk.LEFT, padx=2)
-        self._connect_btn = ttk.Button(actions, text="Connect", width=10,
+
+        self._connect_btn = ttk.Button(actions, text="Save && Connect",
+                                        width=14,
                                         command=self._on_connect)
         self._connect_btn.pack(side=tk.LEFT, padx=2)
-        ttk.Button(actions, text="Save", width=8,
-                   command=self._on_save).pack(side=tk.LEFT, padx=2)
+
+        self._update_btn = ttk.Button(actions, text="Save", width=8,
+                                       command=self._on_save)
+        self._update_btn.pack(side=tk.LEFT, padx=2)
+
         ttk.Button(actions, text="Close", width=8,
                    command=self.destroy).pack(side=tk.LEFT, padx=2)
 
@@ -489,14 +519,58 @@ class NetworkStorageDialog(tk.Toplevel):
             if len(share_list) == 1:
                 self._share_var.set(share_list[0])
 
+    # ---- Mode management -----------------------------------------------
+
+    def _enter_new_mode(self):
+        """Switch to 'new profile' mode: clear form, deselect list."""
+        self._current_idx = None
+        self._profile_list.selection_clear(0, tk.END)
+        self._clear_form()
+        self._update_button_states()
+
+    def _clear_form(self):
+        """Reset all form fields to defaults."""
+        self._label_var.set("")
+        self._proto_var.set("smb")
+        self._server_var.set("")
+        self._share_var.set("")
+        self._user_var.set("")
+        self._pass_var.set("")
+        self._domain_var.set("")
+        self._export_dir_var.set("artifacts")
+        self._remember_var.set(True)
+        for fname, var in self._field_vars.items():
+            var.set(fname in ("ICCID", "IMSI", "Ki", "OPc"))
+        self._on_proto_change()
+        self._status_label.configure(text="")
+
+    def _update_button_states(self):
+        """Update button labels/states based on whether editing or new."""
+        editing = self._current_idx is not None
+        if editing:
+            p = self._profiles[self._current_idx]
+            mounted = self._ns.is_mounted(p)
+            self._update_btn.configure(text="Update", state=tk.NORMAL)
+            self._remove_btn.configure(state=tk.NORMAL)
+            self._connect_btn.configure(
+                text="Disconnect" if mounted else "Save && Connect")
+        else:
+            self._update_btn.configure(text="Save New", state=tk.NORMAL)
+            self._remove_btn.configure(state=tk.DISABLED)
+            self._connect_btn.configure(text="Save && Connect")
+
     # ---- Profile list management ---------------------------------------
 
     def _refresh_profile_list(self):
+        prev_idx = self._current_idx
         self._profile_list.delete(0, tk.END)
         for p in self._profiles:
             mounted = " \u2713" if self._ns.is_mounted(p) else ""
             self._profile_list.insert(tk.END,
                                        f"{p.label} ({p.protocol}){mounted}")
+        # Restore selection if still valid
+        if prev_idx is not None and prev_idx < len(self._profiles):
+            self._profile_list.selection_set(prev_idx)
 
     def _on_profile_select(self, _event):
         sel = self._profile_list.curselection()
@@ -517,27 +591,32 @@ class NetworkStorageDialog(tk.Toplevel):
         self._remember_var.set(bool(p.password))
         for fname, var in self._field_vars.items():
             var.set(fname in p.export_fields)
-        self._update_connect_btn(p)
         self._on_proto_change()
+        self._update_button_states()
+        self._status_label.configure(text="")
 
-    def _on_add(self):
-        p = StorageProfile(label=f"Connection {len(self._profiles) + 1}")
-        self._profiles.append(p)
-        self._refresh_profile_list()
-        self._profile_list.selection_clear(0, tk.END)
-        self._profile_list.selection_set(len(self._profiles) - 1)
-        self._on_profile_select(None)
+    def _on_new(self):
+        """Clear the form for a fresh connection (no phantom profile)."""
+        self._enter_new_mode()
+        self._status_label.configure(text="Fill in details for a new connection")
 
     def _on_remove(self):
         if self._current_idx is None:
             return
         p = self._profiles[self._current_idx]
+        name = p.label or "this connection"
+        if not messagebox.askyesno(
+                "Remove Connection",
+                f"Remove \"{name}\"?\n\nThis will also disconnect if mounted.",
+                parent=self):
+            return
         if self._ns.is_mounted(p):
             self._ns.unmount(p)
         self._profiles.pop(self._current_idx)
-        self._current_idx = None
         self._ns.save_profiles(self._profiles)
+        self._enter_new_mode()
         self._refresh_profile_list()
+        self._status_label.configure(text=f"Removed \"{name}\"")
 
     def _on_proto_change(self):
         is_smb = self._proto_var.get() == "smb"
@@ -548,26 +627,28 @@ class NetworkStorageDialog(tk.Toplevel):
         self._share_label.configure(
             text="Share name:" if is_smb else "Export path:")
 
-    def _update_connect_btn(self, profile: StorageProfile):
-        if self._ns.is_mounted(profile):
-            self._connect_btn.configure(text="Disconnect")
-        else:
-            self._connect_btn.configure(text="Connect")
-
     # ---- Actions -------------------------------------------------------
 
     def _form_to_profile(self) -> StorageProfile | None:
-        """Read form into a StorageProfile (validates required fields)."""
-        label = self._label_var.get().strip()
+        """Read form into a StorageProfile (validates required fields).
+
+        If the Name field is blank, auto-generates one from server + share.
+        """
         server = _sanitise_server(self._server_var.get())
         proto = self._proto_var.get()
         share = _sanitise_share(self._share_var.get(), proto)
+        label = self._label_var.get().strip()
 
-        if not label or not server or not share:
+        if not server or not share:
             messagebox.showwarning("Missing fields",
-                                   "Name, Server, and Share are required.",
+                                   "Server and Share are required.",
                                    parent=self)
             return None
+
+        # Auto-generate name if blank
+        if not label:
+            label = _auto_name(server, share, proto)
+            self._label_var.set(label)
 
         # If "Remember" is unchecked, don't persist the password
         password = self._pass_var.get() if self._remember_var.get() else ""
@@ -585,18 +666,49 @@ class NetworkStorageDialog(tk.Toplevel):
             export_fields=fields,
         )
 
-    def _on_save(self):
+    def _save_profile(self) -> StorageProfile | None:
+        """Save or update the current profile from the form.
+
+        Returns the saved profile on success, None on validation failure.
+        Creates a new profile if _current_idx is None, otherwise updates.
+        """
         p = self._form_to_profile()
         if p is None:
-            return
+            return None
+
         if self._current_idx is not None:
+            # Update existing
             self._profiles[self._current_idx] = p
         else:
+            # Check for duplicate (same server + share + protocol)
+            for existing in self._profiles:
+                if (existing.server == p.server
+                        and existing.share == p.share
+                        and existing.protocol == p.protocol):
+                    if not messagebox.askyesno(
+                            "Duplicate Connection",
+                            f"A connection to {p.share} on {p.server} "
+                            f"already exists (\"{existing.label}\").\n\n"
+                            "Save as a new connection anyway?",
+                            parent=self):
+                        return None
+                    break
+            # Append new
             self._profiles.append(p)
+            self._current_idx = len(self._profiles) - 1
+
         self._update_server_history(p.server)
         self._ns.save_profiles(self._profiles)
         self._refresh_profile_list()
-        self._status_label.configure(text="Profile saved")
+        self._update_button_states()
+        return p
+
+    def _on_save(self):
+        p = self._save_profile()
+        if p is None:
+            return
+        action = "updated" if self._current_idx is not None else "saved"
+        self._status_label.configure(text=f"\"{p.label}\" {action}")
 
     def _on_test(self):
         p = self._form_to_profile()
@@ -613,33 +725,32 @@ class NetworkStorageDialog(tk.Toplevel):
             messagebox.showwarning("Connection Test", msg, parent=self)
 
     def _on_connect(self):
-        if self._current_idx is None:
-            return
-        p = self._profiles[self._current_idx]
-
-        if self._ns.is_mounted(p):
+        # If currently connected, disconnect
+        if (self._current_idx is not None
+                and self._ns.is_mounted(self._profiles[self._current_idx])):
+            p = self._profiles[self._current_idx]
             ok, msg = self._ns.unmount(p)
             self._status_label.configure(text=msg[:80])
-        else:
-            # Save form first
-            updated = self._form_to_profile()
-            if updated is None:
-                return
-            # For mounting, always use the entered password
-            # (even if "Remember" is unchecked)
-            if not updated.password:
-                updated.password = self._pass_var.get()
-            self._profiles[self._current_idx] = updated
-            self._update_server_history(updated.server)
-            self._ns.save_profiles(self._profiles)
-            p = updated
+            self._refresh_profile_list()
+            self._update_button_states()
+            return
 
-            self._status_label.configure(text="Mounting...")
-            self.update_idletasks()
-            ok, msg = self._ns.mount(p)
-            self._status_label.configure(text=msg[:80])
-            if not ok:
-                messagebox.showerror("Mount Failed", msg, parent=self)
+        # Save first (creates new or updates existing)
+        p = self._save_profile()
+        if p is None:
+            return
+
+        # For mounting, always use the entered password
+        # (even if "Remember" is unchecked)
+        if not p.password:
+            p.password = self._pass_var.get()
+
+        self._status_label.configure(text="Mounting...")
+        self.update_idletasks()
+        ok, msg = self._ns.mount(p)
+        self._status_label.configure(text=msg[:80])
+        if not ok:
+            messagebox.showerror("Mount Failed", msg, parent=self)
 
         self._refresh_profile_list()
-        self._update_connect_btn(self._profiles[self._current_idx])
+        self._update_button_states()
