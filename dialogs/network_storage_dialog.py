@@ -11,6 +11,7 @@ UX principles:
 - All input is sanitised (protocol prefixes stripped automatically)
 """
 
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -19,6 +20,11 @@ from managers.network_storage_manager import (
     StorageProfile,
 )
 from theme import ModernTheme
+from utils.network_scanner import (
+    DiscoveredServer,
+    list_smb_shares,
+    scan_smb_servers,
+)
 
 _ALL_EXPORT_FIELDS = [
     "ICCID", "IMSI", "Ki", "OPc", "ADM1",
@@ -65,7 +71,7 @@ class NetworkStorageDialog(tk.Toplevel):
     def __init__(self, parent, ns_manager: NetworkStorageManager):
         super().__init__(parent)
         self.title("Network Storage")
-        self.geometry("620x580")
+        self.geometry("620x680")
         self.resizable(True, True)
         self.transient(parent)
         self.grab_set()
@@ -159,7 +165,7 @@ class NetworkStorageDialog(tk.Toplevel):
                         command=self._on_proto_change).pack(side=tk.LEFT,
                                                             padx=(pad, 0))
 
-        # Server (combobox with history)
+        # Server (combobox with history) + Scan button
         row += 1
         ttk.Label(form_inner, text="Server:").grid(
             row=row, column=0, sticky=tk.W, pady=2)
@@ -168,17 +174,49 @@ class NetworkStorageDialog(tk.Toplevel):
             form_inner, textvariable=self._server_var, width=28,
             values=self._server_history)
         self._server_combo.grid(
-            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))
+            row=row, column=1, sticky=tk.EW, pady=2, padx=(4, 0))
         # Sanitise on focus-out (strip smb:// etc.)
         self._server_combo.bind("<FocusOut>", self._on_server_focus_out)
+
+        self._scan_btn = ttk.Button(
+            form_inner, text="Scan Network", width=13,
+            command=self._on_scan_network,
+        )
+        self._scan_btn.grid(row=row, column=2, sticky=tk.W, padx=(4, 0))
 
         # Hint below server
         ttk.Label(form_inner, text="Hostname or IP address (e.g. 192.168.1.10)",
                   style="Small.TLabel").grid(
             row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))
 
-        # Share
+        # Discovery results panel
         row += 2
+        self._discovery_frame = ttk.LabelFrame(
+            form_inner, text="Discovered Servers",
+        )
+        self._discovery_frame.grid(
+            row=row, column=0, columnspan=3, sticky=tk.EW, pady=(2, 4),
+        )
+        self._discovery_tree = ttk.Treeview(
+            self._discovery_frame, height=3, show="headings",
+            columns=("name", "ip", "shares"),
+        )
+        self._discovery_tree.heading("name", text="Name")
+        self._discovery_tree.heading("ip", text="IP Address")
+        self._discovery_tree.heading("shares", text="Shares")
+        self._discovery_tree.column("name", width=160)
+        self._discovery_tree.column("ip", width=120)
+        self._discovery_tree.column("shares", width=200)
+        self._discovery_tree.pack(fill=tk.X, padx=4, pady=4)
+        self._discovery_tree.bind(
+            "<<TreeviewSelect>>", self._on_discovery_select,
+        )
+        self._discovered_servers: list[DiscoveredServer] = []
+        # Hide the discovery panel initially
+        self._discovery_frame.grid_remove()
+
+        # Share
+        row += 1
         self._share_label = ttk.Label(form_inner, text="Share name:")
         self._share_label.grid(row=row, column=0, sticky=tk.W, pady=2)
         self._share_var = tk.StringVar()
@@ -272,6 +310,65 @@ class NetworkStorageDialog(tk.Toplevel):
         clean = _sanitise_server(raw)
         if clean != raw:
             self._server_var.set(clean)
+
+    def _on_scan_network(self):
+        """Run SMB network discovery in a background thread."""
+        self._scan_btn.configure(state=tk.DISABLED)
+        self._status_label.configure(text="Scanning network...")
+        self.update_idletasks()
+        thread = threading.Thread(target=self._scan_worker, daemon=True)
+        thread.start()
+
+    def _scan_worker(self):
+        """Background worker — runs scan_smb_servers, then schedules UI update."""
+        servers = scan_smb_servers(timeout=10)
+        # Fetch shares for each discovered server (best-effort)
+        for srv in servers:
+            if not srv.shares:
+                srv.shares = list_smb_shares(srv.ip, timeout=5)
+        self.after(0, self._scan_done, servers)
+
+    def _scan_done(self, servers: list[DiscoveredServer]):
+        """Update the UI with scan results (runs on main thread)."""
+        self._scan_btn.configure(state=tk.NORMAL)
+        self._discovered_servers = servers
+
+        # Clear previous results
+        for item in self._discovery_tree.get_children():
+            self._discovery_tree.delete(item)
+
+        if not servers:
+            self._status_label.configure(text="No SMB servers found on network")
+            self._discovery_frame.grid_remove()
+            return
+
+        self._discovery_frame.grid()
+        for srv in servers:
+            shares_str = ", ".join(srv.shares) if srv.shares else ""
+            self._discovery_tree.insert(
+                "", tk.END, values=(srv.hostname, srv.ip, shares_str),
+            )
+        self._status_label.configure(
+            text=f"Found {len(servers)} server(s)",
+        )
+
+    def _on_discovery_select(self, _event):
+        """Fill server/share fields from a selected discovered server."""
+        sel = self._discovery_tree.selection()
+        if not sel:
+            return
+        item = self._discovery_tree.item(sel[0])
+        values = item.get("values", [])
+        if not values:
+            return
+        hostname, ip, shares_str = values[0], values[1], values[2]
+        # Prefer IP for reliability, but use hostname if available
+        self._server_var.set(str(ip) if ip else str(hostname))
+        # If there's exactly one share, fill the share field
+        if shares_str:
+            share_list = [s.strip() for s in str(shares_str).split(",")]
+            if len(share_list) == 1:
+                self._share_var.set(share_list[0])
 
     # ---- Profile list management ---------------------------------------
 
