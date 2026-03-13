@@ -1,1 +1,455 @@
-#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\"\"\"\nSimGUI - SIM Card Programming GUI\n\nEntry point for the application.  Assembles the main window, tabs,\nand cross-tab wiring.\n\"\"\"\n\nimport logging\nimport os\nimport sys\nimport tkinter as tk\nfrom tkinter import filedialog, messagebox, ttk\n\n# ---------------------------------------------------------------------------\n# Ensure the project root is on sys.path so relative imports work when\n# launched from an installed location (e.g. /opt/simgui/).\n# ---------------------------------------------------------------------------\n_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))\nif _PROJECT_ROOT not in sys.path:\n    sys.path.insert(0, _PROJECT_ROOT)\n\nfrom managers.card_manager import CardManager\nfrom managers.csv_manager import CSVManager, SIM_DATA_FILETYPES\nfrom managers.network_storage_manager import NetworkStorageManager\nfrom managers.settings_manager import SettingsManager\nfrom theme import ModernTheme\nfrom utils import get_browse_initial_dir\n\nlogger = logging.getLogger(__name__)\n\n\nclass SimGUIApp:\n    \"\"\"Main application class.\"\"\"\n\n    def __init__(self, root: tk.Tk):\n        self.root = root\n        self.root.title(\"SimGUI \u2014 SIM Card Manager\")\n        self.root.geometry(\"960x720\")\n        self.root.minsize(800, 600)\n\n        # Theme\n        ModernTheme.apply(root)\n\n        # Managers\n        self._settings = SettingsManager()\n        self._card_manager = CardManager()\n        self._ns_manager = NetworkStorageManager(self._settings)\n        self._last_browse_dir: str | None = None\n\n        # Shared state for cross-tab sync\n        self._last_read_data: dict = {}\n\n        # Build UI\n        self._build_menus()\n        self._build_tabs()\n        self._wire_cross_tab_sync()\n\n        # Simulator mode if no CLI tool found\n        if not self._card_manager.has_cli_tool():\n            self._enable_simulator_mode()\n\n        # Clean up on close\n        self.root.protocol(\"WM_DELETE_WINDOW\", self._on_close)\n\n    # ---- Menu bar --------------------------------------------------------\n\n    def _build_menus(self):\n        menubar = tk.Menu(self.root)\n        self.root.configure(menu=menubar)\n\n        # File menu\n        file_menu = tk.Menu(menubar, tearoff=0)\n        menubar.add_cascade(label=\"File\", menu=file_menu)\n        file_menu.add_command(label=\"Open CSV/EML...\",\n                              command=self._on_open_file,\n                              accelerator=\"Ctrl+O\")\n        file_menu.add_separator()\n        file_menu.add_command(label=\"Network Storage...\",\n                              command=self._on_network_storage)\n        file_menu.add_separator()\n        file_menu.add_command(label=\"Quit\",\n                              command=self._on_close,\n                              accelerator=\"Ctrl+Q\")\n        self.root.bind_all(\"<Control-o>\", lambda e: self._on_open_file())\n        self.root.bind_all(\"<Control-q>\", lambda e: self._on_close())\n\n        # Card menu\n        card_menu = tk.Menu(menubar, tearoff=0)\n        menubar.add_cascade(label=\"Card\", menu=card_menu)\n        card_menu.add_command(label=\"Detect Card\",\n                              command=self._on_detect_card)\n        card_menu.add_separator()\n\n        self._sim_mode_var = tk.BooleanVar(value=False)\n        card_menu.add_checkbutton(\n            label=\"Simulator Mode\",\n            variable=self._sim_mode_var,\n            command=self._on_toggle_simulator)\n        card_menu.add_command(label=\"Simulator Settings...\",\n                              command=self._on_simulator_settings)\n        card_menu.add_separator()\n        card_menu.add_command(label=\"Next Virtual Card\",\n                              command=self._on_next_virtual_card,\n                              accelerator=\"Ctrl+N\")\n        card_menu.add_command(label=\"Previous Virtual Card\",\n                              command=self._on_prev_virtual_card,\n                              accelerator=\"Ctrl+P\")\n        self.root.bind_all(\"<Control-n>\", lambda e: self._on_next_virtual_card())\n        self.root.bind_all(\"<Control-p>\", lambda e: self._on_prev_virtual_card())\n\n        # Help menu\n        help_menu = tk.Menu(menubar, tearoff=0)\n        menubar.add_cascade(label=\"Help\", menu=help_menu)\n        help_menu.add_command(label=\"About SimGUI\",\n                              command=self._on_about)\n\n    # ---- Tabs -----------------------------------------------------------\n\n    def _build_tabs(self):\n        self._notebook = ttk.Notebook(self.root)\n        self._notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)\n\n        # Import widgets inside build to avoid circular imports\n        from widgets.csv_editor_panel import CSVEditorPanel\n        from widgets.read_sim_panel import ReadSIMPanel\n        from widgets.program_sim_panel import ProgramSIMPanel\n        from widgets.batch_program_panel import BatchProgramPanel\n\n        self._csv_panel = CSVEditorPanel(\n            self._notebook, ns_manager=self._ns_manager)\n        self._read_panel = ReadSIMPanel(\n            self._notebook, self._card_manager,\n            ns_manager=self._ns_manager,\n            last_read_data=self._last_read_data)\n        self._program_panel = ProgramSIMPanel(\n            self._notebook, self._card_manager,\n            last_read_data=self._last_read_data,\n            ns_manager=self._ns_manager)\n        self._batch_panel = BatchProgramPanel(\n            self._notebook, self._card_manager,\n            ns_manager=self._ns_manager)\n\n        self._notebook.add(self._csv_panel, text=\"CSV Editor\")\n        self._notebook.add(self._read_panel, text=\"Read SIM\")\n        self._notebook.add(self._program_panel, text=\"Program SIM\")\n        self._notebook.add(self._batch_panel, text=\"Batch Program\")\n\n    def _wire_cross_tab_sync(self):\n        \"\"\"Connect CSV-loaded callbacks so loading in one tab syncs others.\"\"\"\n        def sync_from_program(path):\n            self._batch_panel.load_csv_file(path, _from_sync=True)\n            self._read_panel.load_csv_file(path, _from_sync=True)\n\n        def sync_from_batch(path):\n            self._program_panel.load_csv_file(path, _from_sync=True)\n            self._read_panel.load_csv_file(path, _from_sync=True)\n\n        def sync_from_read(path):\n            self._program_panel.load_csv_file(path, _from_sync=True)\n            self._batch_panel.load_csv_file(path, _from_sync=True)\n\n        self._program_panel.on_csv_loaded_callback = sync_from_program\n        self._batch_panel.on_csv_loaded_callback = sync_from_batch\n        self._read_panel.on_csv_loaded_callback = sync_from_read\n\n    # ---- Menu handlers ---------------------------------------------------\n\n    def _on_open_file(self):\n        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)\n        kwargs = {\"title\": \"Open SIM Data File\", \"filetypes\": SIM_DATA_FILETYPES}\n        if init_dir:\n            kwargs[\"initialdir\"] = init_dir\n        path = filedialog.askopenfilename(**kwargs)\n        if not path:\n            return\n        self._last_browse_dir = os.path.dirname(path)\n        # Load into the currently visible tab if it supports it\n        tab_idx = self._notebook.index(\"current\")\n        panels = [self._csv_panel, self._read_panel,\n                  self._program_panel, self._batch_panel]\n        panel = panels[tab_idx] if tab_idx < len(panels) else None\n        if panel and hasattr(panel, \"load_csv_file\"):\n            panel.load_csv_file(path)\n        elif panel and hasattr(panel, \"_on_load_csv\"):\n            # CSVEditorPanel uses a different interface\n            panel._csv_manager.load_file(path)\n            panel._refresh_table()\n\n    def _on_network_storage(self):\n        from dialogs.network_storage_dialog import NetworkStorageDialog\n        dlg = NetworkStorageDialog(self.root, self._ns_manager)\n        self.root.wait_window(dlg)\n\n    def _on_detect_card(self):\n        ok, msg = self._card_manager.detect_card()\n        if ok:\n            messagebox.showinfo(\"Card Detected\", msg)\n        else:\n            messagebox.showwarning(\"No Card\", msg)\n\n    def _enable_simulator_mode(self):\n        \"\"\"Switch to simulator backend.\"\"\"\n        from simulator.simulator_backend import SimulatorBackend\n        from simulator.settings import SimulatorSettings\n        settings = SimulatorSettings()\n        # Load saved settings\n        saved = self._settings.get(\"simulator_settings\", {})\n        if saved:\n            for key, val in saved.items():\n                if hasattr(settings, key):\n                    setattr(settings, key, val)\n        backend = SimulatorBackend(settings)\n        self._card_manager.set_backend(backend)\n        self._sim_mode_var.set(True)\n        self.root.title(\"SimGUI \u2014 SIM Card Manager [SIMULATOR]\")\n        logger.info(\"Simulator mode enabled (no CLI tool found)\")\n\n    def _on_toggle_simulator(self):\n        if self._sim_mode_var.get():\n            self._enable_simulator_mode()\n        else:\n            self._card_manager.set_backend(None)\n            self.root.title(\"SimGUI \u2014 SIM Card Manager\")\n\n    def _on_simulator_settings(self):\n        from dialogs.simulator_settings_dialog import SimulatorSettingsDialog\n        backend = self._card_manager.get_backend()\n        if backend is None:\n            messagebox.showinfo(\"Simulator\",\n                                \"Enable Simulator Mode first.\")\n            return\n        from simulator.simulator_backend import SimulatorBackend\n        if not isinstance(backend, SimulatorBackend):\n            messagebox.showinfo(\"Simulator\",\n                                \"Simulator settings are only available in Simulator Mode.\")\n            return\n        dlg = SimulatorSettingsDialog(self.root, backend.settings)\n        self.root.wait_window(dlg)\n        if dlg.result:\n            backend.settings = dlg.result\n            # Save to persistent settings\n            self._settings.set(\"simulator_settings\",\n                               dlg.result.__dict__)\n            self._settings.save()\n\n    def _on_next_virtual_card(self):\n        backend = self._card_manager.get_backend()\n        if backend and hasattr(backend, \"next_card\"):\n            backend.next_card()\n\n    def _on_prev_virtual_card(self):\n        backend = self._card_manager.get_backend()\n        if backend and hasattr(backend, \"prev_card\"):\n            backend.prev_card()\n\n    def _on_about(self):\n        messagebox.showinfo(\n            \"About SimGUI\",\n            \"SimGUI v0.2.0\\n\\n\"\n            \"SIM Card Programming GUI\\n\\n\"\n            \"Supports sysmo-usim-tool and pySim\\n\"\n            \"MIT License\"\n        )\n\n    def _on_close(self):\n        # Unmount network shares\n        self._ns_manager.unmount_all()\n        self._settings.save()\n        self.root.destroy()\n\n\ndef main():\n    logging.basicConfig(\n        level=logging.INFO,\n        format=\"%(asctime)s %(name)s %(levelname)s %(message)s\",\n    )\n    root = tk.Tk()\n    app = SimGUIApp(root)\n    root.mainloop()\n\n\nif __name__ == \"__main__\":\n    main()\n
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SimGUI - SIM Card Programming GUI
+
+Main entry point. Builds the application window and wires together
+widgets, managers, and dialogs.
+"""
+
+import logging
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+from dialogs.adm1_dialog import ADM1Dialog
+from dialogs.artifact_export_dialog import ArtifactExportDialog
+from dialogs.network_storage_dialog import NetworkStorageDialog
+from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
+from managers.backup_manager import BackupManager
+from managers.card_manager import CardManager, CLIBackend
+from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
+from managers.network_storage_manager import NetworkStorageManager
+from managers.settings_manager import SettingsManager
+from theme import ModernTheme
+from utils import get_browse_initial_dir
+from widgets.batch_program_panel import BatchProgramPanel
+from widgets.card_status_panel import CardStatusPanel
+from widgets.csv_editor_panel import CSVEditorPanel
+from widgets.program_sim_panel import ProgramSIMPanel
+from widgets.progress_panel import ProgressPanel
+from widgets.read_sim_panel import ReadSIMPanel
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+)
+logger = logging.getLogger(__name__)
+
+
+class SimGUIApp:
+    """Main application class."""
+
+    def __init__(self):
+        self.root = tk.Tk(className="simgui")
+        self.root.title("SimGUI - SIM Card Programmer")
+        self.root.geometry("1024x700")
+        self.root.minsize(800, 500)
+
+        # Load multiple icon sizes so the WM picks the best match for
+        # taskbar, title-bar, and alt-tab.  The first image is the
+        # "default" size; extras are alternates.
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+        icon_sizes = ["simgui-256.png", "simgui-128.png", "simgui-64.png",
+                      "simgui-48.png", "simgui-32.png", "simgui-16.png"]
+        icons = []
+        for name in icon_sizes:
+            p = os.path.join(assets_dir, name)
+            if os.path.exists(p):
+                icons.append(tk.PhotoImage(file=p))
+        if icons:
+            self.root.iconphoto(True, *icons)
+            self._icons = icons          # prevent garbage collection
+
+        ModernTheme.apply_theme(self.root)
+
+        # Ensure Ctrl+V paste works everywhere (Linux workaround)
+        def _global_paste(event):
+            try:
+                widget = event.widget
+                if not isinstance(widget, (tk.Entry, ttk.Entry, ttk.Combobox)):
+                    return
+                text = widget.clipboard_get()
+                text = ''.join(ch for ch in text if ch.isprintable())
+                try:
+                    if widget.select_present():
+                        widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                except (tk.TclError, AttributeError):
+                    pass
+                widget.insert(tk.INSERT, text)
+                return 'break'
+            except tk.TclError:
+                pass
+
+        self.root.bind_all('<Control-v>', _global_paste)
+        self.root.bind_all('<Control-V>', _global_paste)
+
+        # Managers
+        self._card_manager = CardManager()
+        self._backup_manager = BackupManager()
+        self._settings = SettingsManager()
+        self._ns_manager = NetworkStorageManager(self._settings)
+
+        # Mode variable: "hardware" or "simulator"
+        self._mode_var = tk.StringVar(value="hardware")
+
+        # Shared state: last card data read from Read SIM tab
+        self.last_read_data: dict[str, str] = {}
+
+        self._build_menu()
+        self._build_layout()
+        self._bind_shortcuts()
+
+        # Restore window geometry
+        geom = self._settings.get("window_geometry", "")
+        if geom:
+            self.root.geometry(geom)
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Restore simulator mode from settings
+        if self._settings.get("simulator_mode", False):
+            self._mode_var.set("simulator")
+            self._on_mode_change()
+        elif self._card_manager.cli_backend == CLIBackend.NONE:
+            self._mode_var.set("simulator")
+            self._on_mode_change()
+
+    # ---- Layout -----------------------------------------------------------
+
+    def _build_layout(self):
+        """Create the main two-pane layout with status bar."""
+        container = ttk.Frame(self.root)
+        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+
+        # Left panel: card status
+        self._card_panel = CardStatusPanel(container)
+        self._card_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+        self._card_panel.on_detect_callback = self._on_detect_card
+        self._card_panel.on_authenticate_callback = self._on_authenticate
+
+        # Right panel: notebook with workflow tabs
+        notebook = ttk.Notebook(container)
+        notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Workflow tabs
+        self._read_panel = ReadSIMPanel(
+            notebook, self._card_manager,
+            last_read_data=self.last_read_data,
+            ns_manager=self._ns_manager)
+        notebook.add(self._read_panel, text="Read SIM")
+
+        self._program_panel = ProgramSIMPanel(
+            notebook, self._card_manager,
+            last_read_data=self.last_read_data,
+            ns_manager=self._ns_manager)
+        notebook.add(self._program_panel, text="Program SIM")
+
+        self._batch_panel = BatchProgramPanel(
+            notebook, self._card_manager, self._settings,
+            ns_manager=self._ns_manager)
+        notebook.add(self._batch_panel, text="Batch Program")
+
+        # Cross-tab CSV sync: browsing in one tab updates the other
+        self._program_panel.on_csv_loaded_callback = (
+            lambda path: self._batch_panel.load_csv_file(path, _from_sync=True)
+        )
+        self._batch_panel.on_csv_loaded_callback = (
+            lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
+        )
+
+        self._csv_panel = CSVEditorPanel(notebook, ns_manager=self._ns_manager)
+        notebook.add(self._csv_panel, text="CSV Editor")
+
+        self._progress_panel = ProgressPanel(notebook)
+        notebook.add(self._progress_panel, text="Progress")
+
+        # Status bar
+        self._status_var = tk.StringVar(value="Ready")
+        status_bar = ttk.Label(
+            self.root, textvariable=self._status_var,
+            style='Small.TLabel', relief=tk.SUNKEN, anchor=tk.W,
+            padding=(8, 2),
+        )
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # ---- Menu bar ---------------------------------------------------------
+
+    def _build_menu(self):
+        menubar = tk.Menu(self.root)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Open CSV...", command=self._on_open_csv,
+                              accelerator="Ctrl+O")
+        file_menu.add_command(label="Save CSV...", command=self._on_save_csv,
+                              accelerator="Ctrl+S")
+        file_menu.add_separator()
+        file_menu.add_command(label="Network Storage...",
+                              command=self._on_network_storage)
+        file_menu.add_command(label="Export Artifacts...",
+                              command=self._on_export_artifacts)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self._on_close,
+                              accelerator="Ctrl+Q")
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        card_menu = tk.Menu(menubar, tearoff=0)
+        card_menu.add_command(label="Detect Card", command=self._on_detect_card)
+        card_menu.add_command(label="Authenticate...", command=self._on_authenticate)
+        card_menu.add_separator()
+        card_menu.add_radiobutton(label="Hardware Mode",
+                                  variable=self._mode_var, value="hardware",
+                                  command=self._on_mode_change)
+        card_menu.add_radiobutton(label="Simulator Mode",
+                                  variable=self._mode_var, value="simulator",
+                                  command=self._on_mode_change)
+        card_menu.add_separator()
+        self._card_menu = card_menu
+        self._sim_menu_start = card_menu.index(tk.END) + 1
+        card_menu.add_command(label="Next Virtual Card",
+                              command=self._on_next_virtual_card,
+                              accelerator="Ctrl+N")
+        card_menu.add_command(label="Previous Virtual Card",
+                              command=self._on_previous_virtual_card,
+                              accelerator="Ctrl+P")
+        card_menu.add_command(label="Simulator Settings...",
+                              command=self._on_simulator_settings)
+        card_menu.add_command(label="Reset Simulator",
+                              command=self._on_reset_simulator)
+        menubar.add_cascade(label="Card", menu=card_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="About", command=self._on_about)
+        menubar.add_cascade(label="Help", menu=help_menu)
+
+        self.root.config(menu=menubar)
+
+    # ---- Keyboard shortcuts -----------------------------------------------
+
+    def _bind_shortcuts(self):
+        self.root.bind_all('<Control-o>', lambda e: self._on_open_csv())
+        self.root.bind_all('<Control-s>', lambda e: self._on_save_csv())
+        self.root.bind_all('<Control-q>', lambda e: self._on_close())
+        self.root.bind_all('<Control-n>', lambda e: self._on_next_virtual_card())
+        self.root.bind_all('<Control-p>', lambda e: self._on_previous_virtual_card())
+
+    # ---- Callbacks --------------------------------------------------------
+
+    def _on_open_csv(self):
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.askopenfilename(**kwargs)
+        if not fp:
+            return
+        mgr = self._csv_panel.get_csv_manager()
+        try:
+            if mgr.load_file(fp):
+                self._csv_panel._refresh_table()
+                self._status_var.set(f"Loaded {fp}")
+                self._settings.set("last_csv_path", fp)
+            else:
+                messagebox.showerror("Error", f"No card data found in {fp}")
+        except ValueError as exc:
+            messagebox.showerror("Import Error", str(exc))
+
+    def _on_save_csv(self):
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        kwargs = {
+            "title": "Save CSV", "defaultextension": ".csv",
+            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
+        }
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.asksaveasfilename(**kwargs)
+        if fp:
+            mgr = self._csv_panel.get_csv_manager()
+            if mgr.save_csv(fp):
+                self._status_var.set(f"Saved {fp}")
+            else:
+                messagebox.showerror("Error", f"Failed to save {fp}")
+
+    def _on_detect_card(self):
+        ok, msg = self._card_manager.detect_card()
+        if ok:
+            self._card_panel.set_status("detected", msg)
+            info = self._card_manager.card_info
+            self._card_panel.set_card_info(
+                card_type=self._card_manager.card_type.name,
+                imsi=info.get('IMSI'),
+                iccid=info.get('ICCID'),
+            )
+        else:
+            self._card_panel.set_status("error", msg)
+        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
+        self._status_var.set(f"{prefix}{msg}")
+        # Update virtual card indicator
+        sim_info = self._card_manager.get_simulator_info()
+        if sim_info:
+            self._card_panel.set_simulator_info(
+                sim_info["current_index"], sim_info["total_cards"])
+        else:
+            self._card_panel.set_simulator_info(None, None)
+        # Sync the Read SIM tab
+        self._read_panel.refresh()
+
+    def _on_authenticate(self):
+        remaining = self._card_manager.get_remaining_attempts()
+        dlg = ADM1Dialog(self.root, remaining_attempts=remaining or 3)
+        adm1, force = dlg.get_adm1()
+        if adm1 is None:
+            return
+        expected_iccid = self._get_expected_iccid()
+        ok, msg = self._card_manager.authenticate(
+            adm1, force=force, expected_iccid=expected_iccid)
+        if ok:
+            self._card_panel.set_status("authenticated", msg)
+            self._card_panel.set_auth_status(True)
+        else:
+            self._card_panel.set_status("error", msg)
+            self._card_panel.set_auth_status(False)
+            if "ICCID mismatch" in msg:
+                messagebox.showwarning("ICCID Mismatch", msg)
+        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
+        self._status_var.set(f"{prefix}{msg}")
+
+    def _get_expected_iccid(self):
+        """Get ICCID from the currently selected CSV row, if any."""
+        try:
+            mgr = self._csv_panel.get_csv_manager()
+            tree = self._csv_panel._tree
+            selection = tree.selection()
+            if not selection:
+                return None
+            item = selection[0]
+            idx = tree.index(item)
+            card = mgr.get_card(idx)
+            return card.get("ICCID") if card else None
+        except Exception:
+            return None
+
+    def _on_mode_change(self):
+        """Handle switching between hardware and simulator mode."""
+        mode = self._mode_var.get()
+        if mode == "simulator":
+            self._card_manager.enable_simulator()
+            self._update_sim_menu_state(tk.NORMAL)
+            self._status_var.set("[SIM] Simulator mode active")
+            # Auto-detect the first virtual card
+            self._on_detect_card()
+        else:
+            self._card_manager.disable_simulator()
+            self._update_sim_menu_state(tk.DISABLED)
+            self._card_panel.set_simulator_info(None, None)
+            self._status_var.set("Hardware mode active")
+        self._settings.set("simulator_mode", mode == "simulator")
+
+    def _update_sim_menu_state(self, state):
+        """Enable or disable simulator-only menu items."""
+        for i in range(self._sim_menu_start,
+                       self._sim_menu_start + 4):
+            try:
+                self._card_menu.entryconfigure(i, state=state)
+            except tk.TclError:
+                pass
+
+    def _on_next_virtual_card(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        result = self._card_manager.next_virtual_card()
+        if result:
+            idx, total = result
+            self._card_panel.set_simulator_info(idx, total)
+            self._on_detect_card()
+
+    def _on_previous_virtual_card(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        result = self._card_manager.previous_virtual_card()
+        if result:
+            idx, total = result
+            self._card_panel.set_simulator_info(idx, total)
+            self._on_detect_card()
+
+    def _on_simulator_settings(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        sim = self._card_manager._simulator
+        old_count = sim.settings.num_cards
+        dlg = SimulatorSettingsDialog(self.root, sim.settings)
+        if dlg.applied and sim.settings.num_cards != old_count:
+            sim.reset()
+            self._on_detect_card()
+
+    def _on_reset_simulator(self):
+        if not self._card_manager.is_simulator_active:
+            return
+        self._card_manager._simulator.reset()
+        self._on_detect_card()
+        self._status_var.set("[SIM] Simulator reset")
+
+    def _on_network_storage(self):
+        """Open the network storage connection dialog."""
+        NetworkStorageDialog(self.root, self._ns_manager)
+
+    def _on_export_artifacts(self):
+        """Open the artifact export dialog with data from the last batch run."""
+        # Collect records: prefer batch panel results, fall back to read data
+        records = []
+        try:
+            records = self._batch_panel.get_programmed_records()
+        except (AttributeError, Exception):
+            pass
+        if not records and self.last_read_data:
+            records = [self.last_read_data]
+        if not records:
+            messagebox.showinfo(
+                "No Data",
+                "No programming results to export.\n\n"
+                "Run a batch program or read a card first.")
+            return
+        # Get default fields from first connected profile, if any
+        default_fields = None
+        profiles = self._ns_manager.load_profiles()
+        if profiles:
+            default_fields = profiles[0].export_fields
+        ArtifactExportDialog(self.root, records, self._ns_manager,
+                             default_fields)
+
+    def _on_about(self):
+        messagebox.showinfo(
+            "About SimGUI",
+            "SimGUI - SIM Card Programming GUI\n\n"
+            "A lightweight GUI wrapper for sysmo-usim-tool and pySim.\n"
+            "https://github.com/SeJohnEff/SimGUI",
+        )
+
+    def _on_close(self):
+        if self._csv_panel.has_unsaved_changes:
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved changes. Save before closing?")
+            if answer is None:
+                return  # Cancel
+            if answer:
+                self._on_save_csv()
+        self._settings.set("window_geometry", self.root.geometry())
+        self._settings.save()
+        self._ns_manager.unmount_all()
+        self.root.destroy()
+
+    # ---- Run --------------------------------------------------------------
+
+    def run(self):
+        """Start the main event loop."""
+        self.root.mainloop()
+
+
+def main():
+    app = SimGUIApp()
+    app.run()
+
+
+if __name__ == '__main__':
+    main()
