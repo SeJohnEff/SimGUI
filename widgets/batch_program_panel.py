@@ -8,16 +8,20 @@ Data comes from a CSV or from an auto-generated IMSI/ICCID sequence.
 import csv
 import tkinter as tk
 from datetime import datetime
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from managers.batch_manager import BatchManager, BatchState, CardResult
 from managers.card_manager import CardManager
-from managers.csv_manager import CSVManager
+from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from managers.settings_manager import SettingsManager
 from theme import ModernTheme
 from utils.iccid_utils import (
-    generate_iccid, generate_imsi, get_fplmn_for_site,
-    SITE_REGISTER, SIM_TYPES, FPLMN_BY_COUNTRY,
+    FPLMN_BY_COUNTRY,
+    SIM_TYPES,
+    SITE_REGISTER,
+    generate_iccid,
+    generate_imsi,
+    get_fplmn_for_site,
 )
 from widgets.tooltip import add_tooltip
 
@@ -62,10 +66,12 @@ class BatchProgramPanel(ttk.Frame):
     """Tab for batch-programming multiple SIM cards."""
 
     def __init__(self, parent, card_manager: CardManager,
-                 settings: SettingsManager, **kwargs):
+                 settings: SettingsManager, *,
+                 ns_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._settings = settings
+        self._ns_manager = ns_manager
         self._batch_mgr = BatchManager(card_manager)
         self._csv = CSVManager()
         self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV
@@ -438,20 +444,25 @@ class BatchProgramPanel(ttk.Frame):
     def _on_browse_csv(self):
         path = filedialog.askopenfilename(
             title="Open SIM Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
+            filetypes=SIM_DATA_FILETYPES)
         if not path:
             return
         self.load_csv_file(path)
 
     def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
-        """Load a CSV file and refresh the preview.
+        """Load a CSV or EML file and refresh the preview.
 
         Called by Browse button or by cross-tab sync from ProgramSIMPanel.
         *_from_sync* prevents infinite callback loops.
         """
-        if not self._csv.load_csv(path):
+        try:
+            if not self._csv.load_file(path):
+                if not _from_sync:
+                    messagebox.showerror("Error", f"No card data found in {path}")
+                return False
+        except ValueError as exc:
             if not _from_sync:
-                messagebox.showerror("Error", f"Failed to load {path}")
+                messagebox.showerror("Import Error", str(exc))
             return False
         self._csv_path_var.set(path)
         import os
@@ -517,7 +528,7 @@ class BatchProgramPanel(ttk.Frame):
     def _on_browse_adm_csv(self):
         path = filedialog.askopenfilename(
             title="Select ADM1 Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
+            filetypes=SIM_DATA_FILETYPES)
         if path:
             self._adm_csv_path_var.set(path)
 
@@ -623,6 +634,11 @@ class BatchProgramPanel(ttk.Frame):
                 msg = "Preview the batch first."
             messagebox.showinfo("Nothing to do", msg)
             return
+
+        # Check for duplicate artifacts on connected network shares
+        if not self._check_duplicate_artifacts():
+            return  # user cancelled
+
         self._log_clear()
         self._start_btn.configure(state=tk.DISABLED)
         self._pause_btn.configure(state=tk.NORMAL)
@@ -630,6 +646,52 @@ class BatchProgramPanel(ttk.Frame):
         self._abort_btn.configure(state=tk.NORMAL)
         self._summary_frame.pack_forget()
         self._batch_mgr.start(self._preview_data)
+
+    def _check_duplicate_artifacts(self) -> bool:
+        """Warn if any batch ICCIDs already have artifacts on a share.
+
+        Returns True to proceed, False to cancel.
+        """
+        if not self._ns_manager:
+            return True
+
+        iccids = [c.get("ICCID", "") for c in self._preview_data
+                  if c.get("ICCID")]
+        if not iccids:
+            return True
+
+        profiles = self._ns_manager.load_profiles()
+        all_dupes: list[tuple[str, list[str]]] = []  # (share_label, iccids)
+
+        for prof in profiles:
+            if not self._ns_manager.is_mounted(prof):
+                continue
+            dupes = self._ns_manager.find_duplicate_iccids(prof, iccids)
+            if dupes:
+                all_dupes.append((prof.label, dupes))
+
+        if not all_dupes:
+            return True
+
+        # Build warning message
+        lines = []
+        total = 0
+        for label, dupes in all_dupes:
+            total += len(dupes)
+            lines.append(f"  {label}: {len(dupes)} card(s)")
+            # Show first few ICCIDs
+            for d in dupes[:3]:
+                lines.append(f"    - {d}")
+            if len(dupes) > 3:
+                lines.append(f"    ... and {len(dupes) - 3} more")
+
+        msg = (f"{total} card(s) in this batch already have artifacts "
+               f"on the network share:\n\n" +
+               "\n".join(lines) +
+               "\n\nProgramming again may create duplicates.\n"
+               "Continue anyway?")
+
+        return messagebox.askyesno("Duplicate Artifacts Found", msg)
 
     def _on_pause(self):
         if self._batch_mgr.state == BatchState.PAUSED:

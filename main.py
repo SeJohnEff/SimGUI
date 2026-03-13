@@ -10,24 +10,24 @@ widgets, managers, and dialogs.
 import logging
 import os
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
-from theme import ModernTheme
-from managers.card_manager import CardManager, CLIBackend
-from managers.csv_manager import CSVManager
+from dialogs.adm1_dialog import ADM1Dialog
+from dialogs.artifact_export_dialog import ArtifactExportDialog
+from dialogs.network_storage_dialog import NetworkStorageDialog
+from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
 from managers.backup_manager import BackupManager
+from managers.card_manager import CardManager, CLIBackend
+from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
+from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
+from theme import ModernTheme
+from widgets.batch_program_panel import BatchProgramPanel
 from widgets.card_status_panel import CardStatusPanel
 from widgets.csv_editor_panel import CSVEditorPanel
+from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.progress_panel import ProgressPanel
 from widgets.read_sim_panel import ReadSIMPanel
-from widgets.program_sim_panel import ProgramSIMPanel
-from widgets.batch_program_panel import BatchProgramPanel
-from dialogs.adm1_dialog import ADM1Dialog
-from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
-from dialogs.network_storage_dialog import NetworkStorageDialog
-from dialogs.artifact_export_dialog import ArtifactExportDialog
-from managers.network_storage_manager import NetworkStorageManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,7 +122,8 @@ class SimGUIApp:
         notebook.add(self._program_panel, text="Program SIM")
 
         self._batch_panel = BatchProgramPanel(
-            notebook, self._card_manager, self._settings)
+            notebook, self._card_manager, self._settings,
+            ns_manager=self._ns_manager)
         notebook.add(self._batch_panel, text="Batch Program")
 
         # Cross-tab CSV sync: browsing in one tab updates the other
@@ -213,15 +214,19 @@ class SimGUIApp:
     def _on_open_csv(self):
         fp = filedialog.askopenfilename(
             title="Open SIM Data File",
-            filetypes=[("SIM Data Files", "*.csv *.txt"), ("All files", "*.*")])
-        if fp:
-            mgr = self._csv_panel.get_csv_manager()
-            if mgr.load_csv(fp):
+            filetypes=SIM_DATA_FILETYPES)
+        if not fp:
+            return
+        mgr = self._csv_panel.get_csv_manager()
+        try:
+            if mgr.load_file(fp):
                 self._csv_panel._refresh_table()
                 self._status_var.set(f"Loaded {fp}")
                 self._settings.set("last_csv_path", fp)
             else:
-                messagebox.showerror("Error", f"Failed to load {fp}")
+                messagebox.showerror("Error", f"No card data found in {fp}")
+        except ValueError as exc:
+            messagebox.showerror("Import Error", str(exc))
 
     def _on_save_csv(self):
         fp = filedialog.asksaveasfilename(

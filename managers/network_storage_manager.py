@@ -18,7 +18,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -186,6 +186,49 @@ class NetworkStorageManager:
         return [(label, p.mount_point)
                 for label, p in self._active_mounts.items()
                 if self.is_mounted(p)]
+
+    # ---- Artifact duplicate detection ----------------------------------
+
+    def find_duplicate_iccids(self, profile: StorageProfile,
+                              iccids: list[str]) -> list[str]:
+        """Check if any *iccids* already appear in artifact CSVs on the share.
+
+        Scans all ``.csv`` files in the profile's artifact sub-directory.
+        Returns the subset of *iccids* that were found (i.e. already
+        exported).  Returns an empty list if the share is not mounted
+        or no duplicates are found.
+        """
+        if not self.is_mounted(profile):
+            return []
+
+        artifact_dir = os.path.join(profile.mount_point,
+                                    profile.export_subdir)
+        if not os.path.isdir(artifact_dir):
+            return []
+
+        iccid_set = set(iccids)
+        found: set[str] = set()
+
+        import csv as _csv
+        for fname in os.listdir(artifact_dir):
+            if not fname.lower().endswith(".csv"):
+                continue
+            fpath = os.path.join(artifact_dir, fname)
+            try:
+                with open(fpath, "r", newline="", encoding="utf-8-sig") as fh:
+                    reader = _csv.DictReader(fh)
+                    for row in reader:
+                        val = row.get("ICCID", "").strip()
+                        if val in iccid_set:
+                            found.add(val)
+            except (OSError, UnicodeDecodeError, _csv.Error):
+                continue  # skip unreadable files
+
+            # Early exit if we've found all of them
+            if found == iccid_set:
+                break
+
+        return sorted(found)
 
     # ---- Internal helpers ----------------------------------------------
 
