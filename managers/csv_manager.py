@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Dict, List, Optional, Tuple
 
-from utils.validation import validate_card_data
+from utils.validation import _decode_adm1_if_hex_encoded, validate_card_data
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,10 @@ class CSVManager:
                 {col_map.get(k, k): v for k, v in card.items()}
                 for card in raw_cards
             ]
+            # Decode hex-encoded ASCII ADM1 PINs (e.g. 3838383838383838 → 88888888)
+            for card in self.cards:
+                if 'ADM1' in card:
+                    card['ADM1'] = _decode_adm1_if_hex_encoded(card['ADM1'])
             self.filepath = filepath
             return True
         except Exception as e:

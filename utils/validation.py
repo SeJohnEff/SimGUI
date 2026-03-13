@@ -15,6 +15,31 @@ _ADM1_HEX_RE = re.compile(r'^[0-9a-fA-F]{16}$')
 _HEX_RE = re.compile(r'^[0-9a-fA-F]+$')
 
 
+def _decode_adm1_if_hex_encoded(value: str) -> str:
+    """Decode ADM1 if it is a hex-encoded ASCII decimal PIN.
+
+    Some SIM data files store the ADM1 PIN as hex-encoded ASCII.  For example
+    ``3838383838383838`` encodes the 8-digit decimal PIN ``88888888`` (each
+    byte ``0x38`` is ASCII ``'8'``).
+
+    Rules:
+    * If the value is exactly 16 hex characters **and** every decoded byte is
+      an ASCII digit (``0x30``–``0x39``), return the decoded 8-char string.
+    * Otherwise return the value unchanged.
+    """
+    if not value or len(value) != 16:
+        return value
+    if not _ADM1_HEX_RE.match(value):
+        return value
+    try:
+        decoded = bytes.fromhex(value).decode('ascii')
+    except (ValueError, UnicodeDecodeError):
+        return value
+    if _ADM1_DECIMAL_RE.match(decoded):
+        return decoded
+    return value
+
+
 def validate_adm1(value: str) -> Optional[str]:
     """Validate an ADM1 key.
 

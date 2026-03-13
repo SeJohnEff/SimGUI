@@ -7,6 +7,7 @@ import tempfile
 import pytest
 
 from managers.csv_manager import CSVManager, _normalize_column
+from utils.validation import _decode_adm1_if_hex_encoded
 
 
 # -- Test data ---------------------------------------------------------------
@@ -97,7 +98,7 @@ class TestWhitespaceFormat:
             mgr = CSVManager()
             mgr.load_csv(path)
             card = mgr.get_card(0)
-            assert card["ADM1"] == "3838383838383838"
+            assert card["ADM1"] == "88888888"
         finally:
             os.unlink(path)
 
@@ -185,7 +186,7 @@ class TestCommaFormat:
         assert mgr.load_csv(txt_path) is True
         assert mgr.get_card_count() == 100
         card = mgr.get_card(0)
-        assert card["ADM1"] == "3838383838383838"
+        assert card["ADM1"] == "88888888"
         assert "MSISDN" in mgr.columns
 
 
@@ -256,7 +257,7 @@ class TestSaveAfterLoad:
 
             # Verify data integrity
             card = mgr2.get_card(0)
-            assert card["ADM1"] == "3838383838383838"
+            assert card["ADM1"] == "88888888"
             assert card["MSISDN"] == "999880000200000"
         finally:
             os.unlink(txt_path)
@@ -309,3 +310,100 @@ class TestEdgeCases:
             assert mgr.load_csv(path) is False
         finally:
             os.unlink(path)
+
+
+# -- ADM1 hex-decode helper --------------------------------------------------
+
+class TestDecodeAdm1HexEncoded:
+    """Unit tests for _decode_adm1_if_hex_encoded()."""
+
+    def test_hex_encoded_all_eights(self):
+        # 0x38 = ASCII '8', repeated 8 times
+        assert _decode_adm1_if_hex_encoded("3838383838383838") == "88888888"
+
+    def test_hex_encoded_sequential_digits(self):
+        # "12345678" → hex 31 32 33 34 35 36 37 38
+        assert _decode_adm1_if_hex_encoded("3132333435363738") == "12345678"
+
+    def test_hex_encoded_all_zeros(self):
+        # "00000000" → hex 30 30 30 30 30 30 30 30
+        assert _decode_adm1_if_hex_encoded("3030303030303030") == "00000000"
+
+    def test_hex_encoded_all_nines(self):
+        # "99999999" → hex 39 39 39 39 39 39 39 39
+        assert _decode_adm1_if_hex_encoded("3939393939393939") == "99999999"
+
+    def test_eight_digit_decimal_unchanged(self):
+        assert _decode_adm1_if_hex_encoded("76510072") == "76510072"
+
+    def test_eight_digit_decimal_all_eights(self):
+        assert _decode_adm1_if_hex_encoded("88888888") == "88888888"
+
+    def test_genuine_hex_key_non_ascii_digits(self):
+        # Contains bytes outside 0x30-0x39 when decoded
+        assert _decode_adm1_if_hex_encoded("4A7163A109000000") == "4A7163A109000000"
+
+    def test_genuine_hex_key_letters(self):
+        assert _decode_adm1_if_hex_encoded("AABBCCDD11223344") == "AABBCCDD11223344"
+
+    def test_empty_string(self):
+        assert _decode_adm1_if_hex_encoded("") == ""
+
+    def test_short_hex(self):
+        # 10 hex chars — not 16, so unchanged
+        assert _decode_adm1_if_hex_encoded("4A7163A109") == "4A7163A109"
+
+    def test_non_hex_chars(self):
+        assert _decode_adm1_if_hex_encoded("ZZZZZZZZZZZZZZZZ") == "ZZZZZZZZZZZZZZZZ"
+
+    def test_mixed_decodable_non_digit(self):
+        # 16 hex chars, but decoded bytes include 0x41='A' (not a digit)
+        assert _decode_adm1_if_hex_encoded("4142434445464748") == "4142434445464748"
+
+
+# -- ADM1 decode integration in CSV loading ----------------------------------
+
+class TestAdm1DecodeIntegration:
+    """Verify ADM1 hex-decode happens during load_csv()."""
+
+    def test_whitespace_file_adm1_decoded(self):
+        content = WHITESPACE_HEADER + "\n" + WHITESPACE_ROWS[0] + "\n"
+        path = _write_tmp(content, suffix=".txt")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            card = mgr.get_card(0)
+            assert card["ADM1"] == "88888888"
+        finally:
+            os.unlink(path)
+
+    def test_comma_csv_decimal_adm1_unchanged(self):
+        content = COMMA_HEADER + "\n" + COMMA_ROWS[0] + "\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            card = mgr.get_card(0)
+            assert card["ADM1"] == "76510072"
+        finally:
+            os.unlink(path)
+
+    def test_real_fiskarheden_file_decoded(self):
+        txt_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "simFiskarheden_876549639.txt")
+        if not os.path.exists(txt_path):
+            pytest.skip("simFiskarheden_876549639.txt not found")
+        mgr = CSVManager()
+        mgr.load_csv(txt_path)
+        card = mgr.get_card(0)
+        assert card["ADM1"] == "88888888"
+
+    def test_real_sysmocom_file_unchanged(self):
+        csv_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "sysmocom_sim_data.csv")
+        if not os.path.exists(csv_path):
+            pytest.skip("sysmocom_sim_data.csv not found")
+        mgr = CSVManager()
+        mgr.load_csv(csv_path)
+        card = mgr.get_card(0)
+        assert card["ADM1"] == "76510072"
