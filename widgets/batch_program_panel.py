@@ -734,6 +734,20 @@ class BatchProgramPanel(ttk.Frame):
         except Exception as exc:
             messagebox.showerror("Export Error", str(exc))
 
+    # ---- public API (used by main.py for artifact export) ---------------
+
+    def get_programmed_records(self) -> list[dict[str, str]]:
+        """Return card data dicts for successfully programmed cards.
+
+        Matches batch results (by index) back to the preview data that
+        was sent for programming.  Only returns cards that succeeded.
+        """
+        if not self._batch_mgr.results or not self._preview_data:
+            return []
+        ok_indices = {r.index for r in self._batch_mgr.results if r.success}
+        return [self._preview_data[i] for i in sorted(ok_indices)
+                if i < len(self._preview_data)]
+
     # ---- settings persistence ------------------------------------------
 
     def _load_settings(self):

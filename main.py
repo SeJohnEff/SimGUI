@@ -25,6 +25,9 @@ from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.batch_program_panel import BatchProgramPanel
 from dialogs.adm1_dialog import ADM1Dialog
 from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
+from dialogs.network_storage_dialog import NetworkStorageDialog
+from dialogs.artifact_export_dialog import ArtifactExportDialog
+from managers.network_storage_manager import NetworkStorageManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +66,7 @@ class SimGUIApp:
         self._card_manager = CardManager()
         self._backup_manager = BackupManager()
         self._settings = SettingsManager()
+        self._ns_manager = NetworkStorageManager(self._settings)
 
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
@@ -154,6 +158,11 @@ class SimGUIApp:
                               accelerator="Ctrl+O")
         file_menu.add_command(label="Save CSV...", command=self._on_save_csv,
                               accelerator="Ctrl+S")
+        file_menu.add_separator()
+        file_menu.add_command(label="Network Storage...",
+                              command=self._on_network_storage)
+        file_menu.add_command(label="Export Artifacts...",
+                              command=self._on_export_artifacts)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_close,
                               accelerator="Ctrl+Q")
@@ -344,6 +353,34 @@ class SimGUIApp:
         self._on_detect_card()
         self._status_var.set("[SIM] Simulator reset")
 
+    def _on_network_storage(self):
+        """Open the network storage connection dialog."""
+        NetworkStorageDialog(self.root, self._ns_manager)
+
+    def _on_export_artifacts(self):
+        """Open the artifact export dialog with data from the last batch run."""
+        # Collect records: prefer batch panel results, fall back to read data
+        records = []
+        try:
+            records = self._batch_panel.get_programmed_records()
+        except (AttributeError, Exception):
+            pass
+        if not records and self.last_read_data:
+            records = [self.last_read_data]
+        if not records:
+            messagebox.showinfo(
+                "No Data",
+                "No programming results to export.\n\n"
+                "Run a batch program or read a card first.")
+            return
+        # Get default fields from first connected profile, if any
+        default_fields = None
+        profiles = self._ns_manager.load_profiles()
+        if profiles:
+            default_fields = profiles[0].export_fields
+        ArtifactExportDialog(self.root, records, self._ns_manager,
+                             default_fields)
+
     def _on_about(self):
         messagebox.showinfo(
             "About SimGUI",
@@ -363,6 +400,7 @@ class SimGUIApp:
                 self._on_save_csv()
         self._settings.set("window_geometry", self.root.geometry())
         self._settings.save()
+        self._ns_manager.unmount_all()
         self.root.destroy()
 
     # ---- Run --------------------------------------------------------------
