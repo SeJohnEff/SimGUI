@@ -1,1 +1,35 @@
-#!/usr/bin/make -f\n%:\n\tdh $@\n\n# Nothing to compile \u2014 pure Python application\noverride_dh_auto_build:\n\t@true\n\n# Tests run in CI, not during package build\noverride_dh_auto_test:\n\t@true\n\noverride_dh_auto_install:\n\t# Install application files\n\tinstall -d $(CURDIR)/debian/simgui/opt/simgui\n\tcp -r main.py theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ $(CURDIR)/debian/simgui/opt/simgui/\n\t# Launcher\n\tinstall -d $(CURDIR)/debian/simgui/usr/bin\n\tinstall -m 755 debian/simgui-launcher $(CURDIR)/debian/simgui/usr/bin/simgui\n\t# Desktop entry\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/applications\n\tinstall -m 644 debian/simgui.desktop $(CURDIR)/debian/simgui/usr/share/applications/\n\t# Icons into hicolor theme (required for GNOME launcher)\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps\n\tinstall -m 644 assets/simgui-16.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps/simgui.png\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps\n\tinstall -m 644 assets/simgui-32.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps/simgui.png\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps\n\tinstall -m 644 assets/simgui-48.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps/simgui.png\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps\n\tinstall -m 644 assets/simgui-64.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps/simgui.png\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps\n\tinstall -m 644 assets/simgui-128.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps/simgui.png\n\tinstall -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps\n\tinstall -m 644 assets/simgui-256.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps/simgui.png\n
+#!/usr/bin/make -f
+%:
+	dh $@
+
+# Nothing to compile — pure Python application
+override_dh_auto_build:
+	@true
+
+# Tests run in CI, not during package build
+override_dh_auto_test:
+	@true
+
+override_dh_auto_install:
+	# Install application files
+	install -d $(CURDIR)/debian/simgui/opt/simgui
+	cp -r main.py theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ $(CURDIR)/debian/simgui/opt/simgui/
+	# Launcher
+	install -d $(CURDIR)/debian/simgui/usr/bin
+	install -m 755 debian/simgui-launcher $(CURDIR)/debian/simgui/usr/bin/simgui
+	# Desktop entry
+	install -d $(CURDIR)/debian/simgui/usr/share/applications
+	install -m 644 debian/simgui.desktop $(CURDIR)/debian/simgui/usr/share/applications/
+	# Icons into hicolor theme (required for GNOME launcher)
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps
+	install -m 644 assets/simgui-16.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/16x16/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps
+	install -m 644 assets/simgui-32.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/32x32/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps
+	install -m 644 assets/simgui-48.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/48x48/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps
+	install -m 644 assets/simgui-64.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/64x64/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps
+	install -m 644 assets/simgui-128.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/128x128/apps/simgui.png
+	install -d $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps
+	install -m 644 assets/simgui-256.png $(CURDIR)/debian/simgui/usr/share/icons/hicolor/256x256/apps/simgui.png

@@ -1,1 +1,88 @@
-#!/bin/bash\n# ---------------------------------------------------------------\n#  SimGUI installer \u2014 run on a fresh Ubuntu 22.04+ desktop:\n#\n#    curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash\n#\n#  What it does:\n#    1. Installs build dependencies (git, dpkg-dev, debhelper)\n#    2. Clones the repo into a temp directory\n#    3. Builds the .deb package\n#    4. Installs the .deb (pulls in runtime deps automatically)\n#    5. Cleans up the temp directory\n#\n#  After install, launch with:  simgui\n# ---------------------------------------------------------------\nset -euo pipefail\n\nREPO_URL=\"https://github.com/SeJohnEff/SimGUI.git\"\nBRANCH=\"main\"\n\n# --- Colours (if terminal supports them) -----------------------\nif [ -t 1 ]; then\n    BOLD=\"\\033[1m\"\n    GREEN=\"\\033[32m\"\n    YELLOW=\"\\033[33m\"\n    RED=\"\\033[31m\"\n    RESET=\"\\033[0m\"\nelse\n    BOLD=\"\" GREEN=\"\" YELLOW=\"\" RED=\"\" RESET=\"\"\nfi\n\ninfo()  { echo -e \"${GREEN}${BOLD}[SimGUI]${RESET} $*\"; }\nwarn()  { echo -e \"${YELLOW}${BOLD}[SimGUI]${RESET} $*\"; }\nerror() { echo -e \"${RED}${BOLD}[SimGUI]${RESET} $*\" >&2; }\n\n# --- Pre-flight checks -----------------------------------------\nif [ \"$(id -u)\" -ne 0 ]; then\n    error \"This script must be run as root (use sudo).\"\n    exit 1\nfi\n\ninfo \"Installing build dependencies...\"\napt-get update -qq\napt-get install -y -qq git dpkg-dev debhelper > /dev/null\n\n# --- Clone into temp directory ----------------------------------\nBUILD_DIR=$(mktemp -d /tmp/simgui-build.XXXXXX)\ntrap 'rm -rf \"$BUILD_DIR\"' EXIT\n\ninfo \"Cloning SimGUI ($BRANCH)...\"\ngit clone --depth 1 --branch \"$BRANCH\" \"$REPO_URL\" \"$BUILD_DIR/SimGUI\" 2>&1 | tail -1\n\n# --- Build .deb -------------------------------------------------\ninfo \"Building .deb package...\"\ncd \"$BUILD_DIR/SimGUI\"\nBUILD_LOG=\"$BUILD_DIR/build.log\"\nif ! dpkg-buildpackage -us -uc -b > \"$BUILD_LOG\" 2>&1; then\n    error \"Build failed. Last 30 lines of build log:\"\n    tail -30 \"$BUILD_LOG\" >&2\n    exit 1\nfi\n\nDEB=$(ls \"$BUILD_DIR\"/simgui_*.deb 2>/dev/null | head -1)\nif [ -z \"$DEB\" ]; then\n    error \"Build failed \u2014 no .deb produced.\"\n    exit 1\nfi\n\n# --- Install ----------------------------------------------------\ninfo \"Installing $(basename \"$DEB\")...\"\n# dpkg -i will exit non-zero when dependencies are missing \u2014 that is\n# expected.  apt-get install -f resolves them immediately after.\ndpkg -i \"$DEB\" 2>&1 | grep -v \"^dpkg:\" || true\napt-get install -f -y -qq\n\n# Verify the package is fully installed\nif ! dpkg -s simgui >/dev/null 2>&1; then\n    error \"Installation failed. Run 'sudo apt install -f' manually and check for errors.\"\n    exit 1\nfi\n\n# --- Done -------------------------------------------------------\nVERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo \"unknown\")\ninfo \"SimGUI $VERSION installed successfully.\"\necho \"\"\necho -e \"  Launch from terminal:  ${BOLD}simgui${RESET}\"\necho -e \"  Or find ${BOLD}SimGUI${RESET} in your applications menu.\"\necho \"\"\n
+#!/bin/bash
+# ---------------------------------------------------------------
+#  SimGUI installer — run on a fresh Ubuntu 22.04+ desktop:
+#
+#    curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+#
+#  What it does:
+#    1. Installs build dependencies (git, dpkg-dev, debhelper)
+#    2. Clones the repo into a temp directory
+#    3. Builds the .deb package
+#    4. Installs the .deb (pulls in runtime deps automatically)
+#    5. Cleans up the temp directory
+#
+#  After install, launch with:  simgui
+# ---------------------------------------------------------------
+set -euo pipefail
+
+REPO_URL="https://github.com/SeJohnEff/SimGUI.git"
+BRANCH="main"
+
+# --- Colours (if terminal supports them) -----------------------
+if [ -t 1 ]; then
+    BOLD="\033[1m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    RED="\033[31m"
+    RESET="\033[0m"
+else
+    BOLD="" GREEN="" YELLOW="" RED="" RESET=""
+fi
+
+info()  { echo -e "${GREEN}${BOLD}[SimGUI]${RESET} $*"; }
+warn()  { echo -e "${YELLOW}${BOLD}[SimGUI]${RESET} $*"; }
+error() { echo -e "${RED}${BOLD}[SimGUI]${RESET} $*" >&2; }
+
+# --- Pre-flight checks -----------------------------------------
+if [ "$(id -u)" -ne 0 ]; then
+    error "This script must be run as root (use sudo)."
+    exit 1
+fi
+
+info "Installing build dependencies..."
+apt-get update -qq
+apt-get install -y -qq git dpkg-dev debhelper > /dev/null
+
+# --- Clone into temp directory ----------------------------------
+BUILD_DIR=$(mktemp -d /tmp/simgui-build.XXXXXX)
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
+info "Cloning SimGUI ($BRANCH)..."
+git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$BUILD_DIR/SimGUI" 2>&1 | tail -1
+
+# --- Build .deb -------------------------------------------------
+info "Building .deb package..."
+cd "$BUILD_DIR/SimGUI"
+BUILD_LOG="$BUILD_DIR/build.log"
+if ! dpkg-buildpackage -us -uc -b > "$BUILD_LOG" 2>&1; then
+    error "Build failed. Last 30 lines of build log:"
+    tail -30 "$BUILD_LOG" >&2
+    exit 1
+fi
+
+DEB=$(ls "$BUILD_DIR"/simgui_*.deb 2>/dev/null | head -1)
+if [ -z "$DEB" ]; then
+    error "Build failed — no .deb produced."
+    exit 1
+fi
+
+# --- Install ----------------------------------------------------
+info "Installing $(basename "$DEB")..."
+# dpkg -i will exit non-zero when dependencies are missing — that is
+# expected.  apt-get install -f resolves them immediately after.
+dpkg -i "$DEB" 2>&1 | grep -v "^dpkg:" || true
+apt-get install -f -y -qq
+
+# Verify the package is fully installed
+if ! dpkg -s simgui >/dev/null 2>&1; then
+    error "Installation failed. Run 'sudo apt install -f' manually and check for errors."
+    exit 1
+fi
+
+# --- Done -------------------------------------------------------
+VERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo "unknown")
+info "SimGUI $VERSION installed successfully."
+echo ""
+echo -e "  Launch from terminal:  ${BOLD}simgui${RESET}"
+echo -e "  Or find ${BOLD}SimGUI${RESET} in your applications menu."
+echo ""

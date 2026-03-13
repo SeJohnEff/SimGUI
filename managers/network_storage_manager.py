@@ -271,11 +271,14 @@ class NetworkStorageManager:
     def _test_smb(self, profile: StorageProfile) -> tuple[bool, str]:
         """Test SMB connectivity with smbclient."""
         src = profile.source_path
-        cmd = ["smbclient", src, "-N", "-c", "ls"]
         if profile.username:
             cmd = ["smbclient", src,
-                   "-U", f"{profile.username}%{profile.password}",
-                   "-c", "ls"]
+                   "-U", f"{profile.username}%{profile.password}"]
+            if profile.domain:
+                cmd.extend(["-W", profile.domain])
+            cmd.extend(["-c", "ls"])
+        else:
+            cmd = ["smbclient", src, "-N", "-c", "ls"]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if r.returncode == 0:
