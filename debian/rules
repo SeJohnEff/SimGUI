@@ -2,6 +2,14 @@
 %:
 	dh $@
 
+# Nothing to compile — pure Python application
+override_dh_auto_build:
+	@true
+
+# Tests run in CI, not during package build
+override_dh_auto_test:
+	@true
+
 override_dh_auto_install:
 	# Install application files
 	install -d $(CURDIR)/debian/simgui/opt/simgui
