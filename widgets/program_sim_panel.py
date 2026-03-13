@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 from managers.card_manager import CardManager
 from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
 from theme import ModernTheme
+from utils import get_browse_initial_dir
 from widgets.tooltip import add_tooltip
 
 # Fields shown in the form.  Tuple: (key, label, editable_when_csv)
@@ -30,9 +31,12 @@ class ProgramSIMPanel(ttk.Frame):
     """Tab for programming a single SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
-                 last_read_data: dict | None = None, **kwargs):
+                 last_read_data: dict | None = None,
+                 ns_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
+        self._ns_manager = ns_manager
+        self._last_browse_dir: str | None = None
         self._csv = CSVManager()
         self._last_read_data = last_read_data if last_read_data is not None else {}
         self._mode_var = tk.StringVar(value="manual")
@@ -105,7 +109,7 @@ class ProgramSIMPanel(ttk.Frame):
             "IMSI": "International Mobile Subscriber Identity.\n6-15 digits. Example: 99988000301001",
             "Ki": "Authentication key (hex).\n32 hex characters. Example: E049AF7D...C03FD919",
             "OPc": "Operator key (hex).\n32 hex characters. Example: 9EB1A951...D4053A0E",
-            "ADM1": "Admin key for card access.\n8 decimal digits or 16 hex chars.\n\u26a0 3 wrong attempts = permanent lock!",
+            "ADM1": "Admin key for card access.\n8 decimal digits or 16 hex chars.\n⚠ 3 wrong attempts = permanent lock!",
             "ACC": "Access Control Class.\n4 hex digits. Example: 0001",
             "SPN": "Service Provider Name.\nExample: BOLIDEN",
             "FPLMN": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
@@ -187,7 +191,7 @@ class ProgramSIMPanel(ttk.Frame):
         """Fill form fields from the shared last-read card data."""
         if not self._last_read_data:
             self._action_status.configure(
-                text="No card data available \u2014 read a card first on the Read SIM tab",
+                text="No card data available — read a card first on the Read SIM tab",
                 style="Warning.TLabel")
             return
         for read_key, form_key in self._READ_KEY_MAP.items():
@@ -201,11 +205,15 @@ class ProgramSIMPanel(ttk.Frame):
     # ---- CSV -----------------------------------------------------------
 
     def _on_browse_csv(self):
-        path = filedialog.askopenfilename(
-            title="Open SIM Data File",
-            filetypes=SIM_DATA_FILETYPES)
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        path = filedialog.askopenfilename(**kwargs)
         if not path:
             return
+        import os
+        self._last_browse_dir = os.path.dirname(path)
         self.load_csv_file(path)
 
     def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
