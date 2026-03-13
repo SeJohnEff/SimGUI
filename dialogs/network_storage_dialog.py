@@ -1,1 +1,803 @@
-"""\nNetwork Storage Dialog \u2014 Configure and connect NFS / SMB shares.\n\nAllows the user to create, edit, test, connect, and disconnect\nnetwork storage profiles.  Profiles are persisted across sessions.\n\nUX flow:\n  1. Fill in the form (or pick a discovered server).\n  2. Click **Save & Connect** \u2014 profile is saved and mounted in one step.\n  3. To tweak an existing profile, select it, edit, click **Update** or\n     **Save & Connect** again.\n\nUX principles:\n- User enters plain hostname / IP \u2014 never ``smb://`` or ``nfs://``\n- Server field is a combobox with history of previously used servers\n- \"Remember credentials\" checkbox controls secure credential file\n- All input is sanitised (protocol prefixes stripped automatically)\n- No phantom profiles \u2014 \"New\" just clears the form, nothing is persisted\n  until the user explicitly saves.\n"""\n\nimport threading\nimport tkinter as tk\nfrom tkinter import messagebox, ttk\n\nfrom managers.network_storage_manager import (\n    NetworkStorageManager,\n    StorageProfile,\n)\nfrom theme import ModernTheme\nfrom utils.network_scanner import (\n    DiscoveredServer,\n    list_smb_shares,\n    scan_smb_servers,\n)\n\n_ALL_EXPORT_FIELDS = [\n    "ICCID", "IMSI", "Ki", "OPc", "ADM1",\n    "PIN1", "PIN2", "PUK1", "PUK2",\n    "ACC", "MSISDN", "MNC Length",\n    "KIC1", "KID1", "KIK1",\n    "KIC2", "KID2", "KIK2",\n    "KIC3", "KID3", "KIK3",\n    "SUCI Scheme", "SUCI Routing Ind.", "SUCI HN PubKey",\n]\n\n\ndef _sanitise_server(raw: str) -> str:\n    """Strip protocol prefixes and trailing slashes from a server entry.\n\n    Users might paste ``smb://nas.local/share`` or ``nfs://10.0.0.1/data``.\n    We only want the hostname / IP part.\n    """\n    s = raw.strip()\n    for prefix in ("smb://", "cifs://", "nfs://", "//"):\n        if s.lower().startswith(prefix):\n            s = s[len(prefix):]\n    # If they pasted a full path, take only the first component\n    s = s.split("/")[0]\n    return s.strip()\n\n\ndef _sanitise_share(raw: str, protocol: str) -> str:\n    """Clean up share / export path input."""\n    s = raw.strip()\n    if protocol == "smb":\n        # Remove any leading slashes for SMB share name\n        s = s.strip("/")\n    else:\n        # NFS: ensure leading slash\n        if s and not s.startswith("/"):\n            s = "/" + s\n    return s\n\n\ndef _auto_name(server: str, share: str, protocol: str) -> str:\n    """Generate a human-friendly profile name from server + share."""\n    if server and share:\n        return f"{share} on {server} ({protocol.upper()})"\n    if server:\n        return f"{server} ({protocol.upper()})"\n    return f"New connection"\n\n\nclass NetworkStorageDialog(tk.Toplevel):\n    """Modal dialog for managing network storage connections."""\n\n    def __init__(self, parent, ns_manager: NetworkStorageManager):\n        super().__init__(parent)\n        self.title("Network Storage")\n        self.geometry("640x760")\n        self.minsize(580, 500)\n        self.resizable(True, True)\n        self.transient(parent)\n        self.grab_set()\n\n        self._ns = ns_manager\n        self._profiles: list[StorageProfile] = ns_manager.load_profiles()\n        self._current_idx: int | None = None\n        self._field_vars: dict[str, tk.BooleanVar] = {}\n        self._tooltip_win: tk.Toplevel | None = None\n        self._dirty: bool = False  # True when form has unsaved changes\n\n        # Build server history from saved profiles\n        self._server_history: list[str] = self._build_server_history()\n\n        self._build_ui()\n        self._refresh_profile_list()\n\n        if self._profiles:\n            self._profile_list.selection_set(0)\n            self._on_profile_select(None)\n        else:\n            # First-time: form is blank, ready to fill\n            self._enter_new_mode()\n\n    # ---- helpers -------------------------------------------------------\n\n    def _build_server_history(self) -> list[str]:\n        """Collect unique servers from saved profiles for the combobox."""\n        seen = set()\n        servers = []\n        for p in self._profiles:\n            s = p.server.strip()\n            if s and s not in seen:\n                seen.add(s)\n                servers.append(s)\n        return servers\n\n    def _update_server_history(self, server: str):\n        """Add a server to the history if not already present."""\n        server = server.strip()\n        if server and server not in self._server_history:\n            self._server_history.append(server)\n            self._server_combo["values"] = self._server_history\n\n    # ---- UI construction -----------------------------------------------\n\n    def _build_ui(self):\n        pad = ModernTheme.get_padding("medium")\n\n        # --- Scrollable container for the entire dialog body ---\n        self._canvas = tk.Canvas(self, highlightthickness=0)\n        self._vscroll = ttk.Scrollbar(self, orient=tk.VERTICAL,\n                                       command=self._canvas.yview)\n        self._canvas.configure(yscrollcommand=self._vscroll.set)\n        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)\n        self._canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)\n\n        self._body = ttk.Frame(self._canvas)\n        self._body_id = self._canvas.create_window(\n            (0, 0), window=self._body, anchor="nw")\n\n        # Resize the inner frame with the canvas width\n        self._canvas.bind("<Configure>", self._on_canvas_configure)\n        self._body.bind("<Configure>", self._on_body_configure)\n        # Mouse-wheel scrolling (Linux + Windows + macOS)\n        self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)\n        self._canvas.bind_all("<Button-4>", self._on_mousewheel)\n        self._canvas.bind_all("<Button-5>", self._on_mousewheel)\n\n        # \u2500\u2500 Saved connections \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n        top = ttk.Frame(self._body)\n        top.pack(fill=tk.X, padx=pad, pady=(pad, 0))\n\n        ttk.Label(top, text="Saved connections:",\n                  style="Subheading.TLabel").pack(side=tk.LEFT)\n\n        btn_row = ttk.Frame(top)\n        btn_row.pack(side=tk.RIGHT)\n        ttk.Button(btn_row, text="New", width=6,\n                   command=self._on_new).pack(side=tk.LEFT, padx=2)\n        self._remove_btn = ttk.Button(btn_row, text="Remove", width=8,\n                                       command=self._on_remove)\n        self._remove_btn.pack(side=tk.LEFT, padx=2)\n\n        self._profile_list = tk.Listbox(self._body, height=4,\n                                         exportselection=False)\n        self._profile_list.pack(fill=tk.X, padx=pad, pady=(4, pad))\n        self._profile_list.bind("<<ListboxSelect>>", self._on_profile_select)\n\n        # \u2500\u2500 Connection Details form \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n        form = ttk.LabelFrame(self._body, text="Connection Details")\n        form.pack(fill=tk.X, padx=pad, pady=(0, pad))\n        form_inner = ttk.Frame(form)\n        form_inner.pack(fill=tk.X, padx=pad, pady=pad)\n\n        row = 0\n        # Name (auto-generated if left blank)\n        ttk.Label(form_inner, text="Name:").grid(\n            row=row, column=0, sticky=tk.W, pady=2)\n        self._label_var = tk.StringVar()\n        ttk.Entry(form_inner, textvariable=self._label_var, width=30).grid(\n            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))\n        ttk.Label(form_inner, text="(auto-generated if blank)",\n                  style="Small.TLabel").grid(\n            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))\n\n        # Protocol\n        row += 2\n        ttk.Label(form_inner, text="Protocol:").grid(\n            row=row, column=0, sticky=tk.W, pady=2)\n        self._proto_var = tk.StringVar(value="smb")\n        proto_frame = ttk.Frame(form_inner)\n        proto_frame.grid(row=row, column=1, columnspan=2, sticky=tk.W, pady=2,\n                         padx=(4, 0))\n        ttk.Radiobutton(proto_frame, text="SMB / CIFS",\n                        variable=self._proto_var, value="smb",\n                        command=self._on_proto_change).pack(side=tk.LEFT)\n        ttk.Radiobutton(proto_frame, text="NFS",\n                        variable=self._proto_var, value="nfs",\n                        command=self._on_proto_change).pack(side=tk.LEFT,\n                                                            padx=(pad, 0))\n\n        # Server (combobox with history) + Scan button\n        row += 1\n        ttk.Label(form_inner, text="Server:").grid(\n            row=row, column=0, sticky=tk.W, pady=2)\n        self._server_var = tk.StringVar()\n        self._server_combo = ttk.Combobox(\n            form_inner, textvariable=self._server_var, width=28,\n            values=self._server_history)\n        self._server_combo.grid(\n            row=row, column=1, sticky=tk.EW, pady=2, padx=(4, 0))\n        # Sanitise on focus-out (strip smb:// etc.)\n        self._server_combo.bind("<FocusOut>", self._on_server_focus_out)\n\n        self._scan_btn = ttk.Button(\n            form_inner, text="Scan Network", width=13,\n            command=self._on_scan_network,\n        )\n        self._scan_btn.grid(row=row, column=2, sticky=tk.W, padx=(4, 0))\n\n        # Hint below server\n        ttk.Label(form_inner, text="Hostname or IP address (e.g. 192.168.1.10)",\n                  style="Small.TLabel").grid(\n            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))\n\n        # Discovery results panel\n        row += 2\n        self._discovery_frame = ttk.LabelFrame(\n            form_inner, text="Discovered Servers",\n        )\n        self._discovery_frame.grid(\n            row=row, column=0, columnspan=3, sticky=tk.EW, pady=(2, 4),\n        )\n        # Container for treeview + scrollbars\n        tree_container = ttk.Frame(self._discovery_frame)\n        tree_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)\n\n        self._discovery_tree = ttk.Treeview(\n            tree_container, height=3, show="headings",\n            columns=("name", "ip", "shares"),\n        )\n        self._discovery_tree.heading("name", text="Name")\n        self._discovery_tree.heading("ip", text="IP Address")\n        self._discovery_tree.heading("shares", text="Shares")\n        self._discovery_tree.column("name", width=140, minwidth=80,\n                                      stretch=False)\n        self._discovery_tree.column("ip", width=120, minwidth=80,\n                                    stretch=False)\n        self._discovery_tree.column("shares", width=400, minwidth=120,\n                                    stretch=False)\n\n        # Vertical scrollbar\n        tree_vscroll = ttk.Scrollbar(\n            tree_container, orient=tk.VERTICAL,\n            command=self._discovery_tree.yview)\n        self._discovery_tree.configure(yscrollcommand=tree_vscroll.set)\n\n        # Horizontal scrollbar for long share lists\n        tree_hscroll = ttk.Scrollbar(\n            tree_container, orient=tk.HORIZONTAL,\n            command=self._discovery_tree.xview)\n        self._discovery_tree.configure(xscrollcommand=tree_hscroll.set)\n\n        self._discovery_tree.grid(row=0, column=0, sticky="nsew")\n        tree_vscroll.grid(row=0, column=1, sticky="ns")\n        tree_hscroll.grid(row=1, column=0, sticky="ew")\n        tree_container.columnconfigure(0, weight=1)\n        tree_container.rowconfigure(0, weight=1)\n\n        self._discovery_tree.bind(\n            "<<TreeviewSelect>>", self._on_discovery_select,\n        )\n        # Tooltip on hover over truncated shares\n        self._discovery_tree.bind("<Motion>", self._on_tree_motion)\n        self._discovery_tree.bind("<Leave>", self._hide_tooltip)\n        self._discovered_servers: list[DiscoveredServer] = []\n        # Hide the discovery panel initially\n        self._discovery_frame.grid_remove()\n\n        # Share\n        row += 1\n        self._share_label = ttk.Label(form_inner, text="Share name:")\n        self._share_label.grid(row=row, column=0, sticky=tk.W, pady=2)\n        self._share_var = tk.StringVar()\n        ttk.Entry(form_inner, textvariable=self._share_var, width=30).grid(\n            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))\n\n        # Username (SMB only)\n        row += 1\n        self._user_label = ttk.Label(form_inner, text="Username:")\n        self._user_label.grid(row=row, column=0, sticky=tk.W, pady=2)\n        self._user_var = tk.StringVar()\n        self._user_entry = ttk.Entry(form_inner, textvariable=self._user_var,\n                                      width=30)\n        self._user_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW,\n                               pady=2, padx=(4, 0))\n\n        # Password (SMB only)\n        row += 1\n        self._pass_label = ttk.Label(form_inner, text="Password:")\n        self._pass_label.grid(row=row, column=0, sticky=tk.W, pady=2)\n        self._pass_var = tk.StringVar()\n        self._pass_entry = ttk.Entry(form_inner, textvariable=self._pass_var,\n                                      width=30, show="\u2022")\n        self._pass_entry.grid(row=row, column=1, sticky=tk.EW,\n                               pady=2, padx=(4, 0))\n        # Remember credentials checkbox\n        self._remember_var = tk.BooleanVar(value=True)\n        ttk.Checkbutton(form_inner, text="Remember",\n                        variable=self._remember_var).grid(\n            row=row, column=2, sticky=tk.W, padx=(4, 0))\n\n        # Domain (SMB only)\n        row += 1\n        self._domain_label = ttk.Label(form_inner, text="Domain:")\n        self._domain_label.grid(row=row, column=0, sticky=tk.W, pady=2)\n        self._domain_var = tk.StringVar()\n        self._domain_entry = ttk.Entry(form_inner,\n                                        textvariable=self._domain_var,\n                                        width=30)\n        self._domain_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW,\n                                 pady=2, padx=(4, 0))\n        ttk.Label(form_inner, text="Leave blank for most home/office servers",\n                  style="Small.TLabel").grid(\n            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))\n\n        # Export sub-directory\n        row += 2\n        ttk.Label(form_inner, text="Artifact folder:").grid(\n            row=row, column=0, sticky=tk.W, pady=2)\n        self._export_dir_var = tk.StringVar(value="artifacts")\n        ttk.Entry(form_inner, textvariable=self._export_dir_var,\n                  width=30).grid(\n            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2,\n            padx=(4, 0))\n\n        form_inner.columnconfigure(1, weight=1)\n\n        # \u2500\u2500 Export fields selection \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n        fields_frame = ttk.LabelFrame(self._body, text="Artifact Export Fields")\n        fields_frame.pack(fill=tk.X, padx=pad, pady=(0, pad))\n        fields_inner = ttk.Frame(fields_frame)\n        fields_inner.pack(fill=tk.X, padx=pad, pady=pad)\n\n        for i, fname in enumerate(_ALL_EXPORT_FIELDS):\n            var = tk.BooleanVar(value=fname in ("ICCID", "IMSI", "Ki", "OPc"))\n            self._field_vars[fname] = var\n            r, c = divmod(i, 4)\n            ttk.Checkbutton(fields_inner, text=fname,\n                            variable=var).grid(\n                row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)\n\n        # \u2500\u2500 Bottom action buttons \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n        actions = ttk.Frame(self._body)\n        actions.pack(fill=tk.X, padx=pad, pady=(0, pad))\n\n        self._status_label = ttk.Label(actions, text="", style="Small.TLabel")\n        self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)\n\n        ttk.Button(actions, text="Test", width=8,\n                   command=self._on_test).pack(side=tk.LEFT, padx=2)\n\n        self._connect_btn = ttk.Button(actions, text="Save && Connect",\n                                        width=14,\n                                        command=self._on_connect)\n        self._connect_btn.pack(side=tk.LEFT, padx=2)\n\n        self._update_btn = ttk.Button(actions, text="Save", width=8,\n                                       command=self._on_save)\n        self._update_btn.pack(side=tk.LEFT, padx=2)\n\n        ttk.Button(actions, text="Close", width=8,\n                   command=self.destroy).pack(side=tk.LEFT, padx=2)\n\n    # ---- Lifecycle -------------------------------------------------------\n\n    def destroy(self):\n        """Unbind global scroll events before destroying."""\n        self._hide_tooltip()\n        try:\n            self._canvas.unbind_all("<MouseWheel>")\n            self._canvas.unbind_all("<Button-4>")\n            self._canvas.unbind_all("<Button-5>")\n        except tk.TclError:\n            pass\n        super().destroy()\n\n    # ---- Scroll helpers --------------------------------------------------\n\n    def _on_canvas_configure(self, event):\n        """Keep the inner frame width matched to the canvas."""\n        self._canvas.itemconfig(self._body_id, width=event.width)\n\n    def _on_body_configure(self, _event):\n        """Update scrollregion when the body frame changes size."""\n        self._canvas.configure(scrollregion=self._canvas.bbox("all"))\n\n    def _on_mousewheel(self, event):\n        """Scroll the canvas with the mouse wheel."""\n        # Linux uses Button-4/5, Windows/macOS use MouseWheel\n        if event.num == 4:\n            self._canvas.yview_scroll(-3, "units")\n        elif event.num == 5:\n            self._canvas.yview_scroll(3, "units")\n        else:\n            # Windows / macOS\n            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")\n\n    # ---- Tooltip helpers -------------------------------------------------\n\n    def _on_tree_motion(self, event):\n        """Show a tooltip with the full shares text when hovering."""\n        tree = self._discovery_tree\n        row_id = tree.identify_row(event.y)\n        col = tree.identify_column(event.x)\n        if not row_id or col != "#3":  # Only tooltip on the Shares column\n            self._hide_tooltip()\n            return\n        item = tree.item(row_id)\n        shares_text = str(item.get("values", ["", "", ""])[2])\n        if not shares_text or len(shares_text) < 25:\n            self._hide_tooltip()\n            return\n        # Show tooltip near cursor\n        x = event.x_root + 12\n        y = event.y_root + 12\n        if self._tooltip_win and self._tooltip_win.winfo_exists():\n            label = self._tooltip_win.winfo_children()[0]\n            label.configure(text=shares_text)\n            self._tooltip_win.geometry(f"+{x}+{y}")\n        else:\n            self._tooltip_win = tw = tk.Toplevel(self)\n            tw.wm_overrideredirect(True)\n            tw.geometry(f"+{x}+{y}")\n            lbl = tk.Label(\n                tw, text=shares_text, background="#ffffe0",\n                relief="solid", borderwidth=1, padx=6, pady=3,\n                wraplength=400, justify=tk.LEFT,\n            )\n            lbl.pack()\n\n    def _hide_tooltip(self, _event=None):\n        if self._tooltip_win and self._tooltip_win.winfo_exists():\n            self._tooltip_win.destroy()\n        self._tooltip_win = None\n\n    # ---- Event handlers ------------------------------------------------\n\n    def _on_server_focus_out(self, _event):\n        """Sanitise server input when user leaves the field."""\n        raw = self._server_var.get()\n        clean = _sanitise_server(raw)\n        if clean != raw:\n            self._server_var.set(clean)\n\n    def _on_scan_network(self):\n        """Run SMB network discovery in a background thread."""\n        self._scan_btn.configure(state=tk.DISABLED)\n        self._status_label.configure(text="Scanning network...")\n        self.update_idletasks()\n        thread = threading.Thread(target=self._scan_worker, daemon=True)\n        thread.start()\n\n    def _scan_worker(self):\n        """Background worker \u2014 runs scan_smb_servers, then schedules UI update."""\n        servers = scan_smb_servers(timeout=10)\n        # Fetch shares for each discovered server (best-effort)\n        for srv in servers:\n            if not srv.shares:\n                srv.shares = list_smb_shares(srv.ip, timeout=5)\n        self.after(0, self._scan_done, servers)\n\n    def _scan_done(self, servers: list[DiscoveredServer]):\n        """Update the UI with scan results (runs on main thread)."""\n        self._scan_btn.configure(state=tk.NORMAL)\n        self._discovered_servers = servers\n\n        # Clear previous results\n        for item in self._discovery_tree.get_children():\n            self._discovery_tree.delete(item)\n\n        if not servers:\n            self._status_label.configure(text="No SMB servers found on network")\n            self._discovery_frame.grid_remove()\n            return\n\n        self._discovery_frame.grid()\n        max_shares_width = 400  # minimum shares column width\n        import tkinter.font as tkfont\n        try:\n            tree_font = tkfont.nametofont(\n                self._discovery_tree.cget("style") or "TkDefaultFont")\n        except Exception:\n            tree_font = tkfont.nametofont("TkDefaultFont")\n        for srv in servers:\n            shares_str = ", ".join(srv.shares) if srv.shares else ""\n            self._discovery_tree.insert(\n                "", tk.END, values=(srv.hostname, srv.ip, shares_str),\n            )\n            # Measure actual text width so the scrollbar range is correct\n            text_w = tree_font.measure(shares_str) + 20  # padding\n            if text_w > max_shares_width:\n                max_shares_width = text_w\n        # Expand the shares column to fit the widest content\n        self._discovery_tree.column("shares", width=max_shares_width)\n        self._status_label.configure(\n            text=f"Found {len(servers)} server(s)",\n        )\n\n    def _on_discovery_select(self, _event):\n        """Fill server/share fields from a selected discovered server."""\n        sel = self._discovery_tree.selection()\n        if not sel:\n            return\n        item = self._discovery_tree.item(sel[0])\n        values = item.get("values", [])\n        if not values:\n            return\n        hostname, ip, shares_str = values[0], values[1], values[2]\n        # Prefer IP for reliability, but use hostname if available\n        self._server_var.set(str(ip) if ip else str(hostname))\n        # If there's exactly one share, fill the share field\n        if shares_str:\n            share_list = [s.strip() for s in str(shares_str).split(",")]\n            if len(share_list) == 1:\n                self._share_var.set(share_list[0])\n\n    # ---- Mode management -----------------------------------------------\n\n    def _enter_new_mode(self):\n        """Switch to 'new profile' mode: clear form, deselect list."""\n        self._current_idx = None\n        self._profile_list.selection_clear(0, tk.END)\n        self._clear_form()\n        self._update_button_states()\n\n    def _clear_form(self):\n        """Reset all form fields to defaults."""\n        self._label_var.set("")\n        self._proto_var.set("smb")\n        self._server_var.set("")\n        self._share_var.set("")\n        self._user_var.set("")\n        self._pass_var.set("")\n        self._domain_var.set("")\n        self._export_dir_var.set("artifacts")\n        self._remember_var.set(True)\n        for fname, var in self._field_vars.items():\n            var.set(fname in ("ICCID", "IMSI", "Ki", "OPc"))\n        self._on_proto_change()\n        self._status_label.configure(text="")\n\n    def _update_button_states(self):\n        """Update button labels/states based on whether editing or new."""\n        editing = self._current_idx is not None\n        if editing:\n            p = self._profiles[self._current_idx]\n            mounted = self._ns.is_mounted(p)\n            self._update_btn.configure(text="Update", state=tk.NORMAL)\n            self._remove_btn.configure(state=tk.NORMAL)\n            self._connect_btn.configure(\n                text="Disconnect" if mounted else "Save && Connect")\n        else:\n            self._update_btn.configure(text="Save New", state=tk.NORMAL)\n            self._remove_btn.configure(state=tk.DISABLED)\n            self._connect_btn.configure(text="Save && Connect")\n\n    # ---- Profile list management ---------------------------------------\n\n    def _refresh_profile_list(self):\n        prev_idx = self._current_idx\n        self._profile_list.delete(0, tk.END)\n        for p in self._profiles:\n            mounted = " \u2713" if self._ns.is_mounted(p) else ""\n            self._profile_list.insert(tk.END,\n                                       f"{p.label} ({p.protocol}){mounted}")\n        # Restore selection if still valid\n        if prev_idx is not None and prev_idx < len(self._profiles):\n            self._profile_list.selection_set(prev_idx)\n\n    def _on_profile_select(self, _event):\n        sel = self._profile_list.curselection()\n        if not sel:\n            return\n        idx = sel[0]\n        self._current_idx = idx\n        p = self._profiles[idx]\n        self._label_var.set(p.label)\n        self._proto_var.set(p.protocol)\n        self._server_var.set(p.server)\n        self._share_var.set(p.share)\n        self._user_var.set(p.username)\n        self._pass_var.set(p.password)\n        self._domain_var.set(p.domain)\n        self._export_dir_var.set(p.export_subdir)\n        # Remember checkbox: True if password was saved\n        self._remember_var.set(bool(p.password))\n        for fname, var in self._field_vars.items():\n            var.set(fname in p.export_fields)\n        self._on_proto_change()\n        self._update_button_states()\n        self._status_label.configure(text="")\n\n    def _on_new(self):\n        """Clear the form for a fresh connection (no phantom profile)."""\n        if self._current_idx is not None:\n            # Deselect current\n            pass\n        self._enter_new_mode()\n        self._status_label.configure(text="Fill in details for a new connection")\n\n    def _on_remove(self):\n        if self._current_idx is None:\n            return\n        p = self._profiles[self._current_idx]\n        name = p.label or "this connection"\n        if not messagebox.askyesno(\n                "Remove Connection",\n                f"Remove \"{name}\"?\\n\\nThis will also disconnect if mounted.",\n                parent=self):\n            return\n        if self._ns.is_mounted(p):\n            self._ns.unmount(p)\n        self._profiles.pop(self._current_idx)\n        self._ns.save_profiles(self._profiles)\n        self._enter_new_mode()\n        self._refresh_profile_list()\n        self._status_label.configure(text=f"Removed \"{name}\"")\n\n    def _on_proto_change(self):\n        is_smb = self._proto_var.get() == "smb"\n        state = tk.NORMAL if is_smb else tk.DISABLED\n        self._user_entry.configure(state=state)\n        self._pass_entry.configure(state=state)\n        self._domain_entry.configure(state=state)\n        self._share_label.configure(\n            text="Share name:" if is_smb else "Export path:")\n\n    # ---- Actions -------------------------------------------------------\n\n    def _form_to_profile(self) -> StorageProfile | None:\n        """Read form into a StorageProfile (validates required fields).\n\n        If the Name field is blank, auto-generates one from server + share.\n        """\n        server = _sanitise_server(self._server_var.get())\n        proto = self._proto_var.get()\n        share = _sanitise_share(self._share_var.get(), proto)\n        label = self._label_var.get().strip()\n\n        if not server or not share:\n            messagebox.showwarning("Missing fields",\n                                   "Server and Share are required.",\n                                   parent=self)\n            return None\n\n        # Auto-generate name if blank\n        if not label:\n            label = _auto_name(server, share, proto)\n            self._label_var.set(label)\n\n        # If "Remember" is unchecked, don't persist the password\n        password = self._pass_var.get() if self._remember_var.get() else ""\n\n        fields = [f for f, v in self._field_vars.items() if v.get()]\n        return StorageProfile(\n            label=label,\n            protocol=proto,\n            server=server,\n            share=share,\n            username=self._user_var.get().strip(),\n            password=password,\n            domain=self._domain_var.get().strip(),\n            export_subdir=self._export_dir_var.get().strip() or "artifacts",\n            export_fields=fields,\n        )\n\n    def _save_profile(self) -> StorageProfile | None:\n        """Save or update the current profile from the form.\n\n        Returns the saved profile on success, None on validation failure.\n        Creates a new profile if _current_idx is None, otherwise updates.\n        """\n        p = self._form_to_profile()\n        if p is None:\n            return None\n\n        if self._current_idx is not None:\n            # Update existing\n            self._profiles[self._current_idx] = p\n        else:\n            # Check for duplicate (same server + share + protocol)\n            for existing in self._profiles:\n                if (existing.server == p.server\n                        and existing.share == p.share\n                        and existing.protocol == p.protocol):\n                    if not messagebox.askyesno(\n                            "Duplicate Connection",\n                            f"A connection to {p.share} on {p.server} "\n                            f"already exists (\"{existing.label}\").\\n\\n"\n                            "Save as a new connection anyway?",\n                            parent=self):\n                        return None\n                    break\n            # Append new\n            self._profiles.append(p)\n            self._current_idx = len(self._profiles) - 1\n\n        self._update_server_history(p.server)\n        self._ns.save_profiles(self._profiles)\n        self._refresh_profile_list()\n        self._update_button_states()\n        return p\n\n    def _on_save(self):\n        p = self._save_profile()\n        if p is None:\n            return\n        action = "updated" if self._current_idx is not None else "saved"\n        self._status_label.configure(text=f"\"{p.label}\" {action}")\n\n    def _on_test(self):\n        p = self._form_to_profile()\n        if p is None:\n            return\n        # For testing, we need the password even if "Remember" is unchecked\n        if not p.password:\n            p.password = self._pass_var.get()\n        self._status_label.configure(text="Testing connection...")\n        self.update_idletasks()\n        ok, msg = self._ns.test_connection(p)\n        self._status_label.configure(text=msg[:80])\n        if not ok:\n            messagebox.showwarning("Connection Test", msg, parent=self)\n\n    def _on_connect(self):\n        # If currently connected, disconnect\n        if (self._current_idx is not None\n                and self._ns.is_mounted(self._profiles[self._current_idx])):\n            p = self._profiles[self._current_idx]\n            ok, msg = self._ns.unmount(p)\n            self._status_label.configure(text=msg[:80])\n            self._refresh_profile_list()\n            self._update_button_states()\n            return\n\n        # Save first (creates new or updates existing)\n        p = self._save_profile()\n        if p is None:\n            return\n\n        # For mounting, always use the entered password\n        # (even if "Remember" is unchecked)\n        if not p.password:\n            p.password = self._pass_var.get()\n\n        self._status_label.configure(text="Mounting...")\n        self.update_idletasks()\n        ok, msg = self._ns.mount(p)\n        self._status_label.configure(text=msg[:80])\n        if not ok:\n            messagebox.showerror("Mount Failed", msg, parent=self)\n\n        self._refresh_profile_list()\n        self._update_button_states()\n
+"""
+Network Storage Dialog — Configure and connect NFS / SMB shares.
+
+Allows the user to create, edit, test, connect, and disconnect
+network storage profiles.  Profiles are persisted across sessions.
+
+UX flow:
+  1. Fill in the form (or pick a discovered server).
+  2. Click **Save & Connect** — profile is saved and mounted in one step.
+  3. To tweak an existing profile, select it, edit, click **Update** or
+     **Save & Connect** again.
+
+UX principles:
+- User enters plain hostname / IP — never ``smb://`` or ``nfs://``
+- Server field is a combobox with history of previously used servers
+- "Remember credentials" checkbox controls secure credential file
+- All input is sanitised (protocol prefixes stripped automatically)
+- No phantom profiles — "New" just clears the form, nothing is persisted
+  until the user explicitly saves.
+"""
+
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+from managers.network_storage_manager import (
+    NetworkStorageManager,
+    StorageProfile,
+)
+from theme import ModernTheme
+from utils.network_scanner import (
+    DiscoveredServer,
+    list_smb_shares,
+    scan_smb_servers,
+)
+from widgets.tooltip import add_tooltip
+
+_ALL_EXPORT_FIELDS = [
+    "ICCID", "IMSI", "Ki", "OPc", "ADM1",
+    "PIN1", "PIN2", "PUK1", "PUK2",
+    "ACC", "MSISDN", "MNC Length",
+    "KIC1", "KID1", "KIK1",
+    "KIC2", "KID2", "KIK2",
+    "KIC3", "KID3", "KIK3",
+    "SUCI Scheme", "SUCI Routing Ind.", "SUCI HN PubKey",
+]
+
+
+def _sanitise_server(raw: str) -> str:
+    """Strip protocol prefixes and trailing slashes from a server entry.
+
+    Users might paste ``smb://nas.local/share`` or ``nfs://10.0.0.1/data``.
+    We only want the hostname / IP part.
+    """
+    s = raw.strip()
+    for prefix in ("smb://", "cifs://", "nfs://", "//"):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+    # If they pasted a full path, take only the first component
+    s = s.split("/")[0]
+    return s.strip()
+
+
+def _sanitise_share(raw: str, protocol: str) -> str:
+    """Clean up share / export path input."""
+    s = raw.strip()
+    if protocol == "smb":
+        # Remove any leading slashes for SMB share name
+        s = s.strip("/")
+    else:
+        # NFS: ensure leading slash
+        if s and not s.startswith("/"):
+            s = "/" + s
+    return s
+
+
+def _auto_name(server: str, share: str, protocol: str) -> str:
+    """Generate a human-friendly profile name from server + share."""
+    if server and share:
+        return f"{share} on {server} ({protocol.upper()})"
+    if server:
+        return f"{server} ({protocol.upper()})"
+    return "New connection"
+
+
+class NetworkStorageDialog(tk.Toplevel):
+    """Modal dialog for managing network storage connections."""
+
+    def __init__(self, parent, ns_manager: NetworkStorageManager):
+        super().__init__(parent)
+        self.title("Network Storage")
+        self.geometry("640x760")
+        self.minsize(580, 500)
+        self.resizable(True, True)
+        self.transient(parent)
+        self.grab_set()
+
+        self._ns = ns_manager
+        self._profiles: list[StorageProfile] = ns_manager.load_profiles()
+        self._current_idx: int | None = None
+        self._field_vars: dict[str, tk.BooleanVar] = {}
+        self._tooltip_win: tk.Toplevel | None = None
+        self._dirty: bool = False  # True when form has unsaved changes
+
+        # Build server history from saved profiles
+        self._server_history: list[str] = self._build_server_history()
+
+        self._build_ui()
+        self._refresh_profile_list()
+
+        if self._profiles:
+            self._profile_list.selection_set(0)
+            self._on_profile_select(None)
+        else:
+            # First-time: form is blank, ready to fill
+            self._enter_new_mode()
+
+    # ---- helpers -------------------------------------------------------
+
+    def _build_server_history(self) -> list[str]:
+        """Collect unique servers from saved profiles for the combobox."""
+        seen = set()
+        servers = []
+        for p in self._profiles:
+            s = p.server.strip()
+            if s and s not in seen:
+                seen.add(s)
+                servers.append(s)
+        return servers
+
+    def _update_server_history(self, server: str):
+        """Add a server to the history if not already present."""
+        server = server.strip()
+        if server and server not in self._server_history:
+            self._server_history.append(server)
+            self._server_combo["values"] = self._server_history
+
+    # ---- UI construction -----------------------------------------------
+
+    def _build_ui(self):
+        pad = ModernTheme.get_padding("medium")
+
+        # --- Scrollable container for the entire dialog body ---
+        self._canvas = tk.Canvas(self, highlightthickness=0)
+        self._vscroll = ttk.Scrollbar(self, orient=tk.VERTICAL,
+                                       command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._vscroll.set)
+        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self._body = ttk.Frame(self._canvas)
+        self._body_id = self._canvas.create_window(
+            (0, 0), window=self._body, anchor="nw")
+
+        # Resize the inner frame with the canvas width
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        self._body.bind("<Configure>", self._on_body_configure)
+        # Mouse-wheel scrolling (Linux + Windows + macOS)
+        self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self._canvas.bind_all("<Button-5>", self._on_mousewheel)
+
+        # ── Saved connections ──────────────────────────────────────────────────────
+        top = ttk.Frame(self._body)
+        top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
+
+        ttk.Label(top, text="Saved connections:",
+                  style="Subheading.TLabel").pack(side=tk.LEFT)
+
+        btn_row = ttk.Frame(top)
+        btn_row.pack(side=tk.RIGHT)
+        _new_btn = ttk.Button(btn_row, text="New", width=6,
+                   command=self._on_new)
+        _new_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(_new_btn, "Start a new connection profile")
+        self._remove_btn = ttk.Button(btn_row, text="Remove", width=8,
+                                       command=self._on_remove)
+        self._remove_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(self._remove_btn, "Delete the selected connection profile")
+
+        self._profile_list = tk.Listbox(self._body, height=4,
+                                         exportselection=False)
+        self._profile_list.pack(fill=tk.X, padx=pad, pady=(4, pad))
+        self._profile_list.bind("<<ListboxSelect>>", self._on_profile_select)
+
+        # ── Connection Details form ────────────────────────────────────────────
+        form = ttk.LabelFrame(self._body, text="Connection Details")
+        form.pack(fill=tk.X, padx=pad, pady=(0, pad))
+        form_inner = ttk.Frame(form)
+        form_inner.pack(fill=tk.X, padx=pad, pady=pad)
+
+        row = 0
+        # Name (auto-generated if left blank)
+        ttk.Label(form_inner, text="Name:").grid(
+            row=row, column=0, sticky=tk.W, pady=2)
+        self._label_var = tk.StringVar()
+        _name_entry = ttk.Entry(form_inner, textvariable=self._label_var, width=30)
+        _name_entry.grid(
+            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))
+        add_tooltip(_name_entry, "Friendly name for this connection (auto-generated if left blank)")
+        ttk.Label(form_inner, text="(auto-generated if blank)",
+                  style="Small.TLabel").grid(
+            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))
+
+        # Protocol
+        row += 2
+        ttk.Label(form_inner, text="Protocol:").grid(
+            row=row, column=0, sticky=tk.W, pady=2)
+        self._proto_var = tk.StringVar(value="smb")
+        proto_frame = ttk.Frame(form_inner)
+        proto_frame.grid(row=row, column=1, columnspan=2, sticky=tk.W, pady=2,
+                         padx=(4, 0))
+        _smb_rb = ttk.Radiobutton(proto_frame, text="SMB / CIFS",
+                        variable=self._proto_var, value="smb",
+                        command=self._on_proto_change)
+        _smb_rb.pack(side=tk.LEFT)
+        add_tooltip(_smb_rb, "SMB/CIFS for Windows shares, NFS for Linux/Unix exports")
+        _nfs_rb = ttk.Radiobutton(proto_frame, text="NFS",
+                        variable=self._proto_var, value="nfs",
+                        command=self._on_proto_change)
+        _nfs_rb.pack(side=tk.LEFT, padx=(pad, 0))
+        add_tooltip(_nfs_rb, "SMB/CIFS for Windows shares, NFS for Linux/Unix exports")
+
+        # Server (combobox with history) + Scan button
+        row += 1
+        ttk.Label(form_inner, text="Server:").grid(
+            row=row, column=0, sticky=tk.W, pady=2)
+        self._server_var = tk.StringVar()
+        self._server_combo = ttk.Combobox(
+            form_inner, textvariable=self._server_var, width=28,
+            values=self._server_history)
+        self._server_combo.grid(
+            row=row, column=1, sticky=tk.EW, pady=2, padx=(4, 0))
+        add_tooltip(self._server_combo, "Hostname or IP address of the file server")
+        # Sanitise on focus-out (strip smb:// etc.)
+        self._server_combo.bind("<FocusOut>", self._on_server_focus_out)
+
+        self._scan_btn = ttk.Button(
+            form_inner, text="Scan Network", width=13,
+            command=self._on_scan_network,
+        )
+        self._scan_btn.grid(row=row, column=2, sticky=tk.W, padx=(4, 0))
+        add_tooltip(self._scan_btn, "Search the local network for SMB file servers")
+
+        # Hint below server
+        ttk.Label(form_inner, text="Hostname or IP address (e.g. 192.168.1.10)",
+                  style="Small.TLabel").grid(
+            row=row + 1, column=1, columnspan=2, sticky=tk.W, padx=(4, 0))
+
+        # Discovery results panel
+        row += 2
+        self._discovery_frame = ttk.LabelFrame(
+            form_inner, text="Discovered Servers",
+        )
+        self._discovery_frame.grid(
+            row=row, column=0, columnspan=3, sticky=tk.EW, pady=(2, 4),
+        )
+        # Container for treeview + scrollbars
+        tree_container = ttk.Frame(self._discovery_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self._discovery_tree = ttk.Treeview(
+            tree_container, height=3, show="headings",
+            columns=("name", "ip", "shares"),
+        )
+        self._discovery_tree.heading("name", text="Name")
+        self._discovery_tree.heading("ip", text="IP Address")
+        self._discovery_tree.heading("shares", text="Shares")
+        self._discovery_tree.column("name", width=140, minwidth=80,
+                                      stretch=False)
+        self._discovery_tree.column("ip", width=120, minwidth=80,
+                                    stretch=False)
+        self._discovery_tree.column("shares", width=400, minwidth=120,
+                                    stretch=False)
+
+        # Vertical scrollbar
+        tree_vscroll = ttk.Scrollbar(
+            tree_container, orient=tk.VERTICAL,
+            command=self._discovery_tree.yview)
+        self._discovery_tree.configure(yscrollcommand=tree_vscroll.set)
+
+        # Horizontal scrollbar for long share lists
+        tree_hscroll = ttk.Scrollbar(
+            tree_container, orient=tk.HORIZONTAL,
+            command=self._discovery_tree.xview)
+        self._discovery_tree.configure(xscrollcommand=tree_hscroll.set)
+
+        self._discovery_tree.grid(row=0, column=0, sticky="nsew")
+        tree_vscroll.grid(row=0, column=1, sticky="ns")
+        tree_hscroll.grid(row=1, column=0, sticky="ew")
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
+
+        self._discovery_tree.bind(
+            "<<TreeviewSelect>>", self._on_discovery_select,
+        )
+        # Tooltip on hover over truncated shares
+        self._discovery_tree.bind("<Motion>", self._on_tree_motion)
+        self._discovery_tree.bind("<Leave>", self._hide_tooltip)
+        self._discovered_servers: list[DiscoveredServer] = []
+        # Hide the discovery panel initially
+        self._discovery_frame.grid_remove()
+
+        # Share
+        row += 1
+        self._share_label = ttk.Label(form_inner, text="Share name:")
+        self._share_label.grid(row=row, column=0, sticky=tk.W, pady=2)
+        self._share_var = tk.StringVar()
+        _share_entry = ttk.Entry(form_inner, textvariable=self._share_var, width=30)
+        _share_entry.grid(
+            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=(4, 0))
+        add_tooltip(_share_entry, "Share name (SMB) or export path (NFS) on the server")
+
+        # Username (SMB only)
+        row += 1
+        self._user_label = ttk.Label(form_inner, text="Username:")
+        self._user_label.grid(row=row, column=0, sticky=tk.W, pady=2)
+        self._user_var = tk.StringVar()
+        self._user_entry = ttk.Entry(form_inner, textvariable=self._user_var,
+                                      width=30)
+        self._user_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW,
+                               pady=2, padx=(4, 0))
+        add_tooltip(self._user_entry, "Login username for the file server (SMB only)")
+
+        # Password (SMB only)
+        row += 1
+        self._pass_label = ttk.Label(form_inner, text="Password:")
+        self._pass_label.grid(row=row, column=0, sticky=tk.W, pady=2)
+        self._pass_var = tk.StringVar()
+        self._pass_entry = ttk.Entry(form_inner, textvariable=self._pass_var,
+                                      width=30, show="\u2022")
+        self._pass_entry.grid(row=row, column=1, sticky=tk.EW,
+                               pady=2, padx=(4, 0))
+        add_tooltip(self._pass_entry, "Login password (stored securely in ~/.config/simgui/)")
+        # Remember credentials checkbox
+        self._remember_var = tk.BooleanVar(value=True)
+        _remember_chk = ttk.Checkbutton(form_inner, text="Remember",
+                        variable=self._remember_var)
+        _remember_chk.grid(
+            row=row, column=2, sticky=tk.W, padx=(4, 0))
+        add_tooltip(_remember_chk, "Store password locally for automatic reconnection")
+
+        # Domain (SMB only)
+        row += 1
+        self._domain_label = ttk.Label(form_inner, text="Domain:")
+        self._domain_label.grid(row=row, column=0, sticky=tk.W, pady=2)
+        self._domain_var = tk.StringVar()
+        self._domain_entry = ttk.Entry(form_inner,
+                                        textvariable=self._domain_var,
+                                        width=30)
+        self._domain_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW,
+                                 pady=2, padx=(4, 0))
+        add_tooltip(self._domain_entry, "Windows domain or workgroup (leave blank for most servers)")
+
+        # Export sub-directory
+        row += 1
+        ttk.Label(form_inner, text="Artifact folder:").grid(
+            row=row, column=0, sticky=tk.W, pady=2)
+        self._export_dir_var = tk.StringVar(value="artifacts")
+        _export_dir_entry = ttk.Entry(form_inner, textvariable=self._export_dir_var,
+                  width=30)
+        _export_dir_entry.grid(
+            row=row, column=1, columnspan=2, sticky=tk.EW, pady=2,
+            padx=(4, 0))
+        add_tooltip(_export_dir_entry, "Sub-directory on the share for saving programming artifacts")
+
+        form_inner.columnconfigure(1, weight=1)
+
+        # ── Export fields selection ────────────────────────────────────────────
+        fields_frame = ttk.LabelFrame(self._body, text="Artifact Export Fields")
+        fields_frame.pack(fill=tk.X, padx=pad, pady=(0, pad))
+        fields_inner = ttk.Frame(fields_frame)
+        fields_inner.pack(fill=tk.X, padx=pad, pady=pad)
+
+        for i, fname in enumerate(_ALL_EXPORT_FIELDS):
+            var = tk.BooleanVar(value=fname in ("ICCID", "IMSI", "Ki", "OPc"))
+            self._field_vars[fname] = var
+            r, c = divmod(i, 4)
+            _chk = ttk.Checkbutton(fields_inner, text=fname,
+                            variable=var)
+            _chk.grid(
+                row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)
+            add_tooltip(_chk, f"Include {fname} in artifact exports")
+
+        # ── Bottom action buttons ──────────────────────────────────────────────
+        actions = ttk.Frame(self._body)
+        actions.pack(fill=tk.X, padx=pad, pady=(0, pad))
+
+        self._status_label = ttk.Label(actions, text="", style="Small.TLabel")
+        self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        _test_btn = ttk.Button(actions, text="Test", width=8,
+                   command=self._on_test)
+        _test_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(_test_btn, "Test connectivity without mounting the share")
+
+        self._connect_btn = ttk.Button(actions, text="Save && Connect",
+                                        width=14,
+                                        command=self._on_connect)
+        self._connect_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(self._connect_btn, "Save profile and mount the share")
+
+        self._update_btn = ttk.Button(actions, text="Save", width=8,
+                                       command=self._on_save)
+        self._update_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(self._update_btn, "Save changes without connecting")
+
+        _close_btn = ttk.Button(actions, text="Close", width=8,
+                   command=self.destroy)
+        _close_btn.pack(side=tk.LEFT, padx=2)
+        add_tooltip(_close_btn, "Close this dialog")
+
+    # ---- Lifecycle -------------------------------------------------------
+
+    def destroy(self):
+        """Unbind global scroll events before destroying."""
+        self._hide_tooltip()
+        try:
+            self._canvas.unbind_all("<MouseWheel>")
+            self._canvas.unbind_all("<Button-4>")
+            self._canvas.unbind_all("<Button-5>")
+        except tk.TclError:
+            pass
+        super().destroy()
+
+    # ---- Scroll helpers --------------------------------------------------
+
+    def _on_canvas_configure(self, event):
+        """Keep the inner frame width matched to the canvas."""
+        self._canvas.itemconfig(self._body_id, width=event.width)
+
+    def _on_body_configure(self, _event):
+        """Update scrollregion when the body frame changes size."""
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_mousewheel(self, event):
+        """Scroll the canvas with the mouse wheel."""
+        # Linux uses Button-4/5, Windows/macOS use MouseWheel
+        if event.num == 4:
+            self._canvas.yview_scroll(-3, "units")
+        elif event.num == 5:
+            self._canvas.yview_scroll(3, "units")
+        else:
+            # Windows / macOS
+            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    # ---- Tooltip helpers -------------------------------------------------
+
+    def _on_tree_motion(self, event):
+        """Show a tooltip with the full shares text when hovering."""
+        tree = self._discovery_tree
+        row_id = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)
+        if not row_id or col != "#3":  # Only tooltip on the Shares column
+            self._hide_tooltip()
+            return
+        item = tree.item(row_id)
+        shares_text = str(item.get("values", ["", "", ""])[2])
+        if not shares_text or len(shares_text) < 25:
+            self._hide_tooltip()
+            return
+        # Show tooltip near cursor
+        x = event.x_root + 12
+        y = event.y_root + 12
+        if self._tooltip_win and self._tooltip_win.winfo_exists():
+            label = self._tooltip_win.winfo_children()[0]
+            label.configure(text=shares_text)
+            self._tooltip_win.geometry(f"+{x}+{y}")
+        else:
+            self._tooltip_win = tw = tk.Toplevel(self)
+            tw.wm_overrideredirect(True)
+            tw.geometry(f"+{x}+{y}")
+            lbl = tk.Label(
+                tw, text=shares_text, background="#ffffe0",
+                relief="solid", borderwidth=1, padx=6, pady=3,
+                wraplength=400, justify=tk.LEFT,
+            )
+            lbl.pack()
+
+    def _hide_tooltip(self, _event=None):
+        if self._tooltip_win and self._tooltip_win.winfo_exists():
+            self._tooltip_win.destroy()
+        self._tooltip_win = None
+
+    # ---- Event handlers ------------------------------------------------
+
+    def _on_server_focus_out(self, _event):
+        """Sanitise server input when user leaves the field."""
+        raw = self._server_var.get()
+        clean = _sanitise_server(raw)
+        if clean != raw:
+            self._server_var.set(clean)
+
+    def _on_scan_network(self):
+        """Run SMB network discovery in a background thread."""
+        self._scan_btn.configure(state=tk.DISABLED)
+        self._status_label.configure(text="Scanning network...")
+        self.update_idletasks()
+        thread = threading.Thread(target=self._scan_worker, daemon=True)
+        thread.start()
+
+    def _scan_worker(self):
+        """Background worker — runs scan_smb_servers, then schedules UI update."""
+        servers = scan_smb_servers(timeout=10)
+        # Fetch shares for each discovered server (best-effort)
+        for srv in servers:
+            if not srv.shares:
+                srv.shares = list_smb_shares(srv.ip, timeout=5)
+        self.after(0, self._scan_done, servers)
+
+    def _scan_done(self, servers: list[DiscoveredServer]):
+        """Update the UI with scan results (runs on main thread)."""
+        self._scan_btn.configure(state=tk.NORMAL)
+        self._discovered_servers = servers
+
+        # Clear previous results
+        for item in self._discovery_tree.get_children():
+            self._discovery_tree.delete(item)
+
+        if not servers:
+            self._status_label.configure(text="No SMB servers found on network")
+            self._discovery_frame.grid_remove()
+            return
+
+        self._discovery_frame.grid()
+        max_shares_width = 400  # minimum shares column width
+        import tkinter.font as tkfont
+        try:
+            tree_font = tkfont.nametofont(
+                self._discovery_tree.cget("style") or "TkDefaultFont")
+        except Exception:
+            tree_font = tkfont.nametofont("TkDefaultFont")
+        for srv in servers:
+            shares_str = ", ".join(srv.shares) if srv.shares else ""
+            self._discovery_tree.insert(
+                "", tk.END, values=(srv.hostname, srv.ip, shares_str),
+            )
+            # Measure actual text width so the scrollbar range is correct
+            text_w = tree_font.measure(shares_str) + 20  # padding
+            if text_w > max_shares_width:
+                max_shares_width = text_w
+        # Expand the shares column to fit the widest content
+        self._discovery_tree.column("shares", width=max_shares_width)
+        self._status_label.configure(
+            text=f"Found {len(servers)} server(s)",
+        )
+
+    def _on_discovery_select(self, _event):
+        """Fill server/share fields from a selected discovered server."""
+        sel = self._discovery_tree.selection()
+        if not sel:
+            return
+        item = self._discovery_tree.item(sel[0])
+        values = item.get("values", [])
+        if not values:
+            return
+        hostname, ip, shares_str = values[0], values[1], values[2]
+        # Prefer IP for reliability, but use hostname if available
+        self._server_var.set(str(ip) if ip else str(hostname))
+        # If there's exactly one share, fill the share field
+        if shares_str:
+            share_list = [s.strip() for s in str(shares_str).split(",")]
+            if len(share_list) == 1:
+                self._share_var.set(share_list[0])
+
+    # ---- Mode management -----------------------------------------------
+
+    def _enter_new_mode(self):
+        """Switch to 'new profile' mode: clear form, deselect list."""
+        self._current_idx = None
+        self._profile_list.selection_clear(0, tk.END)
+        self._clear_form()
+        self._update_button_states()
+
+    def _clear_form(self):
+        """Reset all form fields to defaults."""
+        self._label_var.set("")
+        self._proto_var.set("smb")
+        self._server_var.set("")
+        self._share_var.set("")
+        self._user_var.set("")
+        self._pass_var.set("")
+        self._domain_var.set("")
+        self._export_dir_var.set("artifacts")
+        self._remember_var.set(True)
+        for fname, var in self._field_vars.items():
+            var.set(fname in ("ICCID", "IMSI", "Ki", "OPc"))
+        self._on_proto_change()
+        self._status_label.configure(text="")
+
+    def _update_button_states(self):
+        """Update button labels/states based on whether editing or new."""
+        editing = self._current_idx is not None
+        if editing:
+            p = self._profiles[self._current_idx]
+            mounted = self._ns.is_mounted(p)
+            self._update_btn.configure(text="Update", state=tk.NORMAL)
+            self._remove_btn.configure(state=tk.NORMAL)
+            self._connect_btn.configure(
+                text="Disconnect" if mounted else "Save && Connect")
+        else:
+            self._update_btn.configure(text="Save New", state=tk.NORMAL)
+            self._remove_btn.configure(state=tk.DISABLED)
+            self._connect_btn.configure(text="Save && Connect")
+
+    # ---- Profile list management ---------------------------------------
+
+    def _refresh_profile_list(self):
+        prev_idx = self._current_idx
+        self._profile_list.delete(0, tk.END)
+        for p in self._profiles:
+            mounted = " \u2713" if self._ns.is_mounted(p) else ""
+            self._profile_list.insert(tk.END,
+                                       f"{p.label} ({p.protocol}){mounted}")
+        # Restore selection if still valid
+        if prev_idx is not None and prev_idx < len(self._profiles):
+            self._profile_list.selection_set(prev_idx)
+
+    def _on_profile_select(self, _event):
+        sel = self._profile_list.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        self._current_idx = idx
+        p = self._profiles[idx]
+        self._label_var.set(p.label)
+        self._proto_var.set(p.protocol)
+        self._server_var.set(p.server)
+        self._share_var.set(p.share)
+        self._user_var.set(p.username)
+        self._pass_var.set(p.password)
+        self._domain_var.set(p.domain)
+        self._export_dir_var.set(p.export_subdir)
+        # Remember checkbox: True if password was saved
+        self._remember_var.set(bool(p.password))
+        for fname, var in self._field_vars.items():
+            var.set(fname in p.export_fields)
+        self._on_proto_change()
+        self._update_button_states()
+        self._status_label.configure(text="")
+
+    def _on_new(self):
+        """Clear the form for a fresh connection (no phantom profile)."""
+        if self._current_idx is not None:
+            # Deselect current
+            pass
+        self._enter_new_mode()
+        self._status_label.configure(text="Fill in details for a new connection")
+
+    def _on_remove(self):
+        if self._current_idx is None:
+            return
+        p = self._profiles[self._current_idx]
+        name = p.label or "this connection"
+        if not messagebox.askyesno(
+                "Remove Connection",
+                f"Remove \"{name}\"?\n\nThis will also disconnect if mounted.",
+                parent=self):
+            return
+        if self._ns.is_mounted(p):
+            self._ns.unmount(p)
+        self._profiles.pop(self._current_idx)
+        self._ns.save_profiles(self._profiles)
+        self._enter_new_mode()
+        self._refresh_profile_list()
+        self._status_label.configure(text=f"Removed \"{name}\"")
+
+    def _on_proto_change(self):
+        is_smb = self._proto_var.get() == "smb"
+        state = tk.NORMAL if is_smb else tk.DISABLED
+        self._user_entry.configure(state=state)
+        self._pass_entry.configure(state=state)
+        self._domain_entry.configure(state=state)
+        self._share_label.configure(
+            text="Share name:" if is_smb else "Export path:")
+
+    # ---- Actions -------------------------------------------------------
+
+    def _form_to_profile(self) -> StorageProfile | None:
+        """Read form into a StorageProfile (validates required fields).
+
+        If the Name field is blank, auto-generates one from server + share.
+        """
+        server = _sanitise_server(self._server_var.get())
+        proto = self._proto_var.get()
+        share = _sanitise_share(self._share_var.get(), proto)
+        label = self._label_var.get().strip()
+
+        if not server or not share:
+            messagebox.showwarning("Missing fields",
+                                   "Server and Share are required.",
+                                   parent=self)
+            return None
+
+        # Auto-generate name if blank
+        if not label:
+            label = _auto_name(server, share, proto)
+            self._label_var.set(label)
+
+        # If "Remember" is unchecked, don't persist the password
+        password = self._pass_var.get() if self._remember_var.get() else ""
+
+        fields = [f for f, v in self._field_vars.items() if v.get()]
+        return StorageProfile(
+            label=label,
+            protocol=proto,
+            server=server,
+            share=share,
+            username=self._user_var.get().strip(),
+            password=password,
+            domain=self._domain_var.get().strip(),
+            export_subdir=self._export_dir_var.get().strip() or "artifacts",
+            export_fields=fields,
+        )
+
+    def _save_profile(self) -> StorageProfile | None:
+        """Save or update the current profile from the form.
+
+        Returns the saved profile on success, None on validation failure.
+        Creates a new profile if _current_idx is None, otherwise updates.
+        """
+        p = self._form_to_profile()
+        if p is None:
+            return None
+
+        if self._current_idx is not None:
+            # Update existing
+            self._profiles[self._current_idx] = p
+        else:
+            # Check for duplicate (same server + share + protocol)
+            for existing in self._profiles:
+                if (existing.server == p.server
+                        and existing.share == p.share
+                        and existing.protocol == p.protocol):
+                    if not messagebox.askyesno(
+                            "Duplicate Connection",
+                            f"A connection to {p.share} on {p.server} "
+                            f"already exists (\"{existing.label}\").\n\n"
+                            "Save as a new connection anyway?",
+                            parent=self):
+                        return None
+                    break
+            # Append new
+            self._profiles.append(p)
+            self._current_idx = len(self._profiles) - 1
+
+        self._update_server_history(p.server)
+        self._ns.save_profiles(self._profiles)
+        self._refresh_profile_list()
+        self._update_button_states()
+        return p
+
+    def _on_save(self):
+        p = self._save_profile()
+        if p is None:
+            return
+        action = "updated" if self._current_idx is not None else "saved"
+        self._status_label.configure(text=f"\"{p.label}\" {action}")
+
+    def _on_test(self):
+        p = self._form_to_profile()
+        if p is None:
+            return
+        # For testing, we need the password even if "Remember" is unchecked
+        if not p.password:
+            p.password = self._pass_var.get()
+        self._status_label.configure(text="Testing connection...")
+        self.update_idletasks()
+        ok, msg = self._ns.test_connection(p)
+        self._status_label.configure(text=msg[:80])
+        if not ok:
+            messagebox.showwarning("Connection Test", msg, parent=self)
+
+    def _on_connect(self):
+        # If currently connected, disconnect
+        if (self._current_idx is not None
+                and self._ns.is_mounted(self._profiles[self._current_idx])):
+            p = self._profiles[self._current_idx]
+            ok, msg = self._ns.unmount(p)
+            self._status_label.configure(text=msg[:80])
+            self._refresh_profile_list()
+            self._update_button_states()
+            return
+
+        # Save first (creates new or updates existing)
+        p = self._save_profile()
+        if p is None:
+            return
+
+        # For mounting, always use the entered password
+        # (even if "Remember" is unchecked)
+        if not p.password:
+            p.password = self._pass_var.get()
+
+        self._status_label.configure(text="Mounting...")
+        self.update_idletasks()
+        ok, msg = self._ns.mount(p)
+        self._status_label.configure(text=msg[:80])
+        if not ok:
+            messagebox.showerror("Mount Failed", msg, parent=self)
+
+        self._refresh_profile_list()
+        self._update_button_states()
