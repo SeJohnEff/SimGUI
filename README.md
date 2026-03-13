@@ -18,45 +18,38 @@ to run card operations from a desktop GUI.
 
 ## Installation (Ubuntu)
 
-On a fresh Ubuntu desktop (22.04+), run these commands:
+On a fresh Ubuntu desktop (22.04+):
 
 ```bash
-# 1. Install build tools
+curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+```
+
+That's it. The script installs build dependencies, builds the `.deb` package,
+installs it, and cleans up. Launch with `simgui` or find **SimGUI** in the
+applications menu.
+
+### Manual install
+
+If you prefer to run the steps yourself:
+
+```bash
 sudo apt update
 sudo apt install -y git dpkg-dev debhelper
-
-# 2. Clone the repo
+cd /tmp
 git clone https://github.com/SeJohnEff/SimGUI.git
-
-# 3. Build the .deb
 cd SimGUI
 dpkg-buildpackage -us -uc -b
-
-# 4. Install it
 sudo dpkg -i ../simgui_0.2.0-1_all.deb; sudo apt install -f -y
-
-# 5. Launch
 simgui
 ```
 
-Step 4 uses `;` (not `&&`) so that `apt install -f` resolves missing
-dependencies even if `dpkg` exits with an error.
-
-This installs SimGUI to `/opt/simgui` with a `/usr/bin/simgui` launcher and a
-GNOME desktop entry. Runtime dependencies (`python3`, `python3-tk`,
-`libpcsclite-dev`, `swig`) are pulled in automatically. The `postinst` script
-installs `pyscard` and `pytlv` via pip.
-
 ### Updating to a new version
 
-```bash
-cd ~/SimGUI
-git pull
-dpkg-buildpackage -us -uc -b
-sudo dpkg -i ../simgui_0.2.0-1_all.deb; sudo apt install -f -y
-```
+Re-run the install script — it always pulls the latest code:
 
-The `.deb` file is built one directory above the repo (`../`), not inside it.
+```bash
+curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+```
 
 ## Usage
 
