@@ -82,13 +82,21 @@ def generate_iccid(mcc_mnc: str, country_code: str, site_index: str,
                    customer_id: str, seq: int) -> str:
     """Generate an ICCID per Teleaura SIM PLMN Numbering Standard.
 
-    ICCID = 89 + MCC_MNC(5) + 0000 + MSIN(10) + Luhn = 20 digits.
+    ICCID = 89 + MCC_MNC(5) + 00 + MSIN(10) + Luhn = 20 digits.
+
+    Structure:
+        89      (2)  MII — telecom industry identifier
+        99988   (5)  MCC + MNC
+        00      (2)  Padding — fixed, ensures 20-digit total
+        MSIN   (10)  CCC+SSS+GG+NN — matches IMSI MSIN exactly
+        C       (1)  Luhn check digit (ISO/IEC 7812-1)
 
     Example:
         generate_iccid("99988", "044", "001", "03", 1)
-        -> "89" + "99988" + "0000" + "0440010301" + check = 20 digits
+        -> "89" + "99988" + "00" + "0440010301" + check
+        -> "89999880004400103010" (20 digits)
     """
     msin = f"{country_code}{site_index}{customer_id}{seq:02d}"
-    base = f"89{mcc_mnc}0000{msin}"
+    base = f"89{mcc_mnc}00{msin}"
     check = compute_luhn_check(base)
     return base + check

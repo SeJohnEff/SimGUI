@@ -115,15 +115,15 @@ class TestGenerateIccid:
         iccid = generate_iccid("99988", "044", "001", "03", 1)
         assert iccid[2:7] == "99988"
 
-    def test_four_zeros_padding(self):
-        """ICCID uses 4 zeros padding, not 5."""
+    def test_two_zeros_padding(self):
+        """ICCID uses 2 zeros padding for 20-digit total per ITU-T E.118."""
         iccid = generate_iccid("99988", "044", "001", "03", 1)
-        assert iccid[7:11] == "0000"
+        assert iccid[7:9] == "00"
 
     def test_iccid_length(self):
-        """ICCID = 89(2) + MCC_MNC(5) + 0000(4) + MSIN(10) + Luhn(1) = 22 digits."""
+        """ICCID = 89(2) + MCC_MNC(5) + 00(2) + MSIN(10) + Luhn(1) = 20 digits."""
         iccid = generate_iccid("99988", "044", "001", "03", 1)
-        assert len(iccid) == 22
+        assert len(iccid) == 20
         assert iccid.isdigit()
 
     def test_valid_luhn(self):
@@ -138,16 +138,16 @@ class TestGenerateIccid:
 
     def test_boliden_uk1_structure(self):
         """Worked example: Boliden at uk1, SIM 01.
-        ICCID = 89 + 99988 + 0000 + 0440010301 + Luhn.
+        ICCID = 89 + 99988 + 00 + 0440010301 + Luhn = 20 digits.
         """
         iccid = generate_iccid("99988", "044", "001", "03", 1)
-        assert iccid[:2] == "89"
-        assert iccid[2:7] == "99988"
-        assert iccid[7:11] == "0000"
+        assert iccid[:2] == "89"           # MII
+        assert iccid[2:7] == "99988"       # MCC+MNC
+        assert iccid[7:9] == "00"          # Padding (2 zeros)
         # MSIN = country(3) + site(3) + customer(2) + seq(2) = 10 digits
-        assert iccid[11:21] == "0440010301"
+        assert iccid[9:19] == "0440010301" # MSIN
         # Last digit is Luhn check
-        assert len(iccid) == 22
+        assert len(iccid) == 20
         assert validate_luhn(iccid)
 
     def test_unique_iccids(self):
