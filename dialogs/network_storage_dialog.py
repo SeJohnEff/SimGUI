@@ -71,7 +71,8 @@ class NetworkStorageDialog(tk.Toplevel):
     def __init__(self, parent, ns_manager: NetworkStorageManager):
         super().__init__(parent)
         self.title("Network Storage")
-        self.geometry("620x680")
+        self.geometry("640x760")
+        self.minsize(580, 500)
         self.resizable(True, True)
         self.transient(parent)
         self.grab_set()
@@ -80,6 +81,7 @@ class NetworkStorageDialog(tk.Toplevel):
         self._profiles: list[StorageProfile] = ns_manager.load_profiles()
         self._current_idx: int | None = None
         self._field_vars: dict[str, tk.BooleanVar] = {}
+        self._tooltip_win: tk.Toplevel | None = None
 
         # Build server history from saved profiles
         self._server_history: list[str] = self._build_server_history()
@@ -116,8 +118,28 @@ class NetworkStorageDialog(tk.Toplevel):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
+        # --- Scrollable container for the entire dialog body ---
+        self._canvas = tk.Canvas(self, highlightthickness=0)
+        self._vscroll = ttk.Scrollbar(self, orient=tk.VERTICAL,
+                                       command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._vscroll.set)
+        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self._body = ttk.Frame(self._canvas)
+        self._body_id = self._canvas.create_window(
+            (0, 0), window=self._body, anchor="nw")
+
+        # Resize the inner frame with the canvas width
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        self._body.bind("<Configure>", self._on_body_configure)
+        # Mouse-wheel scrolling (Linux + Windows + macOS)
+        self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self._canvas.bind_all("<Button-5>", self._on_mousewheel)
+
         # Top: profile list + add/remove buttons
-        top = ttk.Frame(self)
+        top = ttk.Frame(self._body)
         top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
         ttk.Label(top, text="Saved connections:",
@@ -130,13 +152,13 @@ class NetworkStorageDialog(tk.Toplevel):
         ttk.Button(btn_row, text="Remove", width=8,
                    command=self._on_remove).pack(side=tk.LEFT, padx=2)
 
-        self._profile_list = tk.Listbox(self, height=4,
+        self._profile_list = tk.Listbox(self._body, height=4,
                                          exportselection=False)
         self._profile_list.pack(fill=tk.X, padx=pad, pady=(4, pad))
         self._profile_list.bind("<<ListboxSelect>>", self._on_profile_select)
 
         # Middle: connection details form
-        form = ttk.LabelFrame(self, text="Connection Details")
+        form = ttk.LabelFrame(self._body, text="Connection Details")
         form.pack(fill=tk.X, padx=pad, pady=(0, pad))
         form_inner = ttk.Frame(form)
         form_inner.pack(fill=tk.X, padx=pad, pady=pad)
@@ -197,20 +219,45 @@ class NetworkStorageDialog(tk.Toplevel):
         self._discovery_frame.grid(
             row=row, column=0, columnspan=3, sticky=tk.EW, pady=(2, 4),
         )
+        # Container for treeview + scrollbars
+        tree_container = ttk.Frame(self._discovery_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
         self._discovery_tree = ttk.Treeview(
-            self._discovery_frame, height=3, show="headings",
+            tree_container, height=3, show="headings",
             columns=("name", "ip", "shares"),
         )
         self._discovery_tree.heading("name", text="Name")
         self._discovery_tree.heading("ip", text="IP Address")
         self._discovery_tree.heading("shares", text="Shares")
-        self._discovery_tree.column("name", width=160)
-        self._discovery_tree.column("ip", width=120)
-        self._discovery_tree.column("shares", width=200)
-        self._discovery_tree.pack(fill=tk.X, padx=4, pady=4)
+        self._discovery_tree.column("name", width=140, minwidth=80)
+        self._discovery_tree.column("ip", width=120, minwidth=80)
+        self._discovery_tree.column("shares", width=300, minwidth=120)
+
+        # Vertical scrollbar
+        tree_vscroll = ttk.Scrollbar(
+            tree_container, orient=tk.VERTICAL,
+            command=self._discovery_tree.yview)
+        self._discovery_tree.configure(yscrollcommand=tree_vscroll.set)
+
+        # Horizontal scrollbar for long share lists
+        tree_hscroll = ttk.Scrollbar(
+            tree_container, orient=tk.HORIZONTAL,
+            command=self._discovery_tree.xview)
+        self._discovery_tree.configure(xscrollcommand=tree_hscroll.set)
+
+        self._discovery_tree.grid(row=0, column=0, sticky="nsew")
+        tree_vscroll.grid(row=0, column=1, sticky="ns")
+        tree_hscroll.grid(row=1, column=0, sticky="ew")
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
+
         self._discovery_tree.bind(
             "<<TreeviewSelect>>", self._on_discovery_select,
         )
+        # Tooltip on hover over truncated shares
+        self._discovery_tree.bind("<Motion>", self._on_tree_motion)
+        self._discovery_tree.bind("<Leave>", self._hide_tooltip)
         self._discovered_servers: list[DiscoveredServer] = []
         # Hide the discovery panel initially
         self._discovery_frame.grid_remove()
@@ -272,10 +319,10 @@ class NetworkStorageDialog(tk.Toplevel):
         form_inner.columnconfigure(1, weight=1)
 
         # Export fields selection
-        fields_frame = ttk.LabelFrame(self, text="Artifact Export Fields")
-        fields_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(0, pad))
+        fields_frame = ttk.LabelFrame(self._body, text="Artifact Export Fields")
+        fields_frame.pack(fill=tk.X, padx=pad, pady=(0, pad))
         fields_inner = ttk.Frame(fields_frame)
-        fields_inner.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad)
+        fields_inner.pack(fill=tk.X, padx=pad, pady=pad)
 
         for i, fname in enumerate(_ALL_EXPORT_FIELDS):
             var = tk.BooleanVar(value=fname in ("ICCID", "IMSI", "Ki", "OPc"))
@@ -286,7 +333,7 @@ class NetworkStorageDialog(tk.Toplevel):
                 row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)
 
         # Bottom action buttons
-        actions = ttk.Frame(self)
+        actions = ttk.Frame(self._body)
         actions.pack(fill=tk.X, padx=pad, pady=(0, pad))
 
         self._status_label = ttk.Label(actions, text="", style="Small.TLabel")
@@ -301,6 +348,78 @@ class NetworkStorageDialog(tk.Toplevel):
                    command=self._on_save).pack(side=tk.LEFT, padx=2)
         ttk.Button(actions, text="Close", width=8,
                    command=self.destroy).pack(side=tk.LEFT, padx=2)
+
+    # ---- Lifecycle -------------------------------------------------------
+
+    def destroy(self):
+        """Unbind global scroll events before destroying."""
+        self._hide_tooltip()
+        try:
+            self._canvas.unbind_all("<MouseWheel>")
+            self._canvas.unbind_all("<Button-4>")
+            self._canvas.unbind_all("<Button-5>")
+        except tk.TclError:
+            pass
+        super().destroy()
+
+    # ---- Scroll helpers --------------------------------------------------
+
+    def _on_canvas_configure(self, event):
+        """Keep the inner frame width matched to the canvas."""
+        self._canvas.itemconfig(self._body_id, width=event.width)
+
+    def _on_body_configure(self, _event):
+        """Update scrollregion when the body frame changes size."""
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_mousewheel(self, event):
+        """Scroll the canvas with the mouse wheel."""
+        # Linux uses Button-4/5, Windows/macOS use MouseWheel
+        if event.num == 4:
+            self._canvas.yview_scroll(-3, "units")
+        elif event.num == 5:
+            self._canvas.yview_scroll(3, "units")
+        else:
+            # Windows / macOS
+            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    # ---- Tooltip helpers -------------------------------------------------
+
+    def _on_tree_motion(self, event):
+        """Show a tooltip with the full shares text when hovering."""
+        tree = self._discovery_tree
+        row_id = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)
+        if not row_id or col != "#3":  # Only tooltip on the Shares column
+            self._hide_tooltip()
+            return
+        item = tree.item(row_id)
+        shares_text = str(item.get("values", ["", "", ""])[2])
+        if not shares_text or len(shares_text) < 25:
+            self._hide_tooltip()
+            return
+        # Show tooltip near cursor
+        x = event.x_root + 12
+        y = event.y_root + 12
+        if self._tooltip_win and self._tooltip_win.winfo_exists():
+            label = self._tooltip_win.winfo_children()[0]
+            label.configure(text=shares_text)
+            self._tooltip_win.geometry(f"+{x}+{y}")
+        else:
+            self._tooltip_win = tw = tk.Toplevel(self)
+            tw.wm_overrideredirect(True)
+            tw.geometry(f"+{x}+{y}")
+            lbl = tk.Label(
+                tw, text=shares_text, background="#ffffe0",
+                relief="solid", borderwidth=1, padx=6, pady=3,
+                wraplength=400, justify=tk.LEFT,
+            )
+            lbl.pack()
+
+    def _hide_tooltip(self, _event=None):
+        if self._tooltip_win and self._tooltip_win.winfo_exists():
+            self._tooltip_win.destroy()
+        self._tooltip_win = None
 
     # ---- Event handlers ------------------------------------------------
 
