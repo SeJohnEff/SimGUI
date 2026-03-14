@@ -35,6 +35,7 @@ from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.progress_panel import ProgressPanel
 from widgets.read_sim_panel import ReadSIMPanel
 from widgets.toast import show_toast
+from widgets.tooltip import hide_all_tooltips
 
 logging.basicConfig(
     level=logging.INFO,
@@ -438,6 +439,8 @@ class SimGUIApp:
         self._card_panel.set_programmed_indicator(already)
         # Auto-populate Program SIM tab
         self._program_panel.on_card_detected(iccid, card_data, file_path)
+        # Sync the Read SIM tab (public fields)
+        self._read_panel.refresh()
         self._status_var.set(f"Card detected: {iccid}")
 
     def _on_auto_card_unknown(self, iccid):
@@ -457,6 +460,8 @@ class SimGUIApp:
         self._card_panel.set_auth_status(False)
         self._card_panel.set_programmed_indicator(False)
         self._program_panel.on_card_detected(iccid)
+        # Sync the Read SIM tab — card_info has ICCID/IMSI from detect
+        self._read_panel.refresh()
         self._status_var.set(status_msg)
 
         if not iccid:
@@ -464,6 +469,7 @@ class SimGUIApp:
             return
 
         # Open the unified file-picker with network share access
+        hide_all_tooltips()
         self._load_file_for_unknown_card(iccid)
 
     def _load_file_for_unknown_card(self, iccid: str):
@@ -471,7 +477,7 @@ class SimGUIApp:
 
         The dialog may return either:
         * A *directory* path (user clicked "Use This Share") — we scan it.
-        * A *file* path (user clicked "Browse Local…") — we scan its
+        * A *file* path (user clicked "Browse Local\u2026") — we scan its
           parent directory.
         """
         init_dir = get_browse_initial_dir(self._ns_manager)
@@ -518,6 +524,7 @@ class SimGUIApp:
         self._card_panel.set_status("waiting", "Insert a SIM card...")
         self._card_panel.clear_card_info()
         self._program_panel.on_card_removed()
+        self._read_panel.refresh()  # Clear Read SIM fields
         self._status_var.set("Card removed")
 
     def _on_auto_card_error(self, msg):
