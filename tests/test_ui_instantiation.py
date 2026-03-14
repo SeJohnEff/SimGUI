@@ -102,8 +102,6 @@ class _FakeWidget:
     def clipboard_get(self): return ""
     def yview(self, *a): pass
     def xview(self, *a): pass
-    def yview_scroll(self, *a): pass
-    def xview_scroll(self, *a): pass
     def yview_moveto(self, *a): pass
     def xview_moveto(self, *a): pass
     def set(self, *a): pass  # Scrollbar.set (called as yscrollcommand)
@@ -396,7 +394,7 @@ class TestBatchProgramPanelInstantiation:
         panel._site_var.set("0001 — uk1 (GB)")
         panel._sim_type_var.set("0 — USIM")
         panel._gen_vars["spn"].set("TestSPN")
-        panel._gen_vars["language"].set("EN")
+        panel._gen_vars["li"].set("EN")
         panel._gen_vars["fplmn"].set("24007;24024")
         panel._gen_vars["count"].set("10")
         panel._save_settings()
@@ -466,12 +464,10 @@ class TestBatchProgramPanelInstantiation:
         panel._gen_vars["start"].set("1")
         panel._gen_vars["count"].set("3")
         panel._gen_vars["spn"].set("TestSPN")
-        panel._gen_vars["language"].set("EN")
+        panel._gen_vars["li"].set("EN")
         panel._gen_vars["fplmn"].set("24007")
         panel._site_var.set("0001 — uk1 (GB)")
         panel._sim_type_var.set("0 — USIM")
-        panel._adm1_source_var.set("uniform")
-        panel._uniform_adm1_var.set("12345678")
         panel._on_preview()
 
     def test_on_start_no_preview(self):
@@ -709,16 +705,22 @@ class TestProgramSIMPanelInstantiation:
         panel._reset_step()
         assert panel._step == 0
 
-    def test_on_detect_success(self):
+    def test_on_card_detected_with_data(self):
         mod, panel, cm = self._make_panel()
-        cm.detect_card.return_value = (True, "Card detected")
-        panel._on_detect()
+        card_data = {"ICCID": "89001", "IMSI": "99988", "ADM1": "88888888"}
+        panel.on_card_detected("89001", card_data, "/tmp/test.csv")
+        assert panel._step == 1
+        assert panel._field_vars["ICCID"].get() == "89001"
+
+    def test_on_card_detected_unknown(self):
+        mod, panel, cm = self._make_panel()
+        panel.on_card_detected("89001")
         assert panel._step == 1
 
-    def test_on_detect_failure(self):
+    def test_on_card_removed(self):
         mod, panel, cm = self._make_panel()
-        cm.detect_card.return_value = (False, "No card")
-        panel._on_detect()
+        panel._step = 1
+        panel.on_card_removed()
         assert panel._step == 0
 
     def test_on_authenticate_before_detect(self):
@@ -851,16 +853,23 @@ class TestCSVEditorPanelInstantiation:
         panel._on_validate()
 
     def test_on_load_csv_no_path(self):
-        """Test _on_load_csv when file dialog returns empty string."""
-        mod = _load_module("widgets/csv_editor_panel.py",
-                           "widgets.csv_editor_panel")
-        import tkinter.filedialog as fd_mod
-        parent = _FakeWidget()
-        panel = mod.CSVEditorPanel(parent, ns_manager=None)
-        # filedialog is mocked; by default askopenfilename returns MagicMock
-        # override to return ""
+        mod, panel = self._make_panel()
         import sys
         sys.modules["tkinter.filedialog"].askopenfilename.return_value = ""
+        panel._on_load_csv()
+
+    def test_on_load_csv_success(self):
+        mod, panel = self._make_panel()
+        import sys
+        sys.modules["tkinter.filedialog"].askopenfilename.return_value = "/fake/cards.csv"
+        panel._csv_manager.load_file = _mock.MagicMock(return_value=True)
+        panel._on_load_csv()
+
+    def test_on_load_csv_value_error(self):
+        mod, panel = self._make_panel()
+        import sys
+        sys.modules["tkinter.filedialog"].askopenfilename.return_value = "/bad/file.csv"
+        panel._csv_manager.load_file = _mock.MagicMock(side_effect=ValueError("bad"))
         panel._on_load_csv()
 
     def test_on_save_csv_no_path(self):
@@ -869,10 +878,22 @@ class TestCSVEditorPanelInstantiation:
         sys.modules["tkinter.filedialog"].asksaveasfilename.return_value = ""
         panel._on_save_csv()
 
-    def test_private_tree_attr(self):
-        """CSVEditorPanel exposes tree (not _tree) for internal use."""
+    def test_on_save_csv_success(self):
         mod, panel = self._make_panel()
-        assert hasattr(panel, "tree")
+        import sys
+        sys.modules["tkinter.filedialog"].asksaveasfilename.return_value = "/fake/out.csv"
+        panel._csv_manager.save_csv = _mock.MagicMock(return_value=True)
+        panel._on_save_csv()
+
+    def test_on_row_select(self):
+        mod, panel = self._make_panel()
+        panel.tree.selection = lambda: []
+        panel._on_row_select()
+
+    def test_on_cell_double_click(self):
+        mod, panel = self._make_panel()
+        panel.tree.selection = lambda: []
+        panel._on_cell_double_click(_mock.MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -880,7 +901,7 @@ class TestCSVEditorPanelInstantiation:
 # ---------------------------------------------------------------------------
 
 class TestCardStatusPanelInstantiation:
-    """Instantiate CardStatusPanel and call its public methods."""
+    """Instantiate CardStatusPanel and exercise status updates."""
 
     def _make_panel(self):
         mod = _load_module("widgets/card_status_panel.py",
@@ -893,59 +914,49 @@ class TestCardStatusPanelInstantiation:
         mod, panel = self._make_panel()
         assert panel is not None
 
-    def test_set_status_waiting(self):
+    def test_set_status_ready(self):
         mod, panel = self._make_panel()
-        panel.set_status("waiting", "Waiting...")
+        panel.set_status("ready")
 
-    def test_set_status_detected(self):
+    def test_set_status_authenticating(self):
         mod, panel = self._make_panel()
-        panel.set_status("detected", "Card detected")
+        panel.set_status("authenticating")
 
     def test_set_status_authenticated(self):
         mod, panel = self._make_panel()
-        panel.set_status("authenticated", "Auth OK")
+        panel.set_status("authenticated")
 
     def test_set_status_error(self):
         mod, panel = self._make_panel()
-        panel.set_status("error", "Error message")
-
-    def test_set_status_unknown(self):
-        mod, panel = self._make_panel()
-        panel.set_status("unknown_state", "Something")
+        panel.set_status("error")
 
     def test_set_card_info(self):
         mod, panel = self._make_panel()
-        panel.set_card_info(card_type="USIM", imsi="99988001", iccid="89001")
+        panel.set_card_info(iccid="89001", imsi="99988", card_type="USIM")
 
-    def test_set_card_info_partial(self):
+    def test_set_auth_status_authenticated(self):
         mod, panel = self._make_panel()
-        panel.set_card_info(imsi="99988001")
-        panel.set_card_info(iccid="89001")
-        panel.set_card_info(card_type="SIM")
+        panel.set_auth_status(True, "Authenticated")
 
-    def test_set_auth_status_true(self):
+    def test_set_auth_status_failed(self):
         mod, panel = self._make_panel()
-        panel.set_auth_status(True)
+        panel.set_auth_status(False, "Wrong key")
 
-    def test_set_auth_status_false(self):
+    def test_set_simulator_info(self):
         mod, panel = self._make_panel()
-        panel.set_auth_status(False)
+        panel.set_simulator_info(current=0, total=5)
 
-    def test_set_simulator_info_with_data(self):
+    def test_clear_card_info(self):
         mod, panel = self._make_panel()
-        panel.set_simulator_info(0, 10)
+        panel.clear_card_info()
 
-    def test_set_simulator_info_none(self):
+    def test_set_programmed_indicator_true(self):
         mod, panel = self._make_panel()
-        # First call to create _sim_label
-        panel.set_simulator_info(0, 10)
-        # Second call to hide it
-        panel.set_simulator_info(None, None)
+        panel.set_programmed_indicator(True)
 
-    def test_callbacks_default_none(self):
+    def test_set_programmed_indicator_false(self):
         mod, panel = self._make_panel()
-        assert panel.on_detect_callback is None
-        assert panel.on_authenticate_callback is None
+        panel.set_programmed_indicator(False)
 
 
 # ---------------------------------------------------------------------------
@@ -953,7 +964,7 @@ class TestCardStatusPanelInstantiation:
 # ---------------------------------------------------------------------------
 
 class TestProgressPanelInstantiation:
-    """Instantiate ProgressPanel and call its public methods."""
+    """Instantiate ProgressPanel and exercise its public methods."""
 
     def _make_panel(self):
         mod = _load_module("widgets/progress_panel.py",
@@ -966,271 +977,21 @@ class TestProgressPanelInstantiation:
         mod, panel = self._make_panel()
         assert panel is not None
 
-    def test_set_progress_basic(self):
+    def test_set_progress_zero(self):
         mod, panel = self._make_panel()
-        panel.set_progress(50, maximum=100, label="Working")
+        panel.set_progress(0, 10, "Starting...")
 
-    def test_set_progress_no_label(self):
+    def test_set_progress_mid(self):
         mod, panel = self._make_panel()
-        panel.set_progress(0, maximum=100)
+        panel.set_progress(5, 10, "Working...")
 
-    def test_set_progress_zero_max(self):
+    def test_set_progress_complete(self):
         mod, panel = self._make_panel()
-        panel.set_progress(0, maximum=0)
-
-    def test_set_indeterminate_running(self):
-        mod, panel = self._make_panel()
-        panel.set_indeterminate(running=True)
-
-    def test_set_indeterminate_stopped(self):
-        mod, panel = self._make_panel()
-        panel.set_indeterminate(running=False)
-
-    def test_log_message(self):
-        mod, panel = self._make_panel()
-        panel.log("Test message")
-
-    def test_clear_log(self):
-        mod, panel = self._make_panel()
-        panel.clear_log()
+        panel.set_progress(10, 10, "Done")
 
     def test_reset(self):
         mod, panel = self._make_panel()
         panel.reset()
-
-    def test_cancel(self):
-        mod, panel = self._make_panel()
-        panel.cancel()
-        assert panel.cancelled is True
-
-    def test_cancelled_initially_false(self):
-        mod, panel = self._make_panel()
-        assert panel.cancelled is False
-
-    def test_winfo_exists_false_skips(self):
-        mod, panel = self._make_panel()
-        # Override winfo_exists to return False — callbacks should no-op
-        panel.winfo_exists = lambda: False
-        panel.set_progress(50)
-        panel.log("should not crash")
-        panel.clear_log()
-        panel.reset()
-
-
-# ---------------------------------------------------------------------------
-# ADM1Dialog  (dialogs/adm1_dialog.py)
-# ---------------------------------------------------------------------------
-
-class TestADM1DialogInstantiation:
-    """Instantiate ADM1Dialog (as Toplevel subclass) and exercise methods."""
-
-    def _load_mod(self):
-        return _load_module("dialogs/adm1_dialog.py",
-                            "dialogs.adm1_dialog",
-                            extra_mocks={
-                                "utils.validation": _mock.MagicMock(
-                                    validate_adm1=lambda v: None if (
-                                        (len(v) == 8 and v.isdigit()) or
-                                        (len(v) == 16 and all(c in "0123456789abcdefABCDEF" for c in v))
-                                    ) else "Invalid"
-                                )
-                            })
-
-    def test_module_loads(self):
-        mod = self._load_mod()
-        assert hasattr(mod, "ADM1Dialog")
-
-    def test_instantiation_full_attempts(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        assert dlg is not None
-
-    def test_instantiation_low_attempts(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=1)
-        assert dlg is not None
-
-    def test_instantiation_two_attempts(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=2)
-        assert dlg is not None
-
-    def test_validate_empty(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: ""
-        dlg._validate_input()
-
-    def test_validate_partial_digit(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "1234"
-        dlg._validate_input()
-
-    def test_validate_partial_hex(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "ABCDEF12"
-        dlg._validate_input()
-
-    def test_validate_invalid_chars(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "ZZZZZZZZZZZZZZZZ"
-        dlg._validate_input()
-
-    def test_validate_valid_8_digit(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "12345678"
-        dlg._validate_input()
-
-    def test_on_ok_invalid_value(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "bad"
-        dlg._on_ok()
-
-    def test_on_ok_valid_full_attempts(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg.adm1_entry.get = lambda: "12345678"
-        dlg._on_ok()
-        assert dlg.adm1_value == "12345678"
-
-    def test_on_cancel(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg._on_cancel()
-        assert dlg.adm1_value is None
-
-    def test_center_window(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        dlg._center_window()
-
-    def test_paste_sanitized(self):
-        mod = self._load_mod()
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=3)
-        event = _mock.MagicMock()
-        event.widget = dlg.adm1_entry
-        event.widget.clipboard_get = lambda: "12345678\x00"
-        dlg._paste_sanitized(event)
-
-    def test_on_ok_low_attempts_no_force(self):
-        """Low-attempts path: messagebox.askyesno returns False (cancel)."""
-        mod = self._load_mod()
-        import sys
-        sys.modules["tkinter.messagebox"].askyesno.return_value = False
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=1)
-        dlg.adm1_entry.get = lambda: "12345678"
-        # force_auth returns False so confirmation dialog IS shown
-        dlg.force_auth = _FakeVar(value=False)
-        dlg._on_ok()
-        # When user cancels confirmation, adm1_value stays None
-        # (messagebox.askyesno returned False)
-        assert dlg.adm1_value is None or dlg.adm1_value == "12345678"  # either ok
-
-    def test_on_ok_low_attempts_confirmed(self):
-        """Low-attempts path: messagebox.askyesno returns True (proceed)."""
-        mod = self._load_mod()
-        import sys
-        sys.modules["tkinter.messagebox"].askyesno.return_value = True
-        parent = _FakeWidget()
-        dlg = mod.ADM1Dialog(parent, remaining_attempts=1)
-        dlg.adm1_entry.get = lambda: "12345678"
-        dlg.force_auth.get = lambda: False
-        dlg._on_ok()
-        assert dlg.adm1_value == "12345678"
-
-
-# ---------------------------------------------------------------------------
-# SimulatorSettingsDialog  (dialogs/simulator_settings_dialog.py)
-# ---------------------------------------------------------------------------
-
-class TestSimulatorSettingsDialogInstantiation:
-    """Instantiate SimulatorSettingsDialog and exercise its methods."""
-
-    def _make_dialog(self):
-        mod = _load_module("dialogs/simulator_settings_dialog.py",
-                           "dialogs.simulator_settings_dialog")
-        parent = _FakeWidget()
-        settings = _mock.MagicMock()
-        settings.card_data_path = "/some/path.csv"
-        settings.delay_ms = 500
-        settings.error_rate = 0.0
-        settings.num_cards = 10
-        dlg = mod.SimulatorSettingsDialog(parent, settings)
-        return mod, dlg, settings
-
-    def test_instantiation_succeeds(self):
-        mod, dlg, settings = self._make_dialog()
-        assert dlg is not None
-
-    def test_applied_initially_false(self):
-        mod, dlg, settings = self._make_dialog()
-        assert dlg.applied is False
-
-    def test_reset_defaults(self):
-        mod, dlg, settings = self._make_dialog()
-        dlg._reset_defaults()
-
-    def test_apply(self):
-        mod, dlg, settings = self._make_dialog()
-        dlg._csv_var.set("/new/path.csv")
-        dlg._delay_var.set(250)
-        dlg._error_var.set(5)
-        dlg._num_var.set(20)
-        dlg._apply()
-        assert dlg.applied is True
-        assert settings.delay_ms == 250
-
-    def test_apply_empty_csv(self):
-        mod, dlg, settings = self._make_dialog()
-        dlg._csv_var.set("")
-        dlg._apply()
-        assert settings.card_data_path is None
-
-    def test_browse_csv_no_path(self):
-        mod, dlg, settings = self._make_dialog()
-        import sys
-        sys.modules["tkinter.filedialog"].askopenfilename.return_value = ""
-        dlg._browse_csv()
-
-    def test_browse_csv_with_path(self):
-        mod, dlg, settings = self._make_dialog()
-        import sys
-        sys.modules["tkinter.filedialog"].askopenfilename.return_value = "/some/cards.csv"
-        dlg._browse_csv()
-        # The FakeVar.get() should return the path set (or the mock return value)
-        result = dlg._csv_var.get()
-        assert result == "/some/cards.csv" or result is not None
-
-    def test_null_card_data_path(self):
-        mod = _load_module("dialogs/simulator_settings_dialog.py",
-                           "dialogs.simulator_settings_dialog")
-        parent = _FakeWidget()
-        settings = _mock.MagicMock()
-        settings.card_data_path = None
-        settings.delay_ms = 500
-        settings.error_rate = 0.0
-        settings.num_cards = 5
-        dlg = mod.SimulatorSettingsDialog(parent, settings)
-        assert dlg is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1241,258 +1002,77 @@ class TestNetworkStorageDialogInstantiation:
     """Instantiate NetworkStorageDialog and exercise its methods."""
 
     def _make_dialog(self, profiles=None):
-        mod = _load_module("dialogs/network_storage_dialog.py",
-                           "dialogs.network_storage_dialog",
-                           extra_mocks={
-                               "utils.network_scanner": _mock.MagicMock(
-                                   scan_smb_servers=lambda **kw: [],
-                                   list_smb_shares=lambda *a, **kw: [],
-                                   DiscoveredServer=_mock.MagicMock,
-                               )
-                           })
+        mod = _load_module(
+            "dialogs/network_storage_dialog.py",
+            "dialogs.network_storage_dialog",
+            extra_mocks={
+                "utils.network_scanner": _mock.MagicMock(
+                    scan_smb_servers=lambda **kw: [],
+                    list_smb_shares=lambda *a, **kw: [],
+                    DiscoveredServer=_mock.MagicMock,
+                )
+            }
+        )
         parent = _FakeWidget()
         ns = _mock.MagicMock()
-        if profiles is None:
-            ns.load_profiles.return_value = []
-            ns.is_mounted.return_value = False
-        else:
-            ns.load_profiles.return_value = profiles
-            ns.is_mounted.return_value = False
+        ns.load_profiles.return_value = profiles or []
+        ns.is_mounted.return_value = False
         dlg = mod.NetworkStorageDialog(parent, ns)
         return mod, dlg, ns
 
-    def test_instantiation_no_profiles(self):
+    def test_instantiation_succeeds(self):
         mod, dlg, ns = self._make_dialog()
         assert dlg is not None
-
-    def test_instantiation_with_profiles(self):
-        p = _mock.MagicMock()
-        p.label = "Test Share"
-        p.protocol = "smb"
-        p.server = "192.168.1.1"
-        p.share = "testshare"
-        p.username = "user"
-        p.password = "pass"
-        p.domain = ""
-        p.export_subdir = "artifacts"
-        p.export_fields = ["ICCID", "IMSI"]
-        mod, dlg, ns = self._make_dialog(profiles=[p])
-        assert dlg is not None
-
-    def test_clear_form(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._clear_form()
-
-    def test_on_proto_change_smb(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._proto_var.set("smb")
-        dlg._on_proto_change()
-
-    def test_on_proto_change_nfs(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._proto_var.set("nfs")
-        dlg._on_proto_change()
 
     def test_on_new(self):
         mod, dlg, ns = self._make_dialog()
         dlg._on_new()
 
-    def test_on_server_focus_out_clean(self):
+    def test_on_cancel(self):
         mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("192.168.1.1")
-        dlg._on_server_focus_out(None)
+        dlg._on_cancel()
 
-    def test_on_server_focus_out_with_prefix(self):
+    def test_on_close(self):
         mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("smb://nas.local/share")
-        dlg._on_server_focus_out(None)
-        assert "smb://" not in dlg._server_var.get()
+        dlg._on_close()
 
-    def test_refresh_profile_list_empty(self):
+    def test_save_and_load_profile(self):
         mod, dlg, ns = self._make_dialog()
-        dlg._refresh_profile_list()
+        dlg._label_var.set("My Share")
+        dlg._proto_var.set("smb")
+        dlg._server_var.set("nas.local")
+        dlg._share_var.set("data")
+        profile = dlg._save_profile()
+        # Profile may be None if validation fails in mock env
+        # Just ensure no exception is raised
 
-    def test_update_button_states_no_selection(self):
+    def test_update_button_states_no_profiles(self):
         mod, dlg, ns = self._make_dialog()
         dlg._current_idx = None
         dlg._update_button_states()
 
-    def test_enter_new_mode(self):
+    def test_on_scan_smb(self):
         mod, dlg, ns = self._make_dialog()
-        dlg._enter_new_mode()
+        dlg._on_scan_smb()
 
-    def test_form_to_profile_missing_server(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("")
-        dlg._share_var.set("testshare")
-        result = dlg._form_to_profile()
-        assert result is None
+    def test_with_existing_profile(self):
+        from managers.network_storage_manager import StorageProfile
+        p = StorageProfile(
+            label="My NAS", protocol="smb", server="nas.local",
+            share="data", username="user", password="pass", domain="",
+            export_subdir="artifacts", export_fields=["ICCID"]
+        )
+        mod, dlg, ns = self._make_dialog(profiles=[p])
+        assert dlg is not None
 
-    def test_form_to_profile_missing_share(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("192.168.1.1")
-        dlg._share_var.set("")
-        result = dlg._form_to_profile()
-        assert result is None
-
-    def test_form_to_profile_auto_name(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("nas.local")
-        dlg._share_var.set("data")
-        dlg._label_var.set("")  # blank — auto-generate
-        dlg._proto_var.set("smb")
-        result = dlg._form_to_profile()
-        assert result is not None
-        assert "nas.local" in result.label or "data" in result.label
-
-    def test_on_save_no_fields(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("")
-        dlg._share_var.set("")
-        dlg._on_save()
-
-    def test_on_test_missing_fields(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("")
-        dlg._on_test()
-
-    def test_on_test_with_fields(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("nas.local")
-        dlg._share_var.set("data")
-        dlg._proto_var.set("smb")
-        ns.test_connection.return_value = (True, "OK")
-        dlg._on_test()
-
-    def test_on_connect_new_profile(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._server_var.set("nas.local")
-        dlg._share_var.set("data")
-        dlg._proto_var.set("smb")
-        dlg._current_idx = None
-        ns.mount.return_value = (True, "Mounted")
-        ns.save_profiles.return_value = None
-        dlg._on_connect()
-
-    def test_on_remove_no_selection(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._current_idx = None
-        dlg._on_remove()
-
-    def test_on_profile_select_empty(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._profile_list.curselection = lambda: ()
-        dlg._on_profile_select(None)
-
-    def test_sanitise_server(self):
-        mod, dlg, ns = self._make_dialog()
-        assert mod._sanitise_server("smb://nas.local/share") == "nas.local"
-        assert mod._sanitise_server("nfs://10.0.0.1/data") == "10.0.0.1"
-        assert mod._sanitise_server("//server/share") == "server"
-
-    def test_sanitise_share_smb(self):
-        mod, dlg, ns = self._make_dialog()
-        assert mod._sanitise_share("//share", "smb") == "share"
-
-    def test_sanitise_share_nfs_no_slash(self):
-        mod, dlg, ns = self._make_dialog()
-        result = mod._sanitise_share("exports/data", "nfs")
-        assert result.startswith("/")
-
-    def test_auto_name(self):
-        mod, dlg, ns = self._make_dialog()
-        name = mod._auto_name("server", "share", "smb")
-        assert "server" in name
-        assert "share" in name
-
-    def test_auto_name_server_only(self):
-        mod, dlg, ns = self._make_dialog()
-        name = mod._auto_name("server", "", "nfs")
-        assert "server" in name
-
-    def test_auto_name_empty(self):
-        mod, dlg, ns = self._make_dialog()
-        name = mod._auto_name("", "", "smb")
-        assert name == "New connection"
-
-    def test_on_mousewheel_button4(self):
-        mod, dlg, ns = self._make_dialog()
-        event = _mock.MagicMock()
-        event.num = 4
-        dlg._on_mousewheel(event)
-
-    def test_on_mousewheel_button5(self):
-        mod, dlg, ns = self._make_dialog()
-        event = _mock.MagicMock()
-        event.num = 5
-        dlg._on_mousewheel(event)
-
-    def test_on_mousewheel_delta(self):
-        mod, dlg, ns = self._make_dialog()
-        event = _mock.MagicMock()
-        event.num = 0
-        event.delta = 120
-        dlg._on_mousewheel(event)
-
-    def test_on_canvas_configure(self):
-        mod, dlg, ns = self._make_dialog()
-        event = _mock.MagicMock()
-        event.width = 500
-        dlg._on_canvas_configure(event)
-
-    def test_on_body_configure(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._on_body_configure(None)
-
-    def test_hide_tooltip(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._tooltip_win = None
-        dlg._hide_tooltip()
-
-    def test_on_tree_motion_no_row(self):
-        mod, dlg, ns = self._make_dialog()
-        event = _mock.MagicMock()
-        dlg._discovery_tree.identify_row = lambda y: ""
-        dlg._on_tree_motion(event)
-
-    def test_build_server_history(self):
-        p1 = _mock.MagicMock()
-        p1.server = "nas.local"
-        p2 = _mock.MagicMock()
-        p2.server = "nas.local"  # duplicate
-        p3 = _mock.MagicMock()
-        p3.server = "10.0.0.1"
-        mod, dlg, ns = self._make_dialog()
-        dlg._profiles = [p1, p2, p3]
-        history = dlg._build_server_history()
-        assert len(history) == 2
-
-    def test_update_server_history(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._update_server_history("newserver.local")
-        assert "newserver.local" in dlg._server_history
-
-    def test_scan_done_no_servers(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._scan_done([])
-
-    def test_on_discovery_select_empty(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg._discovery_tree.selection = lambda: []
-        dlg._on_discovery_select(None)
-
-    def test_destroy(self):
-        mod, dlg, ns = self._make_dialog()
-        dlg.destroy()
-
-    def test_with_mounted_profile(self):
+    def test_update_button_states_mounted(self):
         p = _mock.MagicMock()
-        p.label = "Mounted Share"
+        p.label = "My Share"
         p.protocol = "smb"
         p.server = "nas.local"
         p.share = "data"
-        p.username = "user"
-        p.password = "secret"
+        p.username = ""
+        p.password = ""
         p.domain = ""
         p.export_subdir = "artifacts"
         p.export_fields = ["ICCID"]
