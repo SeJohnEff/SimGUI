@@ -19,7 +19,7 @@ from tkinter import filedialog, messagebox, ttk
 from managers.card_manager import CardManager
 from theme import ModernTheme
 from utils import get_browse_initial_dir
-from widgets.tooltip import add_tooltip
+from widgets.tooltip import add_tooltip, hide_all_tooltips
 
 # Display order and labels for public fields
 _PUBLIC_DISPLAY = [
@@ -244,8 +244,12 @@ class ReadSIMPanel(ttk.Frame):
             var.set("-")
 
         # Read public data
-        pub = self._cm.read_public_data()
-        if pub:
+        raw = self._cm.read_public_data()
+        if raw:
+            # Normalise keys to lowercase so they match _PUBLIC_DISPLAY.
+            # card_info uses uppercase ("ICCID") but the display map uses
+            # lowercase ("iccid").
+            pub = {k.lower(): v for k, v in raw.items()}
             self._public_data = pub
             self._detected_iccid = pub.get("iccid", "")
             for key, var in self._pub_vars.items():
@@ -288,6 +292,7 @@ class ReadSIMPanel(ttk.Frame):
 
     def _on_load_adm1_csv(self):
         if not self._detected_iccid:
+            hide_all_tooltips()
             messagebox.showinfo(
                 "Detect First",
                 "Please detect a card first (via Card Status panel) "
