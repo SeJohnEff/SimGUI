@@ -43,6 +43,8 @@ class StorageProfile:
     export_fields: list = field(default_factory=lambda: [
         "ICCID", "IMSI", "Ki", "OPc",
     ])
+    # Auto-reconnect: True means mount this share on app startup
+    auto_connect: bool = False
 
     @property
     def mount_point(self) -> str:
@@ -166,6 +168,30 @@ class NetworkStorageManager:
         """Unmount every active mount (call on app exit)."""
         for label in list(self._active_mounts):
             self.unmount(self._active_mounts[label])
+
+    def reconnect_saved(self) -> list[tuple[str, bool, str]]:
+        """Mount every profile that has *auto_connect* enabled.
+
+        Called once at startup.  Returns a list of
+        ``(label, success, message)`` for each attempted reconnection.
+        Profiles that are already mounted are silently skipped.
+        """
+        results: list[tuple[str, bool, str]] = []
+        profiles = self.load_profiles()
+        for p in profiles:
+            if not p.auto_connect:
+                continue
+            if self.is_mounted(p):
+                results.append((p.label, True, "Already mounted"))
+                continue
+            ok, msg = self.mount(p)
+            results.append((p.label, ok, msg))
+            if ok:
+                logger.info("Auto-reconnected: %s", p.label)
+            else:
+                logger.warning("Auto-reconnect failed for %s: %s",
+                               p.label, msg)
+        return results
 
     def is_mounted(self, profile: StorageProfile) -> bool:
         """Check if the profile's mount point is actually mounted."""

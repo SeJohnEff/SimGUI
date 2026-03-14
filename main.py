@@ -34,6 +34,7 @@ from widgets.csv_editor_panel import CSVEditorPanel
 from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.progress_panel import ProgressPanel
 from widgets.read_sim_panel import ReadSIMPanel
+from widgets.toast import show_toast
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,14 +121,14 @@ class SimGUIApp:
 
         # Decide initial mode.
         # If a real CLI backend (pySim) is available, always start in
-        # hardware mode regardless of what was saved - the user shouldn't
+        # hardware mode regardless of what was saved — the user shouldn't
         # have to remember to switch modes every launch.
         if self._card_manager.cli_backend == CLIBackend.NONE:
-            # No pySim / no CLI tool - simulator is the only option
+            # No pySim / no CLI tool — simulator is the only option
             self._mode_var.set("simulator")
             self._on_mode_change()
         else:
-            # Hardware Mode - a real backend is available.
+            # Hardware Mode — a real backend is available.
             self._mode_var.set("hardware")
             self._settings.set("simulator_mode", False)
             # Trigger an initial card detection after 100 ms so that a card
@@ -135,7 +136,10 @@ class SimGUIApp:
             # rather than waiting for the first CardWatcher poll cycle.
             self.root.after(100, self._startup_detect_card)
 
-        # Scan index from connected shares (if any were auto-mounted)
+        # Auto-reconnect network shares from previous session
+        self._auto_reconnect_shares()
+
+        # Scan index from connected shares
         self._rescan_iccid_index()
 
     # ---- Layout -----------------------------------------------------------
@@ -304,7 +308,7 @@ class SimGUIApp:
             return
         if self._card_manager.cli_backend == CLIBackend.NONE:
             return
-        # Run the watcher check - it calls detect_card() internally
+        # Run the watcher check — it calls detect_card() internally
         # and fires the correct callbacks (detected / unknown / removed).
         try:
             self._card_watcher._check_once()
@@ -342,7 +346,35 @@ class SimGUIApp:
             body += f"\nDetail: {detail}"
         messagebox.showwarning("No Card Reader", body)
         self._card_panel.set_status("error", "No card reader detected")
-        self._status_var.set("No card reader - check USB connection")
+        self._status_var.set("No card reader — check USB connection")
+
+    def _auto_reconnect_shares(self):
+        """Reconnect network shares that were connected last session."""
+        results = self._ns_manager.reconnect_saved()
+        if not results:
+            return
+
+        ok_labels = [label for label, ok, _ in results if ok]
+        fail_items = [(label, msg) for label, ok, msg in results if not ok]
+
+        if ok_labels:
+            names = ", ".join(ok_labels)
+            show_toast(
+                self.root,
+                f"Network share reconnected: {names}",
+                level="success",
+                duration=5000,
+            )
+            self._status_var.set(f"Network share connected: {names}")
+
+        for label, msg in fail_items:
+            show_toast(
+                self.root,
+                f"Could not reconnect \"{label}\": {msg}",
+                level="warning",
+                duration=8000,
+            )
+            logger.warning("Auto-reconnect failed: %s — %s", label, msg)
 
     def _rescan_iccid_index(self):
         """Scan all connected shares for ICCID data files and standards."""
@@ -352,7 +384,7 @@ class SimGUIApp:
             try:
                 result = self._iccid_index.scan_directory(mount_path)
                 if result.total_cards > 0:
-                    logger.info("ICCID index: scanned %s - %d cards in %d files",
+                    logger.info("ICCID index: scanned %s — %d cards in %d files",
                                 mount_path, result.total_cards,
                                 result.files_scanned)
             except Exception as exc:
@@ -400,7 +432,7 @@ class SimGUIApp:
         self._status_var.set(status_msg)
 
         if not iccid:
-            # Blank card - nothing to look up, skip the file dialog
+            # Blank card — nothing to look up, skip the file dialog
             return
 
         # Open the unified file-picker with network share access
@@ -453,10 +485,10 @@ class SimGUIApp:
         logger.warning("CardWatcher error: %s", msg)
         if self._is_reader_error(msg):
             self._card_panel.set_status("error", "No card reader detected")
-            self._status_var.set("No card reader - check USB connection")
+            self._status_var.set("No card reader — check USB connection")
 
     def _on_card_programmed(self, card_data):
-        """Called after successful card programming - save auto-artifact."""
+        """Called after successful card programming — save auto-artifact."""
         try:
             paths = self._auto_artifact.save_card_artifact(card_data)
             if paths:
@@ -630,7 +662,7 @@ class SimGUIApp:
     def _on_network_storage(self):
         """Open the network storage connection dialog."""
         NetworkStorageDialog(self.root, self._ns_manager)
-        # Rescan after dialog closes - shares may have been mounted/unmounted
+        # Rescan after dialog closes — shares may have been mounted/unmounted
         self._rescan_iccid_index()
 
     def _on_export_artifacts(self):

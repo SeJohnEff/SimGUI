@@ -790,6 +790,9 @@ class NetworkStorageDialog(tk.Toplevel):
                 and self._ns.is_mounted(self._profiles[self._current_idx])):
             p = self._profiles[self._current_idx]
             ok, msg = self._ns.unmount(p)
+            # Mark as not auto-connect on explicit disconnect
+            p.auto_connect = False
+            self._ns.save_profiles(self._profiles)
             self._status_label.configure(text=msg[:80])
             self._refresh_profile_list()
             self._update_button_states()
@@ -809,7 +812,11 @@ class NetworkStorageDialog(tk.Toplevel):
         self.update_idletasks()
         ok, msg = self._ns.mount(p)
         self._status_label.configure(text=msg[:80])
-        if not ok:
+        if ok:
+            # Mark for auto-reconnect on next app launch
+            p.auto_connect = True
+            self._ns.save_profiles(self._profiles)
+        else:
             messagebox.showerror("Mount Failed", msg, parent=self)
 
         self._refresh_profile_list()
