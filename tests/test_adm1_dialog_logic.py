@@ -7,7 +7,7 @@ is tested by extracting those methods into a lightweight harness.
 
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -382,7 +382,7 @@ class TestADM1PasteSanitized:
     def test_paste_removes_non_printable_chars(self):
         """_paste_sanitized strips non-printable characters from clipboard."""
         d = ADM1DialogHarness()
-        entry = _FakeEntry()
+        _FakeEntry()
 
         class ClipboardEntry(_FakeEntry):
             def clipboard_get(self):

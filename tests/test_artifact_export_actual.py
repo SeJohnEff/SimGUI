@@ -7,7 +7,7 @@ methods using mocked tkinter objects.
 import csv
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -67,7 +67,7 @@ for _mod_key in list(sys.modules.keys()):
 
 # Import under the patched environment
 with _mock.patch.dict("sys.modules", _PATCHES):
-    from dialogs.artifact_export_dialog import ArtifactExportDialog, _ALL_FIELDS
+    from dialogs.artifact_export_dialog import _ALL_FIELDS, ArtifactExportDialog
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def _make_dialog(records=None, default_fields=None, ns_manager=None):
     """Instantiate ArtifactExportDialog with mocked parent and tkinter."""
     if records is None:
         records = []
-    parent = MagicMock()
+    MagicMock()
 
     with _mock.patch.dict("sys.modules", _PATCHES):
         dlg = ArtifactExportDialog.__new__(ArtifactExportDialog)
@@ -286,6 +286,7 @@ def _get_aed_globals():
 
 
 from contextlib import contextmanager
+
 
 @contextmanager
 def _patch_aed_globals(**replacements):
