@@ -124,6 +124,12 @@ class SimGUIApp:
         elif self._card_manager.cli_backend == CLIBackend.NONE:
             self._mode_var.set("simulator")
             self._on_mode_change()
+        else:
+            # Hardware Mode and a real backend is available.
+            # Trigger an initial card detection after 100 ms so that a card
+            # already inserted before the app started is detected immediately
+            # rather than waiting for the first CardWatcher poll cycle.
+            self.root.after(100, self._startup_detect_card)
 
         # Scan index from connected shares (if any were auto-mounted)
         self._rescan_iccid_index()
@@ -279,6 +285,62 @@ class SimGUIApp:
         self._card_watcher.on_error = on_error
         self._card_watcher.start()
 
+    def _startup_detect_card(self):
+        """Trigger an initial card detection at startup for Hardware Mode.
+
+        Called once via ``root.after(100, ...)`` so the UI is fully
+        initialised before the detection runs.  Uses the same CardWatcher
+        detection flow so the UI updates identically to a live insertion.
+
+        Also checks whether a USB smart-card reader is reachable.  When
+        pySim-read returns an error mentioning 'reader' or 'PC/SC' the
+        user gets a one-time warning dialog.
+        """
+        if self._mode_var.get() != "hardware":
+            return
+        if self._card_manager.cli_backend == CLIBackend.NONE:
+            return
+        # Probe with a quick detect — if it fails with a reader error
+        # the user gets a helpful popup instead of silent failure.
+        ok, msg = self._card_manager.detect_card()
+        if not ok and self._is_reader_error(msg):
+            self._show_no_reader_warning(msg)
+            return
+        # Card may already be inserted — run the full watcher flow
+        # so callbacks fire and UI updates.
+        try:
+            self._card_watcher._check_once()
+        except Exception as exc:
+            logger.warning("Startup card detection failed: %s", exc)
+
+    # ---- Reader & index helpers -------------------------------------------
+
+    _READER_ERROR_KEYWORDS = (
+        "no reader", "no pc/sc", "pcsc", "reader not found",
+        "scard", "could not connect", "no smart card",
+        "service not available", "establish_context",
+    )
+
+    def _is_reader_error(self, msg: str) -> bool:
+        """Return True if *msg* looks like a missing-reader error."""
+        lower = msg.lower()
+        return any(kw in lower for kw in self._READER_ERROR_KEYWORDS)
+
+    def _show_no_reader_warning(self, detail: str = ""):
+        """Show a popup warning about missing USB smart-card reader."""
+        body = (
+            "No USB smart-card reader detected.\n\n"
+            "Please check:\n"
+            "  \u2022 Reader is plugged in (and passed through to the VM)\n"
+            "  \u2022 PC/SC service is running: sudo systemctl start pcscd\n"
+            "  \u2022 Reader appears in: pcsc_scan\n"
+        )
+        if detail:
+            body += f"\nDetail: {detail}"
+        messagebox.showwarning("No Card Reader", body)
+        self._card_panel.set_status("error", "No card reader detected")
+        self._status_var.set("No card reader — check USB connection")
+
     def _rescan_iccid_index(self):
         """Scan all connected shares for ICCID data files and standards."""
         mount_dirs = []
@@ -316,13 +378,58 @@ class SimGUIApp:
         self._status_var.set(f"Card detected: {iccid}")
 
     def _on_auto_card_unknown(self, iccid):
-        """Card inserted but not in index (runs on main thread)."""
+        """Card inserted but not in index (runs on main thread).
+
+        Offers the user a chance to load a CSV file that contains this
+        card so the ICCID gets indexed.
+        """
         self._card_panel.set_status("detected", f"Card: {iccid} (not in index)")
         self._card_panel.set_card_info(iccid=iccid, source_file=None)
         self._card_panel.set_auth_status(False)
         self._card_panel.set_programmed_indicator(False)
         self._program_panel.on_card_detected(iccid)
         self._status_var.set(f"Card detected: {iccid} (not in index)")
+
+        # Ask the user whether they want to load a data file for this card
+        answer = messagebox.askyesno(
+            "Card Not in Index",
+            f"Card ICCID: {iccid}\n\n"
+            "This card was not found in any indexed data file.\n\n"
+            "Would you like to load a CSV/EML file containing this card's data?",
+        )
+        if answer:
+            self._load_file_for_unknown_card(iccid)
+
+    def _load_file_for_unknown_card(self, iccid: str):
+        """Let the user pick a data file, scan it, and re-check the card."""
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        kwargs = {"title": "Load Card Data File", "filetypes": SIM_DATA_FILETYPES}
+        if init_dir:
+            kwargs["initialdir"] = init_dir
+        fp = filedialog.askopenfilename(**kwargs)
+        if not fp:
+            return
+        try:
+            result = self._iccid_index.scan_directory(
+                os.path.dirname(fp))
+            logger.info("Re-scanned %s: %d cards in %d files",
+                        os.path.dirname(fp), result.total_cards,
+                        result.files_scanned)
+        except Exception as exc:
+            messagebox.showerror("Scan Error", str(exc))
+            return
+        # Re-check this ICCID in the refreshed index
+        entry = self._iccid_index.lookup(iccid)
+        if entry:
+            card_data = self._iccid_index.load_card(iccid)
+            if card_data:
+                self._on_auto_card_detected(iccid, card_data, entry.file_path)
+                self._status_var.set(f"Card found in {os.path.basename(fp)}")
+                return
+        messagebox.showinfo(
+            "Not Found",
+            f"ICCID {iccid} was not found in the selected file.\n\n"
+            "Make sure the file contains this card's data.")
 
     def _on_auto_card_removed(self):
         """Card removed (runs on main thread)."""
@@ -334,6 +441,9 @@ class SimGUIApp:
     def _on_auto_card_error(self, msg):
         """CardWatcher error (runs on main thread)."""
         logger.warning("CardWatcher error: %s", msg)
+        if self._is_reader_error(msg):
+            self._card_panel.set_status("error", "No card reader detected")
+            self._status_var.set("No card reader — check USB connection")
 
     def _on_card_programmed(self, card_data):
         """Called after successful card programming — save auto-artifact."""
@@ -459,6 +569,8 @@ class SimGUIApp:
             self._card_panel.set_simulator_info(None, None)
             self._card_watcher.resume()  # Resume hardware polling
             self._status_var.set("Hardware mode active")
+            # Check for reader and attempt initial card detection
+            self.root.after(100, self._startup_detect_card)
         self._settings.set("simulator_mode", mode == "simulator")
 
     def _update_sim_menu_state(self, state):

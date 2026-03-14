@@ -43,6 +43,27 @@ class CLIBackend(Enum):
     SIMULATOR = auto()
 
 
+def _find_venv_python(tool_path: str) -> Optional[str]:
+    """Find the venv Python interpreter for a CLI tool directory.
+
+    Checks for a virtual environment inside the tool directory and returns
+    the path to its Python interpreter.  Falls back to None (meaning use
+    sys.executable) when no venv is present.
+    """
+    for venv_dir in ['.venv', 'venv', '.env', 'env']:
+        candidate = os.path.join(tool_path, venv_dir, 'bin', 'python')
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            logger.info("Found venv Python at %s", candidate)
+            return candidate
+    # Also check for a python3 symlink
+    for venv_dir in ['.venv', 'venv', '.env', 'env']:
+        candidate = os.path.join(tool_path, venv_dir, 'bin', 'python3')
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            logger.info("Found venv Python3 at %s", candidate)
+            return candidate
+    return None
+
+
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     """Locate sysmo-usim-tool or pySim repo on the system.
 
@@ -52,11 +73,13 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     # Check environment variable first (sysmo-usim-tool)
     env_path = os.environ.get('SYSMO_USIM_TOOL_PATH')
     if env_path and os.path.isdir(env_path):
+        logger.info("Found sysmo-usim-tool via env var: %s", env_path)
         return env_path, CLIBackend.SYSMO
 
     # Check environment variable for pySim
     pysim_path = os.environ.get('PYSIM_PATH')
     if pysim_path and os.path.isdir(pysim_path):
+        logger.info("Found pySim via env var: %s", pysim_path)
         return pysim_path, CLIBackend.PYSIM
 
     # Check common relative paths for sysmo-usim-tool
@@ -66,6 +89,7 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
         '/opt/sysmo-usim-tool',
     ]:
         if os.path.isdir(candidate):
+            logger.info("Found sysmo-usim-tool at %s", candidate)
             return os.path.abspath(candidate), CLIBackend.SYSMO
 
     # Check common relative paths for pySim
@@ -75,8 +99,10 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
         '/opt/pysim',
     ]:
         if os.path.isdir(candidate):
+            logger.info("Found pySim at %s", candidate)
             return os.path.abspath(candidate), CLIBackend.PYSIM
 
+    logger.warning("No CLI tool found (sysmo-usim-tool or pySim)")
     return None, CLIBackend.NONE
 
 
@@ -87,10 +113,15 @@ class CardManager:
         self.cli_path: Optional[str]
         self.cli_backend: CLIBackend
         self.cli_path, self.cli_backend = _find_cli_tool()
+        self._venv_python: Optional[str] = None
+        if self.cli_path:
+            self._venv_python = _find_venv_python(self.cli_path)
         self.card_type: CardType = CardType.UNKNOWN
         self.authenticated: bool = False
         self.card_info: Dict[str, str] = {}
         self._simulator = None  # Optional[SimulatorBackend]
+        logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
+                    self.cli_backend.name, self.cli_path, self._venv_python)
 
     # ---- simulator ---------------------------------------------------------
 
@@ -161,7 +192,8 @@ class CardManager:
         if script_path is None:
             return False, "", f"Invalid script path: {script}"
 
-        cmd = [sys.executable, script_path] + list(args)
+        python_exe = self._venv_python or sys.executable
+        cmd = [python_exe, script_path] + list(args)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout,
@@ -181,12 +213,15 @@ class CardManager:
         """Manually set the path to the CLI tool."""
         if os.path.isdir(path):
             self.cli_path = path
+            self._venv_python = _find_venv_python(path)
             if backend is not None:
                 self.cli_backend = backend
             elif os.path.exists(os.path.join(path, 'pySim-read.py')):
                 self.cli_backend = CLIBackend.PYSIM
             else:
                 self.cli_backend = CLIBackend.SYSMO
+            logger.info("CLI path set to %s (backend=%s, venv=%s)",
+                        path, self.cli_backend.name, self._venv_python)
             return True
         return False
 
