@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from managers.settings_manager import SettingsManager, _DEFAULTS
+from managers.settings_manager import _DEFAULTS, SettingsManager
 
 
 class TestSettingsManagerExtended:
