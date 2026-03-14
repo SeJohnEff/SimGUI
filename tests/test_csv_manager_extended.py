@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from managers.csv_manager import CSVManager, _normalize_column
 
-
 # ---------------------------------------------------------------------------
 # _normalize_column
 # ---------------------------------------------------------------------------
@@ -85,7 +84,7 @@ class TestLoadFileDispatch:
 
     def test_load_eml_returns_false_for_empty_parse(self, tmp_path):
         """_load_eml() returns False when parser returns no cards (line 78)."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         # Patch parse_eml_file to return empty cards list
         eml_path = tmp_path / "empty.eml"
         eml_path.write_text(
