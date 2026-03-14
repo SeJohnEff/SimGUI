@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import unittest.mock as _mock
 
-
 # ---------------------------------------------------------------------------
 # Tooltip tests — import real tooltip module (no tk needed at import time)
 # ---------------------------------------------------------------------------
@@ -277,7 +276,11 @@ class TestCardStatusPanelMethods:
         return FakePanel()
 
     def _get_csp_class(self):
-        """Import CardStatusPanel with mocked tkinter."""
+        """Import CardStatusPanel with mocked tkinter via importlib."""
+        import importlib
+        import importlib.util
+        import types
+
         _tk = _mock.MagicMock()
         _ttk = _mock.MagicMock()
         _ttk.LabelFrame = _FakeWidget  # base class
@@ -291,21 +294,39 @@ class TestCardStatusPanelMethods:
         _tk.E = "e"
         _tk.X = "x"
         _tk.LEFT = "left"
+        # CRITICAL: 'from tkinter import ttk' resolves to _tk.ttk, not _ttk.
+        _tk.ttk = _ttk
 
         _th = _mock.MagicMock()
         _th.ModernTheme.get_color.return_value = "#000000"
         _th.ModernTheme.get_padding.side_effect = lambda k: 8
         _tp = _mock.MagicMock()
 
+        # Remove ALL cached widget modules to prevent MagicMock leaking
         for k in list(sys.modules.keys()):
-            if "card_status_panel" in k and "test_" not in k:
+            if k.startswith("widgets") and "test_" not in k:
                 del sys.modules[k]
+
+        # Create a real module for 'widgets' package to prevent
+        # MagicMock attribute access from hijacking submodule imports.
+        _widgets_pkg = types.ModuleType("widgets")
+        _widgets_pkg.__path__ = [
+            os.path.join(os.path.dirname(__file__), "..", "widgets")
+        ]
 
         with _mock.patch.dict(sys.modules, {
             "tkinter": _tk, "tkinter.ttk": _ttk,
-            "theme": _th, "widgets.tooltip": _tp
+            "theme": _th,
+            "widgets": _widgets_pkg, "widgets.tooltip": _tp,
         }):
-            from widgets.card_status_panel import CardStatusPanel
+            spec = importlib.util.spec_from_file_location(
+                "widgets.card_status_panel",
+                os.path.join(os.path.dirname(__file__), "..", "widgets", "card_status_panel.py"),
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["widgets.card_status_panel"] = mod
+            spec.loader.exec_module(mod)
+            CardStatusPanel = mod.CardStatusPanel
         return CardStatusPanel
 
     def test_set_status_waiting(self):
