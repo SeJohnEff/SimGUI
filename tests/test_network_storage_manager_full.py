@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import tempfile
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -30,7 +30,6 @@ from managers.network_storage_manager import (
     StorageProfile,
 )
 from managers.settings_manager import SettingsManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -440,7 +439,7 @@ class TestMountUnmount:
         """mount() returns success when subprocess exits 0."""
         ns = NetworkStorageManager()
         p = _make_smb_profile(label="mnt_test")
-        mp = str(tmp_path / "mnt_test")
+        str(tmp_path / "mnt_test")
         with patch.object(ns, "is_mounted", return_value=False), \
              patch("os.makedirs"), \
              patch.object(ns, "_build_mount_cmd",
@@ -448,7 +447,7 @@ class TestMountUnmount:
              patch("subprocess.run",
                    return_value=MagicMock(returncode=0, stderr="")):
             with patch.object(ns, "is_mounted", side_effect=[False, True]):
-                # First call (already_mounted check) -> False, mount
+                # First call (already_mounted check) → False, mount
                 mock_result = MagicMock(returncode=0, stderr="")
                 with patch("subprocess.run", return_value=mock_result):
                     with patch("os.makedirs"):
