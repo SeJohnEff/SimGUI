@@ -76,8 +76,58 @@ class ReadSIMPanel(ttk.Frame):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
+        # --- Scrollable container for all content ---
+        self._canvas = tk.Canvas(self, highlightthickness=0)
+        self._vscroll = ttk.Scrollbar(
+            self, orient=tk.VERTICAL, command=self._canvas.yview)
+        self._inner = ttk.Frame(self._canvas)
+
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(
+                scrollregion=self._canvas.bbox("all")))
+        self._canvas_window = self._canvas.create_window(
+            (0, 0), window=self._inner, anchor="nw")
+        self._canvas.configure(yscrollcommand=self._vscroll.set)
+
+        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Keep inner frame width in sync with canvas
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(
+                self._canvas_window, width=e.width))
+
+        # Mousewheel scrolling
+        def _on_mousewheel(event):
+            self._canvas.yview_scroll(
+                int(-1 * (event.delta / 120)), "units")
+
+        def _on_mousewheel_linux(event):
+            if event.num == 4:
+                self._canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self._canvas.yview_scroll(1, "units")
+
+        def _bind_wheel(event):
+            self._canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            self._canvas.bind_all("<Button-4>", _on_mousewheel_linux)
+            self._canvas.bind_all("<Button-5>", _on_mousewheel_linux)
+
+        def _unbind_wheel(event):
+            self._canvas.unbind_all("<MouseWheel>")
+            self._canvas.unbind_all("<Button-4>")
+            self._canvas.unbind_all("<Button-5>")
+
+        self._canvas.bind("<Enter>", _bind_wheel)
+        self._canvas.bind("<Leave>", _unbind_wheel)
+
+        # --- All content goes inside self._inner ---
+
         # --- Public Fields grid ---
-        pub_frame = ttk.LabelFrame(self, text="Public Fields (no auth required)")
+        pub_frame = ttk.LabelFrame(
+            self._inner, text="Public Fields (no auth required)")
         pub_frame.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
 
         pub_grid = ttk.Frame(pub_frame)
@@ -102,7 +152,7 @@ class ReadSIMPanel(ttk.Frame):
         pub_grid.columnconfigure(3, weight=1)
 
         # --- Authentication section ---
-        auth_frame = ttk.LabelFrame(self, text="Authentication")
+        auth_frame = ttk.LabelFrame(self._inner, text="Authentication")
         auth_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
 
         auth_inner = ttk.Frame(auth_frame)
@@ -131,8 +181,9 @@ class ReadSIMPanel(ttk.Frame):
                                sticky=tk.W, pady=(pad, 0))
 
         # --- Protected Fields section ---
-        prot_frame = ttk.LabelFrame(self, text="Protected Fields (requires ADM1)")
-        prot_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad // 2)
+        prot_frame = ttk.LabelFrame(
+            self._inner, text="Protected Fields (requires ADM1)")
+        prot_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
 
         prot_top = ttk.Frame(prot_frame)
         prot_top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
@@ -166,7 +217,7 @@ class ReadSIMPanel(ttk.Frame):
         prot_grid.columnconfigure(3, weight=1)
 
         # --- Bottom action buttons ---
-        btn_row = ttk.Frame(self)
+        btn_row = ttk.Frame(self._inner)
         btn_row.pack(fill=tk.X, padx=pad, pady=(0, pad))
         self._copy_btn = ttk.Button(
             btn_row, text="Copy All to Clipboard", command=self._on_copy)
