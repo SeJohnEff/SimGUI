@@ -21,7 +21,6 @@ from managers.batch_manager import BatchManager, BatchState, CardResult
 from managers.card_manager import CardManager
 from simulator.settings import SimulatorSettings
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
