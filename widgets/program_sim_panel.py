@@ -2,7 +2,9 @@
 Program SIM Panel — Workflow 2.
 
 Program a single SIM card. Data comes from manual entry or CSV selection.
-Three-step guided flow: Detect → Authenticate → Program.
+Two-step flow: Authenticate → Program.  Card detection is automatic
+via CardWatcher.  When a card is inserted, fields are auto-populated
+from the IccidIndex if the card's ICCID is found in a loaded data file.
 
 Layout uses a vertical PanedWindow so the operator can drag the divider
 to give more space to the card-data fields or the CSV table.
@@ -118,22 +120,18 @@ class ProgramSIMPanel(ttk.Frame):
 
         btn_row = ttk.Frame(act)
         btn_row.pack(fill=tk.X, padx=pad, pady=pad)
-        self._detect_btn = ttk.Button(
-            btn_row, text="1. Detect Card", command=self._on_detect)
-        self._detect_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(self._detect_btn, "Check if a SIM card is inserted in the reader")
         self._auth_btn = ttk.Button(
-            btn_row, text="2. Authenticate", command=self._on_authenticate,
+            btn_row, text="1. Authenticate", command=self._on_authenticate,
             state=tk.DISABLED)
         self._auth_btn.pack(side=tk.LEFT, padx=(0, pad))
         add_tooltip(self._auth_btn, "Verify the ADM1 key with the card")
         self._prog_btn = ttk.Button(
-            btn_row, text="3. Program Card", command=self._on_program,
+            btn_row, text="2. Program Card", command=self._on_program,
             state=tk.DISABLED, style="Accent.TButton")
         self._prog_btn.pack(side=tk.LEFT)
         add_tooltip(self._prog_btn, "Write all field values to the inserted SIM card")
 
-        self._action_status = ttk.Label(act, text="Ready — insert card and detect")
+        self._action_status = ttk.Label(act, text="Insert a SIM card...")
         self._action_status.pack(anchor=tk.W, padx=pad, pady=(0, pad))
 
         self._paned.add(top_pane, minsize=200)
@@ -233,7 +231,7 @@ class ProgramSIMPanel(ttk.Frame):
         """Fill form fields from the shared last-read card data."""
         if not self._last_read_data:
             self._action_status.configure(
-                text="No card data available \u2014 read a card first on the Read SIM tab",
+                text="No card data available — read a card first on the Read SIM tab",
                 style="Warning.TLabel")
             return
         for read_key, form_key in self._READ_KEY_MAP.items():
@@ -311,24 +309,48 @@ class ProgramSIMPanel(ttk.Frame):
             self._field_vars[key].set(val)
         self._reset_step()
 
-    # ---- 3-step flow ---------------------------------------------------
+    # ---- 2-step flow (auto-detect replaces manual Detect) ---------------
 
     def _reset_step(self):
         self._step = 0
         self._auth_btn.configure(state=tk.DISABLED)
         self._prog_btn.configure(state=tk.DISABLED)
         self._action_status.configure(
-            text="Ready — insert card and detect", style="TLabel")
+            text="Insert a SIM card...", style="TLabel")
 
-    def _on_detect(self):
-        ok, msg = self._cm.detect_card()
-        if ok:
-            self._step = 1
-            self._auth_btn.configure(state=tk.NORMAL)
-            self._action_status.configure(text=msg, style="Success.TLabel")
+    def on_card_detected(self, iccid, card_data=None, file_path=None):
+        """Called by CardWatcher (via main.py) when a card is auto-detected.
+
+        If *card_data* is provided the form fields are auto-populated.
+        """
+        self._step = 1
+        self._auth_btn.configure(state=tk.NORMAL)
+        self._prog_btn.configure(state=tk.DISABLED)
+
+        if card_data:
+            # Auto-populate all form fields from the indexed data
+            for key, _, _ in _FORM_FIELDS:
+                val = card_data.get(key, card_data.get(key.upper(), ""))
+                if key == "OPc" and not val:
+                    val = card_data.get("OPC", "")
+                self._field_vars[key].set(val)
+            import os
+            src = os.path.basename(file_path) if file_path else "index"
+            self._action_status.configure(
+                text=f"Card detected — data loaded from {src}",
+                style="Success.TLabel")
         else:
-            self._reset_step()
-            self._action_status.configure(text=msg, style="Error.TLabel")
+            # Card found but not in index — just show ICCID
+            self._field_vars["ICCID"].set(iccid)
+            self._action_status.configure(
+                text=f"Card detected (ICCID {iccid}) — not in index, enter data manually",
+                style="Warning.TLabel")
+
+    def on_card_removed(self):
+        """Called by CardWatcher when the card is removed."""
+        self._reset_step()
+        for key, _, _ in _FORM_FIELDS:
+            self._field_vars[key].set("")
 
     def _on_authenticate(self):
         if self._step < 1:
@@ -356,5 +378,8 @@ class ProgramSIMPanel(ttk.Frame):
         ok, msg = self._cm.program_card(card_data)
         if ok:
             self._action_status.configure(text=msg, style="Success.TLabel")
+            # Notify main.py so it can save auto-artifact
+            if callable(getattr(self, 'on_card_programmed_callback', None)):
+                self.on_card_programmed_callback(card_data)
         else:
             self._action_status.configure(text=msg, style="Error.TLabel")
