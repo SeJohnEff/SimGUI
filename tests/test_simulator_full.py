@@ -25,7 +25,6 @@ from simulator.settings import SimulatorSettings
 from simulator.simulator_backend import SimulatorBackend
 from simulator.virtual_card import VirtualCard
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
