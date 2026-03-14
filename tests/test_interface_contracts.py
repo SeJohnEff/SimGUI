@@ -1,4 +1,4 @@
-"""Interface contract tests — catch the *category* of bugs, not just instances.
+"""Interface contract tests - catch the *category* of bugs, not just instances.
 
 The ``_find_all_field_headers`` bug was code calling a function that
 didn't exist.  These tests ensure that:
@@ -46,7 +46,7 @@ def _iter_py_files():
                 continue
             full = Path(root) / fn
             rel = full.relative_to(PROJECT_ROOT)
-            # Skip test files — we're testing production code
+            # Skip test files - we're testing production code
             if "tests" in rel.parts:
                 continue
             # Build dotted module name
@@ -74,7 +74,7 @@ _MODULES = list(_iter_py_files())
                          ids=[m for _, m in _MODULES])
 def test_module_imports_cleanly(path, module_name):
     """Importing every production module must not raise."""
-    # Some modules need tkinter — skip if display unavailable
+    # Some modules need tkinter - skip if display unavailable
     try:
         importlib.import_module(module_name)
     except ImportError as exc:
@@ -92,7 +92,7 @@ def test_module_imports_cleanly(path, module_name):
 # Test 2: Self-method calls resolve (catches the _find_all_field_headers bug)
 # ---------------------------------------------------------------------------
 
-# Methods inherited from tkinter/ttk base classes — these are always available
+# Methods inherited from tkinter/ttk base classes - these are always available
 # on widgets and dialogs even though they're not defined in the class body.
 _INHERITED_TKINTER_METHODS = {
     # tk.Tk / tk.Toplevel / tk.Widget / ttk.Frame / etc.
@@ -111,7 +111,7 @@ _INHERITED_TKINTER_METHODS = {
 }
 
 # Callback attributes set via assignment (self.on_X = ...) that are later
-# called as self.on_X() — these are dynamic attributes, not methods.
+# called as self.on_X() - these are dynamic attributes, not methods.
 _KNOWN_CALLBACK_PATTERNS = {"on_progress", "on_card_result",
                             "on_waiting_for_card", "on_completed",
                             "on_csv_loaded_callback",
@@ -183,7 +183,7 @@ def _get_module_level_names(tree: ast.Module) -> set[str]:
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 names.add(alias.asname or alias.name)
-    # Add builtins — __builtins__ can be a dict or a module depending on context
+    # Add builtins - __builtins__ can be a dict or a module depending on context
     import builtins as _builtins_mod
     names.update(dir(_builtins_mod))
     return names
@@ -274,7 +274,7 @@ def test_no_unresolved_self_calls():
     if _SELF_ISSUES:
         msg = "Unresolved self.method() calls found:\n"
         for file, cls, method, lineno in _SELF_ISSUES:
-            msg += f"  {file}:{lineno} — {cls}.{method}()\n"
+            msg += f"  {file}:{lineno} - {cls}.{method}()\n"
         pytest.fail(msg)
 
 
@@ -283,12 +283,12 @@ def test_no_unresolved_module_calls():
     if _MODULE_ISSUES:
         msg = "Unresolved module-level function calls found:\n"
         for file, func, lineno in _MODULE_ISSUES:
-            msg += f"  {file}:{lineno} — {func}()\n"
+            msg += f"  {file}:{lineno} - {func}()\n"
         pytest.fail(msg)
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Cross-module imports — every 'from X import Y' resolves
+# Test 3: Cross-module imports - every 'from X import Y' resolves
 # ---------------------------------------------------------------------------
 
 def _collect_import_statements():
@@ -325,7 +325,12 @@ def test_from_import_resolves(file, module, names, lineno):
     except ImportError as exc:
         if "tkinter" in str(exc) or "_tkinter" in str(exc):
             pytest.skip(f"Skipped (no display): {exc}")
-        pytest.fail(f"{file}:{lineno} — cannot import module '{module}': {exc}")
+        # pyscard (smartcard) is an optional dependency available only
+        # inside the pySim venv on real hardware.  The import is
+        # guarded by try/except at runtime, so missing here is fine.
+        if "smartcard" in str(exc):
+            pytest.skip(f"Skipped (optional dep): {exc}")
+        pytest.fail(f"{file}:{lineno} - cannot import module '{module}': {exc}")
     except RuntimeError as exc:
         if "display" in str(exc).lower():
             pytest.skip(f"Skipped (no display): {exc}")
@@ -335,12 +340,12 @@ def test_from_import_resolves(file, module, names, lineno):
             continue
         if not hasattr(mod, name):
             pytest.fail(
-                f"{file}:{lineno} — 'from {module} import {name}' — "
+                f"{file}:{lineno} - 'from {module} import {name}' - "
                 f"'{name}' does not exist in module '{module}'")
 
 
 # ---------------------------------------------------------------------------
-# Test 4: Public API smoke — every public function is at least callable
+# Test 4: Public API smoke - every public function is at least callable
 # ---------------------------------------------------------------------------
 
 def test_eml_parser_public_api():

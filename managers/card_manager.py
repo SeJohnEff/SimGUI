@@ -25,43 +25,79 @@ from typing import Dict, List, Optional, Tuple
 
 from utils.validation import validate_adm1
 
-# Tiny Python snippet that checks for card presence via PC/SC
-# without doing a full pySim-read.  Returns ATR hex on stdout
-# if a card is present, or exits with code 1 if not.
-_PCSC_PROBE_SCRIPT = '''
-import sys
-try:
-    from smartcard.System import readers
-    from smartcard.Exceptions import NoCardException, CardConnectionException
-    rlist = readers()
-    if not rlist:
-        print("NO_READER", file=sys.stderr)
-        sys.exit(1)
-    r = rlist[0]
-    try:
-        conn = r.createConnection()
-        conn.connect()
-        atr = conn.getATR()
-        print(" ".join(f"{b:02X}" for b in atr))
-        conn.disconnect()
-    except NoCardException:
-        print("NO_CARD", file=sys.stderr)
-        sys.exit(1)
-    except CardConnectionException as e:
-        print(f"CARD_ERROR:{e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"CARD_ERROR:{e}", file=sys.stderr)
-        sys.exit(1)
-except ImportError:
-    print("NO_PYSCARD", file=sys.stderr)
-    sys.exit(2)
-except Exception as e:
-    print(f"ERROR:{e}", file=sys.stderr)
-    sys.exit(1)
-'''
-
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# pyscard (smartcard) lazy import
+# ---------------------------------------------------------------------------
+# pyscard lives in the pySim venv.  We add its site-packages to sys.path
+# once so subsequent imports work in-process - no subprocess needed.
+
+_pyscard_available: Optional[bool] = None
+_smartcard_readers = None     # smartcard.System.readers
+_NoCardException = None       # smartcard.Exceptions.NoCardException
+_CardConnectionException = None
+
+
+def _init_pyscard(venv_python: Optional[str] = None) -> bool:
+    """Try to import pyscard, adding venv site-packages if needed.
+
+    Returns True if pyscard is usable.
+    """
+    global _pyscard_available, _smartcard_readers
+    global _NoCardException, _CardConnectionException
+
+    if _pyscard_available is not None:
+        return _pyscard_available
+
+    # First try a direct import (works if pyscard is on the system)
+    try:
+        from smartcard.System import readers as _r
+        from smartcard.Exceptions import (
+            NoCardException as _nc,
+            CardConnectionException as _cc,
+        )
+        _smartcard_readers = _r
+        _NoCardException = _nc
+        _CardConnectionException = _cc
+        _pyscard_available = True
+        logger.info("pyscard available (system)")
+        return True
+    except ImportError:
+        pass
+
+    # Try adding the venv site-packages to sys.path
+    if venv_python:
+        venv_dir = os.path.dirname(os.path.dirname(venv_python))  # .venv/
+        import glob as _glob
+        patterns = [
+            os.path.join(venv_dir, 'lib', 'python*', 'site-packages'),
+            os.path.join(venv_dir, 'lib64', 'python*', 'site-packages'),
+        ]
+        for pat in patterns:
+            for sp in _glob.glob(pat):
+                if sp not in sys.path:
+                    sys.path.insert(0, sp)
+                    logger.info("Added venv site-packages: %s", sp)
+
+        try:
+            from smartcard.System import readers as _r
+            from smartcard.Exceptions import (
+                NoCardException as _nc,
+                CardConnectionException as _cc,
+            )
+            _smartcard_readers = _r
+            _NoCardException = _nc
+            _CardConnectionException = _cc
+            _pyscard_available = True
+            logger.info("pyscard available (venv)")
+            return True
+        except ImportError:
+            pass
+
+    _pyscard_available = False
+    logger.info("pyscard not available")
+    return False
 
 
 class CardType(Enum):
@@ -264,37 +300,37 @@ class CardManager:
     # ---- card presence (fast, no pySim) --------------------------------
 
     def probe_card_presence(self) -> Tuple[bool, str]:
-        """Lightweight card presence check via PC/SC.
+        """Lightweight card presence check via PC/SC (in-process).
 
         Returns (True, atr_hex) if a card is physically present,
-        (False, reason) otherwise.  This is much faster than a full
-        pySim-read and suitable for polling.
+        (False, reason) otherwise.  Runs in-process using the pyscard
+        library - typically completes in <50 ms, suitable for 1.5 s polling.
         """
-        python_exe = self._venv_python or sys.executable
+        if not _init_pyscard(self._venv_python):
+            return False, 'NO_PYSCARD'
+
         try:
-            result = subprocess.run(
-                [python_exe, '-c', _PCSC_PROBE_SCRIPT],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                atr = result.stdout.strip()
-                return True, atr
-            stderr = result.stderr.strip()
-            if 'NO_READER' in stderr:
-                return False, 'No smart-card reader detected'
-            if 'NO_CARD' in stderr:
-                return False, 'No card in reader'
-            if 'NO_PYSCARD' in stderr:
-                # pyscard not installed - fall back to detect_card
-                return False, 'NO_PYSCARD'
-            if 'CARD_ERROR:' in stderr:
-                detail = stderr.split('CARD_ERROR:', 1)[1].strip()
-                return False, self._clean_pysim_error(detail)
-            return False, stderr or 'Unknown error'
-        except subprocess.TimeoutExpired:
-            return False, 'Card probe timed out'
+            rlist = _smartcard_readers()
         except Exception as exc:
-            return False, str(exc)
+            return False, f'PC/SC error: {exc}'
+
+        if not rlist:
+            return False, 'No smart-card reader detected'
+
+        reader = rlist[0]
+        try:
+            conn = reader.createConnection()
+            conn.connect()
+            atr = conn.getATR()
+            atr_hex = ' '.join(f'{b:02X}' for b in atr)
+            conn.disconnect()
+            return True, atr_hex
+        except _NoCardException:
+            return False, 'No card in reader'
+        except _CardConnectionException as exc:
+            return False, self._clean_pysim_error(str(exc))
+        except Exception as exc:
+            return False, self._clean_pysim_error(str(exc))
 
     # ---- card operations -----------------------------------------------
 

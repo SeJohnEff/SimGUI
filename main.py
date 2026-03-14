@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from dialogs.adm1_dialog import ADM1Dialog
 from dialogs.artifact_export_dialog import ArtifactExportDialog
+from dialogs.load_card_file_dialog import LoadCardFileDialog
 from dialogs.network_storage_dialog import NetworkStorageDialog
 from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
 from managers.auto_artifact_manager import AutoArtifactManager
@@ -382,9 +383,9 @@ class SimGUIApp:
     def _on_auto_card_unknown(self, iccid):
         """Card inserted but not in index (runs on main thread).
 
-        Offers the user a chance to load a CSV file that contains this
-        card so the ICCID gets indexed.  If *iccid* is empty the card
-        is completely blank (no ICCID programmed yet).
+        Opens a unified file-picker dialog with network share access
+        so the user can locate the card's data file in one step.
+        If *iccid* is empty the card is completely blank.
         """
         if iccid:
             status_msg = f"Card: {iccid} (not in index)"
@@ -402,25 +403,22 @@ class SimGUIApp:
             # Blank card - nothing to look up, skip the file dialog
             return
 
-        # Ask the user whether they want to load a data file for this card
-        answer = messagebox.askyesno(
-            "Card Not in Index",
-            f"Card ICCID: {iccid}\n\n"
-            "This card was not found in any indexed data file.\n\n"
-            "Would you like to load a CSV/EML file containing this card's data?",
-        )
-        if answer:
-            self._load_file_for_unknown_card(iccid)
+        # Open the unified file-picker with network share access
+        self._load_file_for_unknown_card(iccid)
 
     def _load_file_for_unknown_card(self, iccid: str):
-        """Let the user pick a data file, scan it, and re-check the card."""
+        """Open the unified file picker (local + network shares)."""
         init_dir = get_browse_initial_dir(self._ns_manager)
-        kwargs = {"title": "Load Card Data File", "filetypes": SIM_DATA_FILETYPES}
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        fp = filedialog.askopenfilename(**kwargs)
+        dlg = LoadCardFileDialog(
+            self.root, iccid, self._ns_manager,
+            initial_dir=init_dir,
+        )
+        self.root.wait_window(dlg)
+
+        fp = dlg.selected_path
         if not fp:
             return
+
         try:
             result = self._iccid_index.scan_directory(
                 os.path.dirname(fp))
