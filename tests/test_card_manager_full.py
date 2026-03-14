@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from managers.card_manager import CardManager, CardType, CLIBackend, _find_cli_tool
 from simulator.settings import SimulatorSettings
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
