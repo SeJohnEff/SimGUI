@@ -80,7 +80,7 @@ class BatchProgramPanel(ttk.Frame):
         self._preview_data: list[dict[str, str]] = []
 
         self._source_var = tk.StringVar(value="generate")
-        self._adm1_source_var = tk.StringVar(value="csv")
+        self._standards_mgr = None  # Set by main.py via set_standards_manager()
 
         # Callback set by main.py for cross-tab sync
         self.on_csv_loaded_callback = None
@@ -202,8 +202,16 @@ class BatchProgramPanel(ttk.Frame):
             ),
             "start": "First SIM sequence number (0-99999).\nExample: 1 \u2192 SIM 00001",
             "count": "Number of SIMs to generate (max 100000).\nExample: 20 \u2192 SIMs 00001 to 00020",
-            "spn": "Service Provider Name stored on the SIM.\nExample: BOLIDEN",
-            "language": "ISO 639-1 language code for the SIM.\nExample: EN (English), SV (Swedish)",
+            "spn": (
+                "Service Provider Name (EF_SPN 6F46).\n"
+                "Select from standards list or type a custom value.\n"
+                "Values loaded from standards.json on the network share."
+            ),
+            "li": (
+                "Language Indicator (EF_LI 6F05).\n"
+                "ISO 639-1 code — e.g. EN (English), SV (Swedish).\n"
+                "Values loaded from standards.json on the network share."
+            ),
             "fplmn": "Forbidden PLMNs, semicolon-separated.\nAuto-populated from site's country, editable.\nExample: 24007;24024;24001;24008;24002",
         }
 
@@ -228,7 +236,7 @@ class BatchProgramPanel(ttk.Frame):
         lbl = ttk.Label(inner, text="Site:")
         lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
         site_values = [
-            f"{sid} \u2014 {info['code']} ({info['country']})"
+            f"{sid} — {info['code']} ({info['country']})"
             for sid, info in SITE_REGISTER.items()
         ]
         self._site_var = tk.StringVar()
@@ -247,7 +255,7 @@ class BatchProgramPanel(ttk.Frame):
         lbl = ttk.Label(inner, text="SIM Type:")
         lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
         sim_type_values = [
-            f"{k} \u2014 {v}" for k, v in SIM_TYPES.items()
+            f"{k} — {v}" for k, v in SIM_TYPES.items()
         ]
         self._sim_type_var = tk.StringVar()
         self._sim_type_combo = ttk.Combobox(
@@ -281,26 +289,28 @@ class BatchProgramPanel(ttk.Frame):
         add_tooltip(spinbox, _FIELD_TOOLTIPS["count"])
         row_idx += 1
 
-        # SPN entry
+        # SPN combobox (validated against standards.json)
         lbl = ttk.Label(inner, text="SPN:")
         lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
-        var = tk.StringVar()
-        entry = ttk.Entry(inner, textvariable=var, width=20)
-        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
-        self._gen_vars["spn"] = var
+        self._spn_var = tk.StringVar()
+        self._spn_combo = ttk.Combobox(
+            inner, textvariable=self._spn_var, width=20)
+        self._spn_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["spn"] = self._spn_var
         add_tooltip(lbl, _FIELD_TOOLTIPS["spn"])
-        add_tooltip(entry, _FIELD_TOOLTIPS["spn"])
+        add_tooltip(self._spn_combo, _FIELD_TOOLTIPS["spn"])
         row_idx += 1
 
-        # Language entry
-        lbl = ttk.Label(inner, text="Language:")
+        # LI (Language Indicator) combobox (validated against standards.json)
+        lbl = ttk.Label(inner, text="LI (Language):")
         lbl.grid(row=row_idx, column=0, sticky=tk.W, padx=(0, pad), pady=2)
-        var = tk.StringVar()
-        entry = ttk.Entry(inner, textvariable=var, width=6)
-        entry.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
-        self._gen_vars["language"] = var
-        add_tooltip(lbl, _FIELD_TOOLTIPS["language"])
-        add_tooltip(entry, _FIELD_TOOLTIPS["language"])
+        self._li_var = tk.StringVar(value="EN")
+        self._li_combo = ttk.Combobox(
+            inner, textvariable=self._li_var, width=6)
+        self._li_combo.grid(row=row_idx, column=1, sticky=tk.W, pady=2)
+        self._gen_vars["li"] = self._li_var
+        add_tooltip(lbl, _FIELD_TOOLTIPS["li"])
+        add_tooltip(self._li_combo, _FIELD_TOOLTIPS["li"])
         row_idx += 1
 
         # FPLMN entry
@@ -313,28 +323,16 @@ class BatchProgramPanel(ttk.Frame):
         add_tooltip(lbl, _FIELD_TOOLTIPS["fplmn"])
         add_tooltip(entry, _FIELD_TOOLTIPS["fplmn"])
 
-        # ADM1 source
-        adm_row = ttk.Frame(self._gen_section)
-        adm_row.pack(fill=tk.X, padx=pad, pady=(0, pad))
-        adm1_lbl = ttk.Label(adm_row, text="ADM1 Source:")
-        adm1_lbl.pack(side=tk.LEFT)
-        add_tooltip(adm1_lbl,
-                    "ADM1 key for card authentication.\n"
-                    "'Same for all': one ADM1 for entire batch.\n"
-                    "'From CSV file': per-card ADM1 from data file.\n"
+        # ADM1 note — ADM1 comes from the loaded data file (auto-read)
+        adm_note = ttk.Label(
+            self._gen_section,
+            text="ADM1 comes from the data file loaded during auto-read.",
+            style="Small.TLabel")
+        adm_note.pack(anchor=tk.W, padx=pad, pady=(0, pad))
+        add_tooltip(adm_note,
+                    "ADM1 key is per-card and sourced from the vendor data "
+                    "file (.eml / .csv / .txt).\n"
                     "\u26a0 3 wrong attempts = permanent lock!")
-        ttk.Radiobutton(adm_row, text="Same for all:", variable=self._adm1_source_var,
-                        value="uniform").pack(side=tk.LEFT, padx=(pad, 0))
-        self._uniform_adm1_var = tk.StringVar()
-        self._uniform_adm1_entry = ttk.Entry(
-            adm_row, textvariable=self._uniform_adm1_var, width=12)
-        self._uniform_adm1_entry.pack(side=tk.LEFT, padx=(4, pad))
-        ttk.Radiobutton(adm_row, text="From CSV file:",
-                        variable=self._adm1_source_var, value="csv"
-                        ).pack(side=tk.LEFT)
-        self._adm_csv_path_var = tk.StringVar()
-        ttk.Button(adm_row, text="Browse...",
-                   command=self._on_browse_adm_csv).pack(side=tk.LEFT, padx=(pad, 0))
 
         # Preview button
         ttk.Button(self._gen_section, text="Preview Batch",
@@ -395,7 +393,7 @@ class BatchProgramPanel(ttk.Frame):
 
         # Card-ready button (for hardware mode prompts)
         self._card_ready_btn = ttk.Button(
-            self._exec_frame, text="Card Inserted \u2014 Continue",
+            self._exec_frame, text="Card Inserted — Continue",
             command=self._on_card_ready, state=tk.DISABLED)
         self._card_ready_btn.pack(anchor=tk.W, padx=pad, pady=pad // 2)
 
@@ -427,6 +425,68 @@ class BatchProgramPanel(ttk.Frame):
         fplmn = get_fplmn_for_site(site_id)
         if fplmn:
             self._gen_vars["fplmn"].set(fplmn)
+
+    # ---- standards management -------------------------------------------
+
+    def set_standards_manager(self, mgr) -> None:
+        """Inject the :class:`StandardsManager` (called by main.py)."""
+        self._standards_mgr = mgr
+        self.refresh_standards()
+
+    def refresh_standards(self) -> None:
+        """Refresh SPN / LI combobox values from the standards manager."""
+        mgr = self._standards_mgr
+        if mgr and mgr.has_standards:
+            self._spn_combo["values"] = mgr.spn_values
+            self._li_combo["values"] = mgr.li_values
+        else:
+            self._spn_combo["values"] = []
+            self._li_combo["values"] = []
+
+    def _validate_standards_field(self, value: str, field_name: str) -> bool:
+        """Check *value* against the standards file for *field_name*.
+
+        If the value is not in the canonical list and a standards file is
+        loaded, asks the user to confirm.  Returns True to proceed.
+        """
+        mgr = self._standards_mgr
+        if not mgr or not mgr.has_standards:
+            return True  # No standards loaded — allow anything
+
+        if field_name == "spn":
+            if mgr.is_valid_spn(value):
+                return True
+            suggestion = mgr.suggest_spn(value)
+        elif field_name == "li":
+            if mgr.is_valid_li(value):
+                return True
+            suggestion = mgr.suggest_li(value)
+        else:
+            return True
+
+        # Build confirmation message
+        label = "SPN" if field_name == "spn" else "LI"
+        msg = (f'"{value}" is not in the standards file.\n\n')
+        if suggestion:
+            msg += (f'Did you mean "{suggestion}"?\n'
+                    f'Click No to use the canonical value, '
+                    f'or Yes to use "{value}" as-is.')
+            answer = messagebox.askyesno(
+                f"Non-standard {label}", msg, icon="warning")
+            if not answer:
+                # Auto-correct to canonical form
+                if field_name == "spn":
+                    self._spn_var.set(suggestion)
+                elif field_name == "li":
+                    self._li_var.set(suggestion)
+                return True  # proceed with corrected value
+            return True  # user chose to keep their value
+
+        msg += (f'The standards file contains: '
+                f'{", ".join(mgr.spn_values if field_name == "spn" else mgr.li_values)}\n\n'
+                f'Use "{value}" anyway?')
+        return messagebox.askyesno(
+            f"Non-standard {label}", msg, icon="warning")
 
     # ---- source toggle --------------------------------------------------
 
@@ -534,19 +594,8 @@ class BatchProgramPanel(ttk.Frame):
         actual = len(filtered)
         end_row = start + actual - 1 if actual else start
         self._range_info_lbl.configure(
-            text=f"Rows {start}\u2013{end_row} of {total} ({actual} cards)")
+            text=f"Rows {start}–{end_row} of {total} ({actual} cards)")
         self._refresh_preview()
-
-    def _on_browse_adm_csv(self):
-        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        kwargs = {"title": "Select ADM1 Data File", "filetypes": SIM_DATA_FILETYPES}
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        path = filedialog.askopenfilename(**kwargs)
-        if path:
-            import os
-            self._last_browse_dir = os.path.dirname(path)
-            self._adm_csv_path_var.set(path)
 
     # ---- preview -------------------------------------------------------
 
@@ -556,7 +605,7 @@ class BatchProgramPanel(ttk.Frame):
             start = int(self._gen_vars["start"].get().strip())
             count = int(self._gen_vars["count"].get().strip())
             spn = self._gen_vars["spn"].get().strip()
-            language = self._gen_vars["language"].get().strip()
+            li = self._gen_vars["li"].get().strip()
             fplmn = self._gen_vars["fplmn"].get().strip()
         except ValueError:
             messagebox.showerror("Error", "Start and Count must be integers")
@@ -580,32 +629,33 @@ class BatchProgramPanel(ttk.Frame):
             messagebox.showerror("Error", "MCC+MNC is required")
             return
 
+        # Validate SPN and LI against standards file
+        if spn and not self._validate_standards_field(spn, "spn"):
+            return
+        # Re-read SPN in case it was auto-corrected by the validator
+        spn = self._gen_vars["spn"].get().strip()
+
+        if li and not self._validate_standards_field(li, "li"):
+            return
+        li = self._gen_vars["li"].get().strip()
+
         # Resolve site code for display
         site_info = SITE_REGISTER.get(site_id, {})
         site_code = site_info.get("code", "")
-
-        # Load ADM1 from CSV if applicable
-        adm1_map: dict[str, str] = {}
-        uniform_adm1 = ""
-        if self._adm1_source_var.get() == "uniform":
-            uniform_adm1 = self._uniform_adm1_var.get().strip()
-        elif self._adm_csv_path_var.get():
-            adm1_map = self._load_adm1_csv(self._adm_csv_path_var.get())
 
         self._preview_data = []
         for seq in range(start, start + count):
             imsi = generate_imsi(mcc_mnc, site_id, sim_type, seq)
             iccid = generate_iccid(mcc_mnc, site_id, sim_type, seq)
-            adm1 = uniform_adm1 or adm1_map.get(iccid, "")
             self._preview_data.append({
                 "IMSI": imsi,
                 "ICCID": iccid,
                 "SITE_CODE": site_code,
                 "SPN": spn,
                 "FPLMN": fplmn,
-                "ADM1": adm1,
+                "ADM1": "",  # Comes from data file during auto-read
                 "ACC": "0001",
-                "LI": language,
+                "LI": li,
             })
         self._refresh_preview()
         self._save_settings()
@@ -620,22 +670,6 @@ class BatchProgramPanel(ttk.Frame):
                 row.get("SPN", ""),
                 row.get("ADM1", ""),
             ))
-
-    @staticmethod
-    def _load_adm1_csv(path: str) -> dict[str, str]:
-        """Load a CSV and return {ICCID: ADM1} mapping."""
-        mapping: dict[str, str] = {}
-        try:
-            with open(path, "r", newline="", encoding="utf-8-sig") as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    iccid = row.get("ICCID", "").strip()
-                    adm1 = row.get("ADM1", "").strip()
-                    if iccid and adm1:
-                        mapping[iccid] = adm1
-        except Exception:
-            pass
-        return mapping
 
     # ---- batch execution -----------------------------------------------
 
@@ -736,7 +770,7 @@ class BatchProgramPanel(ttk.Frame):
             self._progress_bar["maximum"] = total
             self._progress_bar["value"] = current
             self._progress_lbl.configure(
-                text=f"Card {current + 1} of {total} \u2014 {msg}")
+                text=f"Card {current + 1} of {total} — {msg}")
         self.after(0, _do)
 
     def _on_card_result(self, result: CardResult):
@@ -854,13 +888,15 @@ class BatchProgramPanel(ttk.Frame):
             if last_sim_type in sim_type_keys:
                 self._sim_type_combo.current(sim_type_keys.index(last_sim_type))
 
-        # SPN, Language, FPLMN
-        for key, skey in [
-            ("spn", "last_spn"),
-            ("language", "last_language"),
-            ("fplmn", "last_fplmn"),
+        # SPN, LI, FPLMN
+        for key, skey, fallback_skey in [
+            ("spn", "last_spn", None),
+            ("li", "last_li", "last_language"),  # migrate from old key
+            ("fplmn", "last_fplmn", None),
         ]:
             val = self._settings.get(skey, "")
+            if not val and fallback_skey:
+                val = self._settings.get(fallback_skey, "")
             if val and key in self._gen_vars:
                 self._gen_vars[key].set(str(val))
 
@@ -883,7 +919,7 @@ class BatchProgramPanel(ttk.Frame):
 
         for key, skey in [
             ("spn", "last_spn"),
-            ("language", "last_language"),
+            ("li", "last_li"),
             ("fplmn", "last_fplmn"),
         ]:
             self._settings.set(skey, self._gen_vars[key].get().strip())
