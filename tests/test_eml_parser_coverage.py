@@ -22,7 +22,6 @@ from utils.eml_parser import (
     parse_eml_file,
 )
 
-
 # ---------------------------------------------------------------------------
 # _normalise_field_name
 # ---------------------------------------------------------------------------
@@ -69,8 +68,6 @@ class TestParseCsvText:
 
     def test_exception_returns_empty_list(self):
         """Exception during CSV parsing returns [] (lines 287-288)."""
-        # Pass a non-string to trigger an exception inside DictReader
-        # We simulate an exception by passing None which will fail
         import unittest.mock as mock
         with mock.patch("csv.DictReader", side_effect=RuntimeError("boom")):
             result = _parse_csv_text("anything")
@@ -89,18 +86,14 @@ class TestReadCardValues:
         return [ln.strip() for ln in text.splitlines()]
 
     def test_blank_lines_inside_values_are_skipped(self):
-        """Blank lines inside a card value block are skipped (lines 257-258).
-
-        The field block has 3 fields; values are separated by blank lines.
-        """
-        # 3 field names, then 3 values for 1 card with blanks between them
+        """Blank lines inside a card value block are skipped (lines 257-258)."""
         field_names = ["IMSI", "ICCID", "Ki"]
         lines = [
-            "001010001",   # IMSI value
-            "",            # blank line — should be skipped (line 257-258)
-            "89001",       # ICCID value
-            "",            # another blank
-            "aabbcc",      # Ki value
+            "001010001",
+            "",
+            "89001",
+            "",
+            "aabbcc",
         ]
         result = _read_card_values(lines, start=0, num_fields=3, field_names=field_names)
         assert len(result) == 1
@@ -109,22 +102,17 @@ class TestReadCardValues:
         assert result[0]["Ki"] == "aabbcc"
 
     def test_signature_line_stops_inner_loop(self):
-        """'--' line inside card values terminates collection (line 260).
-
-        This results in an incomplete card (< num_fields values), so the
-        outer loop also breaks.
-        """
+        """'--' line inside card values terminates collection (line 260)."""
         field_names = ["IMSI", "ICCID", "Ki", "OPC", "ADM1"]
         lines = [
-            "001010001",   # IMSI
-            "89001",       # ICCID
-            "--",          # signature — break (line 260)
-            "aabbcc",      # would be Ki but we stop first
+            "001010001",
+            "89001",
+            "--",
+            "aabbcc",
             "ddee",
             "12345678",
         ]
         result = _read_card_values(lines, start=0, num_fields=5, field_names=field_names)
-        # Incomplete card (only 2 values) → outer loop breaks → no cards
         assert result == []
 
     def test_type_line_stops_inner_loop(self):
@@ -133,23 +121,17 @@ class TestReadCardValues:
         lines = [
             "001010001",
             "89001",
-            "Type: SJA5",   # stops inner loop
+            "Type: SJA5",
         ]
         result = _read_card_values(lines, start=0, num_fields=5, field_names=field_names)
         assert result == []
 
     def test_new_header_block_inside_values_stops(self):
-        """A new header block inside value reading stops collection (lines 263-268).
-
-        Place enough consecutive known field names after 2 values to trigger
-        the lookahead check.
-        """
-        # 5 known consecutive field names will exceed _MIN_HEADER_FIELDS=5
+        """A new header block inside value reading stops collection (lines 263-268)."""
         field_names = ["IMSI", "ICCID"]
         lines = [
-            "001010001",   # IMSI value
-            "89001",       # ICCID value
-            # Now a second batch header block (>=5 known field names)
+            "001010001",
+            "89001",
             "IMSI",
             "ICCID",
             "Ki",
@@ -161,9 +143,7 @@ class TestReadCardValues:
             "ddee",
             "12345678",
         ]
-        # Read with num_fields=2 so first card completes, then we try a second
         result = _read_card_values(lines, start=0, num_fields=2, field_names=field_names)
-        # First card should be parsed; then the header block stops the outer loop
         assert len(result) == 1
         assert result[0]["IMSI"] == "001010001"
 
@@ -177,9 +157,8 @@ class TestReadCardValues:
         """When card values are incomplete, the loop stops (line 276)."""
         field_names = ["IMSI", "ICCID", "Ki"]
         lines = [
-            "001010001",   # IMSI
-            "89001",       # ICCID
-            # Ki is missing — incomplete card
+            "001010001",
+            "89001",
         ]
         result = _read_card_values(lines, start=0, num_fields=3, field_names=field_names)
         assert result == []
@@ -246,7 +225,6 @@ class TestParseEmlFileCsvAttachment:
         path = tmp_path / "test.eml"
         path.write_text(eml_content)
         cards, meta = parse_eml_file(str(path))
-        # Cards may come from the CSV attachment
         assert isinstance(cards, list)
 
     def test_eml_missing_file_raises(self, tmp_path):
