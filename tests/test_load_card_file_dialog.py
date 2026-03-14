@@ -168,11 +168,12 @@ class TestBrowseLocal:
 
 
 # ---------------------------------------------------------------------------
-# Browse share behaviour
+# Use share behaviour
 # ---------------------------------------------------------------------------
 
-class TestBrowseShare:
-    def test_browse_share_sets_path(self):
+class TestUseShare:
+    def test_use_share_sets_directory_path(self):
+        """'Use This Share' sets selected_path to the mount directory."""
         LoadCardFileDialog, _ = _import_module()
         import tkinter as tk
         root = tk.Tk()
@@ -183,10 +184,30 @@ class TestBrowseShare:
                 ("NAS", "/mnt/nas"),
             ]
             dlg = LoadCardFileDialog(root, "ICCID123", ns)
-            with patch("dialogs.load_card_file_dialog.filedialog") as mock_fd:
-                mock_fd.askopenfilename.return_value = "/mnt/nas/batch.csv"
-                dlg._on_browse_share("/mnt/nas")
-            assert dlg.selected_path == "/mnt/nas/batch.csv"
+            # Prevent actual window destruction in test
+            dlg.destroy = MagicMock()
+            dlg._on_use_share("/mnt/nas")
+            assert dlg.selected_path == "/mnt/nas"
+        finally:
+            root.destroy()
+
+    def test_use_share_returns_directory_not_file(self):
+        """selected_path should be a directory, not a file."""
+        LoadCardFileDialog, _ = _import_module()
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            ns = MagicMock()
+            ns.get_active_mount_paths.return_value = [
+                ("Share A", "/mnt/shareA"),
+            ]
+            dlg = LoadCardFileDialog(root, "ICCID123", ns)
+            dlg.destroy = MagicMock()
+            dlg._on_use_share("/mnt/shareA")
+            # Should be the directory itself, not any file within it
+            assert dlg.selected_path == "/mnt/shareA"
+            assert not dlg.selected_path.endswith(".csv")
         finally:
             root.destroy()
 

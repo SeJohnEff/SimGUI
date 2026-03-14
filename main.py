@@ -142,6 +142,9 @@ class SimGUIApp:
         # Scan index from connected shares
         self._rescan_iccid_index()
 
+        # Show persistent share indicator
+        self._refresh_share_indicator()
+
     # ---- Layout -----------------------------------------------------------
 
     def _build_layout(self):
@@ -197,14 +200,26 @@ class SimGUIApp:
         self._progress_panel = ProgressPanel(notebook)
         notebook.add(self._progress_panel, text="Progress")
 
-        # Status bar
+        # Status bar (left = status text, right = share indicator)
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
         self._status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(
-            self.root, textvariable=self._status_var,
+        status_label = ttk.Label(
+            status_frame, textvariable=self._status_var,
             style='Small.TLabel', relief=tk.SUNKEN, anchor=tk.W,
             padding=(8, 2),
         )
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Persistent network-share indicator (right side of status bar)
+        self._share_indicator_var = tk.StringVar(value="")
+        self._share_indicator = ttk.Label(
+            status_frame, textvariable=self._share_indicator_var,
+            style='Small.TLabel', relief=tk.SUNKEN, anchor=tk.E,
+            padding=(8, 2),
+        )
+        self._share_indicator.pack(side=tk.RIGHT)
 
     # ---- Menu bar ---------------------------------------------------------
 
@@ -376,6 +391,19 @@ class SimGUIApp:
             )
             logger.warning("Auto-reconnect failed: %s — %s", label, msg)
 
+    def _refresh_share_indicator(self):
+        """Update the persistent share-connected indicator in the status bar."""
+        mounts = self._ns_manager.get_active_mount_paths()
+        if mounts:
+            labels = [label for label, _path in mounts]
+            self._share_indicator_var.set(
+                f"\u25cf NAS: {', '.join(labels)}")
+            # Green-ish foreground when shares are connected
+            self._share_indicator.configure(foreground="#2e7d32")
+        else:
+            self._share_indicator_var.set("")
+            self._share_indicator.configure(foreground="")
+
     def _rescan_iccid_index(self):
         """Scan all connected shares for ICCID data files and standards."""
         mount_dirs = []
@@ -439,7 +467,13 @@ class SimGUIApp:
         self._load_file_for_unknown_card(iccid)
 
     def _load_file_for_unknown_card(self, iccid: str):
-        """Open the unified file picker (local + network shares)."""
+        """Open the unified file picker (local + network shares).
+
+        The dialog may return either:
+        * A *directory* path (user clicked "Use This Share") — we scan it.
+        * A *file* path (user clicked "Browse Local…") — we scan its
+          parent directory.
+        """
         init_dir = get_browse_initial_dir(self._ns_manager)
         dlg = LoadCardFileDialog(
             self.root, iccid, self._ns_manager,
@@ -447,15 +481,19 @@ class SimGUIApp:
         )
         self.root.wait_window(dlg)
 
+        # User may have connected a new share inside the dialog
+        self._refresh_share_indicator()
+
         fp = dlg.selected_path
         if not fp:
             return
 
+        scan_dir = fp if os.path.isdir(fp) else os.path.dirname(fp)
+
         try:
-            result = self._iccid_index.scan_directory(
-                os.path.dirname(fp))
+            result = self._iccid_index.scan_directory(scan_dir)
             logger.info("Re-scanned %s: %d cards in %d files",
-                        os.path.dirname(fp), result.total_cards,
+                        scan_dir, result.total_cards,
                         result.files_scanned)
         except Exception as exc:
             messagebox.showerror("Scan Error", str(exc))
@@ -466,12 +504,14 @@ class SimGUIApp:
             card_data = self._iccid_index.load_card(iccid)
             if card_data:
                 self._on_auto_card_detected(iccid, card_data, entry.file_path)
-                self._status_var.set(f"Card found in {os.path.basename(fp)}")
+                self._status_var.set(
+                    f"Card found in {os.path.basename(entry.file_path)}")
                 return
         messagebox.showinfo(
             "Not Found",
-            f"ICCID {iccid} was not found in the selected file.\n\n"
-            "Make sure the file contains this card's data.")
+            f"ICCID {iccid} was not found in the scanned directory.\n\n"
+            f"Scanned: {scan_dir}\n"
+            "Make sure the directory contains a data file for this card.")
 
     def _on_auto_card_removed(self):
         """Card removed (runs on main thread)."""
@@ -664,6 +704,7 @@ class SimGUIApp:
         NetworkStorageDialog(self.root, self._ns_manager)
         # Rescan after dialog closes — shares may have been mounted/unmounted
         self._rescan_iccid_index()
+        self._refresh_share_indicator()
 
     def _on_export_artifacts(self):
         """Open the artifact export dialog with data from the last batch run."""
