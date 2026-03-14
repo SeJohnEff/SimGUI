@@ -3,6 +3,9 @@ Program SIM Panel — Workflow 2.
 
 Program a single SIM card. Data comes from manual entry or CSV selection.
 Three-step guided flow: Detect → Authenticate → Program.
+
+Layout uses a vertical PanedWindow so the operator can drag the divider
+to give more space to the card-data fields or the CSV table.
 """
 
 import tkinter as tk
@@ -55,7 +58,7 @@ class ProgramSIMPanel(ttk.Frame):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
-        # Data source toggle
+        # Data source toggle — always visible at top
         src = ttk.Frame(self)
         src.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
         ttk.Label(src, text="Data Source:").pack(side=tk.LEFT)
@@ -72,42 +75,18 @@ class ProgramSIMPanel(ttk.Frame):
         _read_card_rb.pack(side=tk.LEFT, padx=(pad, 0))
         add_tooltip(_read_card_rb, "Use data from last card read")
 
-        # CSV selector (hidden when manual)
-        self._csv_frame = ttk.LabelFrame(self, text="CSV Selection")
-        self._csv_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        # --- PanedWindow: top = Card Data + Actions, bottom = CSV table ---
+        self._paned = tk.PanedWindow(
+            self, orient=tk.VERTICAL, sashwidth=6, sashrelief=tk.RAISED,
+            bg=ModernTheme.get_color("border"))
+        self._paned.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(0, pad))
 
-        csv_bar = ttk.Frame(self._csv_frame)
-        csv_bar.pack(fill=tk.X, padx=pad, pady=(pad, 0))
-        self._csv_path_var = tk.StringVar()
-        ttk.Entry(csv_bar, textvariable=self._csv_path_var,
-                  state="readonly", width=40).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        _browse_csv_btn = ttk.Button(csv_bar, text="Browse...",
-                   command=self._on_browse_csv)
-        _browse_csv_btn.pack(side=tk.LEFT, padx=(pad, 0))
-        add_tooltip(_browse_csv_btn, "Open a CSV or EML file with SIM card data")
-        self._csv_count_lbl = ttk.Label(csv_bar, text="")
-        self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
-
-        # Filename label
-        self._csv_filename_lbl = ttk.Label(self._csv_frame, text="",
-                                           style="Small.TLabel")
-        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
-
-        self._card_tree = ttk.Treeview(
-            self._csv_frame, columns=("iccid", "imsi", "adm1"),
-            show="headings", height=5)
-        self._card_tree.heading("iccid", text="ICCID")
-        self._card_tree.heading("imsi", text="IMSI")
-        self._card_tree.heading("adm1", text="ADM1")
-        self._card_tree.column("iccid", width=180)
-        self._card_tree.column("imsi", width=150)
-        self._card_tree.column("adm1", width=100)
-        self._card_tree.pack(fill=tk.X, padx=pad, pady=pad)
-        self._card_tree.bind("<<TreeviewSelect>>", self._on_card_select)
+        # --- Top pane: Card Data + Actions ---
+        top_pane = ttk.Frame(self._paned)
 
         # Form
-        form_frame = ttk.LabelFrame(self, text="Card Data")
-        form_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        form_frame = ttk.LabelFrame(top_pane, text="Card Data")
+        form_frame.pack(fill=tk.X, padx=0, pady=(0, pad // 2))
 
         _FIELD_TOOLTIPS = {
             "ICCID": "Integrated Circuit Card Identifier.\n19-20 digits. Example: 89999880000003010011",
@@ -134,8 +113,8 @@ class ProgramSIMPanel(ttk.Frame):
         form_frame.columnconfigure(1, weight=1)
 
         # Action buttons
-        act = ttk.LabelFrame(self, text="Actions")
-        act.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        act = ttk.LabelFrame(top_pane, text="Actions")
+        act.pack(fill=tk.X, padx=0, pady=pad // 2)
 
         btn_row = ttk.Frame(act)
         btn_row.pack(fill=tk.X, padx=pad, pady=pad)
@@ -157,6 +136,55 @@ class ProgramSIMPanel(ttk.Frame):
         self._action_status = ttk.Label(act, text="Ready — insert card and detect")
         self._action_status.pack(anchor=tk.W, padx=pad, pady=(0, pad))
 
+        self._paned.add(top_pane, minsize=200)
+
+        # --- Bottom pane: CSV Selection ---
+        self._csv_pane = ttk.Frame(self._paned)
+
+        self._csv_frame = ttk.LabelFrame(self._csv_pane, text="CSV Selection")
+        self._csv_frame.pack(fill=tk.BOTH, expand=True)
+
+        csv_bar = ttk.Frame(self._csv_frame)
+        csv_bar.pack(fill=tk.X, padx=pad, pady=(pad, 0))
+        self._csv_path_var = tk.StringVar()
+        ttk.Entry(csv_bar, textvariable=self._csv_path_var,
+                  state="readonly", width=40).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _browse_csv_btn = ttk.Button(csv_bar, text="Browse...",
+                   command=self._on_browse_csv)
+        _browse_csv_btn.pack(side=tk.LEFT, padx=(pad, 0))
+        add_tooltip(_browse_csv_btn, "Open a CSV or EML file with SIM card data")
+        self._csv_count_lbl = ttk.Label(csv_bar, text="")
+        self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+
+        # Filename label
+        self._csv_filename_lbl = ttk.Label(self._csv_frame, text="",
+                                           style="Small.TLabel")
+        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
+
+        # Tree + scrollbar in a container
+        tree_container = ttk.Frame(self._csv_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad)
+
+        self._card_tree = ttk.Treeview(
+            tree_container, columns=("iccid", "imsi", "adm1"),
+            show="headings", height=5)
+        self._card_tree.heading("iccid", text="ICCID")
+        self._card_tree.heading("imsi", text="IMSI")
+        self._card_tree.heading("adm1", text="ADM1")
+        self._card_tree.column("iccid", width=180)
+        self._card_tree.column("imsi", width=150)
+        self._card_tree.column("adm1", width=100)
+
+        tree_sb = ttk.Scrollbar(tree_container, orient=tk.VERTICAL,
+                                command=self._card_tree.yview)
+        self._card_tree.configure(yscrollcommand=tree_sb.set)
+        self._card_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._card_tree.bind("<<TreeviewSelect>>", self._on_card_select)
+
+        self._paned.add(self._csv_pane, minsize=100)
+
     # ---- mode switching ------------------------------------------------
 
     def _on_mode_change(self):
@@ -164,12 +192,18 @@ class ProgramSIMPanel(ttk.Frame):
         is_csv = mode == "csv"
         is_read_card = mode == "read_card"
 
+        # Show/hide the CSV pane in the PanedWindow
         if is_csv:
-            self._csv_frame.pack(fill=tk.X,
-                                 padx=ModernTheme.get_padding("medium"),
-                                 pady=ModernTheme.get_padding("medium") // 2)
+            if self._csv_pane not in [self._paned.panes()]:
+                try:
+                    self._paned.add(self._csv_pane, minsize=100)
+                except tk.TclError:
+                    pass  # already added
         else:
-            self._csv_frame.pack_forget()
+            try:
+                self._paned.forget(self._csv_pane)
+            except tk.TclError:
+                pass  # already removed
 
         # All fields editable for manual and read_card modes
         for key, _, editable_csv in _FORM_FIELDS:
