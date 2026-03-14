@@ -1,41 +1,42 @@
-"""SimGUI ModernTheme — unified styling for the SIM Card Programmer.
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SimGUI Theme - Modern macOS-like Theme Configuration
 
-Provides colours, fonts, and padding constants.
-Call ``ModernTheme.apply_theme(root)`` once at startup.
+Provides a consistent look and feel across the application.
+Self-contained: no dependency on the CLI tool.
 """
 
 import platform
 import tkinter as tk
 from tkinter import ttk
 
-_PLATFORM = platform.system()
 
-
-class ModernTheme:
-    """Centralised look-and-feel constants and ttk style configuration."""
-
-    # ---- Fonts (platform-adaptive) ------------------------------------------
-    if _PLATFORM == 'Darwin':
-        family, display, mono = 'SF Pro', 'SF Pro Display', 'SF Mono'
-        FONTS = {
+def _platform_fonts():
+    """Return font dict appropriate for the current platform."""
+    system = platform.system()
+    if system == 'Darwin':
+        family, mono = 'SF Pro Text', 'SF Mono'
+        display = 'SF Pro Display'
+        return {
             'default': (family, 13),
             'heading': (display, 18, 'bold'),
             'subheading': (family, 14, 'bold'),
             'small': (family, 11),
             'mono': (mono, 11),
         }
-    elif _PLATFORM == 'Linux':
-        family, display, mono = 'Ubuntu', 'Ubuntu', 'Ubuntu Mono'
-        FONTS = {
+    elif system == 'Linux':
+        family, mono = 'DejaVu Sans', 'DejaVu Sans Mono'
+        return {
             'default': (family, 10),
             'heading': (family, 14, 'bold'),
             'subheading': (family, 11, 'bold'),
             'small': (family, 9),
             'mono': (mono, 9),
         }
-    else:
-        family, display, mono = 'Segoe UI', 'Segoe UI', 'Consolas'
-        FONTS = {
+    else:  # Windows and others
+        family, mono = 'Segoe UI', 'Consolas'
+        return {
             'default': (family, 10),
             'heading': (family, 14, 'bold'),
             'subheading': (family, 11, 'bold'),
@@ -43,7 +44,11 @@ class ModernTheme:
             'mono': (mono, 9),
         }
 
-    # ---- Colour palette ----------------------------------------------------
+
+class ModernTheme:
+    """Modern macOS-like theme configuration"""
+
+    # Color palette - macOS Big Sur inspired
     COLORS = {
         'bg': '#F5F5F7',
         'fg': '#1D1D1F',
@@ -60,39 +65,38 @@ class ModernTheme:
         'disabled': '#8E8E93',
     }
 
-    # ---- Padding -----------------------------------------------------------
-    _PADDING = {
+    FONTS = _platform_fonts()
+
+    PADDING = {
         'small': 4,
         'medium': 8,
         'large': 16,
+        'xlarge': 24,
     }
 
     @classmethod
-    def get_padding(cls, size: str = 'medium') -> int:
-        return cls._PADDING.get(size, cls._PADDING['medium'])
-
-    @classmethod
-    def get_font(cls, name: str = 'default'):
-        return cls.FONTS.get(name, cls.FONTS['default'])
-
-    @classmethod
-    def get_color(cls, name: str) -> str:
-        return cls.COLORS.get(name, cls.COLORS['fg'])
-
-    # ---- Apply to a Tk root ------------------------------------------------
-    @classmethod
     def apply_theme(cls, root):
-        """Configure ttk styles on *root* and return the Style object."""
+        """Apply modern theme to the root window"""
         style = ttk.Style(root)
+        style.theme_use('clam')
         root.configure(bg=cls.COLORS['bg'])
 
-        # Widget defaults
-        style.configure('.', font=cls.FONTS['default'],
-                        background=cls.COLORS['bg'],
-                        foreground=cls.COLORS['fg'])
+        style.configure('TFrame', background=cls.COLORS['bg'])
+        style.configure('Card.TFrame', background=cls.COLORS['panel_bg'],
+                        relief='flat', borderwidth=0)
+
+        style.configure('TLabel', background=cls.COLORS['bg'],
+                        foreground=cls.COLORS['fg'], font=cls.FONTS['default'])
         style.configure('Heading.TLabel', font=cls.FONTS['heading'])
         style.configure('Subheading.TLabel', font=cls.FONTS['subheading'])
-        style.configure('Small.TLabel', font=cls.FONTS['small'])
+        style.configure('Small.TLabel', font=cls.FONTS['small'],
+                        foreground=cls.COLORS['disabled'])
+        style.configure('Success.TLabel', foreground=cls.COLORS['success'])
+        style.configure('Error.TLabel', foreground=cls.COLORS['error'])
+        style.configure('Warning.TLabel', foreground=cls.COLORS['warning'])
+
+        style.configure('TButton', font=cls.FONTS['default'],
+                        padding=(cls.PADDING['medium'], cls.PADDING['small']))
 
         # Accent.TButton (primary action style)
         style.configure('Accent.TButton', foreground='white',
@@ -115,33 +119,53 @@ class ModernTheme:
         style.configure('TLabelframe', background=cls.COLORS['bg'],
                         foreground=cls.COLORS['fg'])
         style.configure('TLabelframe.Label', background=cls.COLORS['bg'],
+                        foreground=cls.COLORS['fg'],
+                        font=cls.FONTS['subheading'])
+
+        style.configure('TEntry', fieldbackground=cls.COLORS['input_bg'],
                         foreground=cls.COLORS['fg'])
 
-        # Success/Warning/Error labels
-        style.configure('Success.TLabel',
-                        foreground=cls.COLORS['success'])
-        style.configure('Warning.TLabel',
-                        foreground=cls.COLORS['warning'])
-        style.configure('Error.TLabel',
-                        foreground=cls.COLORS['error'])
-
-        # TEntry and readonly
-        style.configure('TEntry', fieldbackground=cls.COLORS['input_bg'])
-        style.map('TEntry',
-                  fieldbackground=[('readonly', cls.COLORS['bg'])])
-
-        # Copyable.TEntry — read-only but selectable
+        # Read-only entry that looks like a label but allows text selection
+        # and Ctrl+C copying.
         style.configure('Copyable.TEntry',
-                        fieldbackground=cls.COLORS['bg'])
+                        fieldbackground=cls.COLORS['bg'],
+                        foreground=cls.COLORS['fg'],
+                        borderwidth=0, relief='flat')
         style.map('Copyable.TEntry',
                   fieldbackground=[('readonly', cls.COLORS['bg'])])
 
-        # Treeview colours
-        style.configure('Treeview', rowheight=24,
-                        background=cls.COLORS['panel_bg'],
+        style.configure('Treeview', background=cls.COLORS['panel_bg'],
+                        foreground=cls.COLORS['fg'],
                         fieldbackground=cls.COLORS['panel_bg'],
-                        foreground=cls.COLORS['fg'])
+                        font=cls.FONTS['default'], rowheight=28)
         style.configure('Treeview.Heading', font=cls.FONTS['subheading'],
-                        background=cls.COLORS['accent'])
+                        background=cls.COLORS['bg'],
+                        foreground=cls.COLORS['fg'])
+        style.map('Treeview',
+                  background=[('selected', cls.COLORS['selected'])],
+                  foreground=[('selected', 'white')])
 
+        style.configure('TNotebook', background=cls.COLORS['bg'])
+        style.configure('TNotebook.Tab', font=cls.FONTS['default'],
+                        padding=(cls.PADDING['medium'], cls.PADDING['small']))
+
+        style.configure('TProgressbar', troughcolor=cls.COLORS['border'],
+                        background=cls.COLORS['accent'])
+        style.configure('Success.Horizontal.TProgressbar',
+                        background=cls.COLORS['success'])
+
+        style.configure('TScrollbar', troughcolor=cls.COLORS['bg'],
+                        background=cls.COLORS['border'])
         return style
+
+    @classmethod
+    def get_color(cls, name):
+        return cls.COLORS.get(name, cls.COLORS['fg'])
+
+    @classmethod
+    def get_font(cls, name):
+        return cls.FONTS.get(name, cls.FONTS['default'])
+
+    @classmethod
+    def get_padding(cls, name):
+        return cls.PADDING.get(name, cls.PADDING['medium'])
