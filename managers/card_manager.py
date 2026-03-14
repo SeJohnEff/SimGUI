@@ -25,6 +25,42 @@ from typing import Dict, List, Optional, Tuple
 
 from utils.validation import validate_adm1
 
+# Tiny Python snippet that checks for card presence via PC/SC
+# without doing a full pySim-read.  Returns ATR hex on stdout
+# if a card is present, or exits with code 1 if not.
+_PCSC_PROBE_SCRIPT = '''
+import sys
+try:
+    from smartcard.System import readers
+    from smartcard.Exceptions import NoCardException, CardConnectionException
+    rlist = readers()
+    if not rlist:
+        print("NO_READER", file=sys.stderr)
+        sys.exit(1)
+    r = rlist[0]
+    try:
+        conn = r.createConnection()
+        conn.connect()
+        atr = conn.getATR()
+        print(" ".join(f"{b:02X}" for b in atr))
+        conn.disconnect()
+    except NoCardException:
+        print("NO_CARD", file=sys.stderr)
+        sys.exit(1)
+    except CardConnectionException as e:
+        print(f"CARD_ERROR:{e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"CARD_ERROR:{e}", file=sys.stderr)
+        sys.exit(1)
+except ImportError:
+    print("NO_PYSCARD", file=sys.stderr)
+    sys.exit(2)
+except Exception as e:
+    print(f"ERROR:{e}", file=sys.stderr)
+    sys.exit(1)
+'''
+
 logger = logging.getLogger(__name__)
 
 
@@ -225,6 +261,41 @@ class CardManager:
             return True
         return False
 
+    # ---- card presence (fast, no pySim) --------------------------------
+
+    def probe_card_presence(self) -> Tuple[bool, str]:
+        """Lightweight card presence check via PC/SC.
+
+        Returns (True, atr_hex) if a card is physically present,
+        (False, reason) otherwise.  This is much faster than a full
+        pySim-read and suitable for polling.
+        """
+        python_exe = self._venv_python or sys.executable
+        try:
+            result = subprocess.run(
+                [python_exe, '-c', _PCSC_PROBE_SCRIPT],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                atr = result.stdout.strip()
+                return True, atr
+            stderr = result.stderr.strip()
+            if 'NO_READER' in stderr:
+                return False, 'No smart-card reader detected'
+            if 'NO_CARD' in stderr:
+                return False, 'No card in reader'
+            if 'NO_PYSCARD' in stderr:
+                # pyscard not installed - fall back to detect_card
+                return False, 'NO_PYSCARD'
+            if 'CARD_ERROR:' in stderr:
+                detail = stderr.split('CARD_ERROR:', 1)[1].strip()
+                return False, self._clean_pysim_error(detail)
+            return False, stderr or 'Unknown error'
+        except subprocess.TimeoutExpired:
+            return False, 'Card probe timed out'
+        except Exception as exc:
+            return False, str(exc)
+
     # ---- card operations -----------------------------------------------
 
     def detect_card(self) -> Tuple[bool, str]:
@@ -257,7 +328,12 @@ class CardManager:
             if ok:
                 self._parse_pysim_output(stdout)
                 return True, "Card detected via pySim"
-            return False, stderr or "No card detected"
+            # Also check stdout - pySim sometimes prints data before failing
+            if stdout:
+                self._parse_pysim_output(stdout)
+                if self.card_info.get('ICCID'):
+                    return True, "Card detected via pySim"
+            return False, self._clean_pysim_error(stderr) or "No card detected"
 
         # sysmo-usim-tool: try each card type script
         for script, ctype in [
@@ -373,14 +449,65 @@ class CardManager:
         self.card_type = CardType.UNKNOWN
         self.card_info = {}
 
+    # Error patterns from pySim that indicate specific conditions.
+    # Each tuple is (keyword_in_stderr, user_friendly_message).
+    _PYSIM_ERROR_MAP = [
+        ("no card", "No SIM card in reader"),
+        ("card is unpowered", "Card not powered - re-seat the SIM in the reader"),
+        ("unable to connect with protocol", "Card not powered - re-seat the SIM in the reader"),
+        ("no reader", "No smart-card reader detected"),
+        ("no pc/sc", "PC/SC service not available - run: sudo systemctl start pcscd"),
+        ("establish_context", "PC/SC service not available - run: sudo systemctl start pcscd"),
+        ("could not connect", "Cannot connect to card reader"),
+        ("protocoerror", "Card communication error - re-seat the SIM"),
+        ("protocolerror", "Card communication error - re-seat the SIM"),
+    ]
+
+    def _clean_pysim_error(self, stderr: str) -> str:
+        """Extract a user-friendly message from pySim stderr.
+
+        pySim outputs full Python tracebacks on errors.  We scan for
+        known patterns and return a short, readable summary instead of
+        dumping the raw traceback into the UI.
+        """
+        if not stderr:
+            return ""
+        lower = stderr.lower()
+        for pattern, friendly in self._PYSIM_ERROR_MAP:
+            if pattern in lower:
+                return friendly
+        # Fallback: take the last non-empty line (usually the actual error)
+        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+        if lines:
+            last = lines[-1]
+            # Strip common Python exception prefixes
+            for prefix in [
+                "pysim.exceptions.", "smartcard.Exceptions.",
+                "Exception:", "RuntimeError:", "OSError:",
+            ]:
+                if last.startswith(prefix):
+                    last = last[len(prefix):].strip()
+                    break
+            # Truncate overly long messages
+            if len(last) > 120:
+                last = last[:117] + "..."
+            return last
+        return "Card read failed"
+
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info."""
         for line in output.splitlines():
             if ':' not in line:
                 continue
+            # Skip lines that look like tracebacks or file paths
+            stripped = line.strip()
+            if stripped.startswith(('File "', 'Traceback', 'raise ')):
+                continue
             key, _, val = line.partition(':')
             key = key.strip().upper()
             val = val.strip()
+            if not val:
+                continue
             if 'IMSI' in key:
                 self.card_info['IMSI'] = val
             elif 'ICCID' in key:

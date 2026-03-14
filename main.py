@@ -117,15 +117,18 @@ class SimGUIApp:
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Restore simulator mode from settings
-        if self._settings.get("simulator_mode", False):
-            self._mode_var.set("simulator")
-            self._on_mode_change()
-        elif self._card_manager.cli_backend == CLIBackend.NONE:
+        # Decide initial mode.
+        # If a real CLI backend (pySim) is available, always start in
+        # hardware mode regardless of what was saved - the user shouldn't
+        # have to remember to switch modes every launch.
+        if self._card_manager.cli_backend == CLIBackend.NONE:
+            # No pySim / no CLI tool - simulator is the only option
             self._mode_var.set("simulator")
             self._on_mode_change()
         else:
-            # Hardware Mode and a real backend is available.
+            # Hardware Mode - a real backend is available.
+            self._mode_var.set("hardware")
+            self._settings.set("simulator_mode", False)
             # Trigger an initial card detection after 100 ms so that a card
             # already inserted before the app started is detected immediately
             # rather than waiting for the first CardWatcher poll cycle.
@@ -289,29 +292,28 @@ class SimGUIApp:
         """Trigger an initial card detection at startup for Hardware Mode.
 
         Called once via ``root.after(100, ...)`` so the UI is fully
-        initialised before the detection runs.  Uses the same CardWatcher
-        detection flow so the UI updates identically to a live insertion.
+        initialised before the detection runs.  Delegates to the
+        CardWatcher so callbacks fire and UI updates identically to a
+        live insertion.
 
         Also checks whether a USB smart-card reader is reachable.  When
-        pySim-read returns an error mentioning 'reader' or 'PC/SC' the
-        user gets a one-time warning dialog.
+        pySim returns a reader error the user gets a warning dialog.
         """
         if self._mode_var.get() != "hardware":
             return
         if self._card_manager.cli_backend == CLIBackend.NONE:
             return
-        # Probe with a quick detect — if it fails with a reader error
-        # the user gets a helpful popup instead of silent failure.
-        ok, msg = self._card_manager.detect_card()
-        if not ok and self._is_reader_error(msg):
-            self._show_no_reader_warning(msg)
-            return
-        # Card may already be inserted — run the full watcher flow
-        # so callbacks fire and UI updates.
+        # Run the watcher check - it calls detect_card() internally
+        # and fires the correct callbacks (detected / unknown / removed).
         try:
             self._card_watcher._check_once()
         except Exception as exc:
             logger.warning("Startup card detection failed: %s", exc)
+        # If the watcher didn't find a card, check if it's a reader issue
+        if not self._card_watcher._card_present:
+            ok, msg = self._card_manager.detect_card()
+            if not ok and self._is_reader_error(msg):
+                self._show_no_reader_warning(msg)
 
     # ---- Reader & index helpers -------------------------------------------
 
@@ -339,7 +341,7 @@ class SimGUIApp:
             body += f"\nDetail: {detail}"
         messagebox.showwarning("No Card Reader", body)
         self._card_panel.set_status("error", "No card reader detected")
-        self._status_var.set("No card reader — check USB connection")
+        self._status_var.set("No card reader - check USB connection")
 
     def _rescan_iccid_index(self):
         """Scan all connected shares for ICCID data files and standards."""
@@ -349,7 +351,7 @@ class SimGUIApp:
             try:
                 result = self._iccid_index.scan_directory(mount_path)
                 if result.total_cards > 0:
-                    logger.info("ICCID index: scanned %s — %d cards in %d files",
+                    logger.info("ICCID index: scanned %s - %d cards in %d files",
                                 mount_path, result.total_cards,
                                 result.files_scanned)
             except Exception as exc:
@@ -381,14 +383,24 @@ class SimGUIApp:
         """Card inserted but not in index (runs on main thread).
 
         Offers the user a chance to load a CSV file that contains this
-        card so the ICCID gets indexed.
+        card so the ICCID gets indexed.  If *iccid* is empty the card
+        is completely blank (no ICCID programmed yet).
         """
-        self._card_panel.set_status("detected", f"Card: {iccid} (not in index)")
-        self._card_panel.set_card_info(iccid=iccid, source_file=None)
+        if iccid:
+            status_msg = f"Card: {iccid} (not in index)"
+        else:
+            status_msg = "Blank card detected (no ICCID)"
+        self._card_panel.set_status("detected", status_msg)
+        self._card_panel.set_card_info(
+            iccid=iccid or "(blank)", source_file=None)
         self._card_panel.set_auth_status(False)
         self._card_panel.set_programmed_indicator(False)
         self._program_panel.on_card_detected(iccid)
-        self._status_var.set(f"Card detected: {iccid} (not in index)")
+        self._status_var.set(status_msg)
+
+        if not iccid:
+            # Blank card - nothing to look up, skip the file dialog
+            return
 
         # Ask the user whether they want to load a data file for this card
         answer = messagebox.askyesno(
@@ -443,10 +455,10 @@ class SimGUIApp:
         logger.warning("CardWatcher error: %s", msg)
         if self._is_reader_error(msg):
             self._card_panel.set_status("error", "No card reader detected")
-            self._status_var.set("No card reader — check USB connection")
+            self._status_var.set("No card reader - check USB connection")
 
     def _on_card_programmed(self, card_data):
-        """Called after successful card programming — save auto-artifact."""
+        """Called after successful card programming - save auto-artifact."""
         try:
             paths = self._auto_artifact.save_card_artifact(card_data)
             if paths:
@@ -620,7 +632,7 @@ class SimGUIApp:
     def _on_network_storage(self):
         """Open the network storage connection dialog."""
         NetworkStorageDialog(self.root, self._ns_manager)
-        # Rescan after dialog closes — shares may have been mounted/unmounted
+        # Rescan after dialog closes - shares may have been mounted/unmounted
         self._rescan_iccid_index()
 
     def _on_export_artifacts(self):
