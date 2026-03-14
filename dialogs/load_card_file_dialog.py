@@ -47,8 +47,11 @@ class LoadCardFileDialog(tk.Toplevel):
     initial_dir :
         Default directory for the local file browser (optional).
 
-    After the dialog closes, read :attr:`selected_path` for the chosen
-    file path, or ``None`` if the user cancelled.
+    After the dialog closes, read :attr:`selected_path`:
+
+    * A *directory* path when the user clicked "Use This Share".
+    * A *file* path when the user clicked "Browse Local…".
+    * ``None`` if the user cancelled.
     """
 
     def __init__(self, parent, iccid: str, ns_manager, *,
@@ -80,7 +83,7 @@ class LoadCardFileDialog(tk.Toplevel):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
-        # ── Card info banner ──────────────────────────────────────────────
+        # ── Card info banner ────────────────────────────────────────────
         banner = ttk.Frame(self)
         banner.pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
@@ -97,13 +100,13 @@ class LoadCardFileDialog(tk.Toplevel):
 
         ttk.Label(
             banner,
-            text="Select a data file (CSV / EML) containing this card:",
+            text="Select a network share or browse locally for this card's data:",
             style="Small.TLabel",
         ).pack(anchor=tk.W, pady=(4, 0))
 
         ttk.Separator(self).pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
-        # ── Network shares section ────────────────────────────────────────
+        # ── Network shares section ────────────────────────────────────
         shares_frame = ttk.LabelFrame(self, text="Network Shares")
         shares_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(pad, 0))
 
@@ -135,7 +138,7 @@ class LoadCardFileDialog(tk.Toplevel):
 
         self._populate_shares()
 
-        # ── Bottom buttons ────────────────────────────────────────────
+        # ── Bottom buttons ──────────────────────────────────────────
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=pad, pady=pad)
 
@@ -196,28 +199,26 @@ class LoadCardFileDialog(tk.Toplevel):
             ttk.Label(info, text=mount_path,
                       style="Small.TLabel").pack(anchor=tk.W)
 
-            # Browse button
-            browse_btn = ttk.Button(
-                row, text="Browse\u2026",
-                command=lambda mp=mount_path: self._on_browse_share(mp),
+            # "Use This Share" button — selects the share directory and
+            # closes the dialog.  The caller scans for data files.
+            use_btn = ttk.Button(
+                row, text="Use This Share",
+                command=lambda mp=mount_path: self._on_use_share(mp),
             )
-            browse_btn.pack(side=tk.RIGHT, padx=(pad, 0))
-            add_tooltip(browse_btn,
-                        f"Browse files on \"{label}\"")
+            use_btn.pack(side=tk.RIGHT, padx=(pad, 0))
+            add_tooltip(use_btn,
+                        f"Scan \"{label}\" for card data files")
 
     # ---- Event handlers ------------------------------------------------
 
-    def _on_browse_share(self, mount_path: str):
-        """Open file dialog starting at the given network mount."""
-        fp = filedialog.askopenfilename(
-            title="Select Card Data File",
-            initialdir=mount_path,
-            filetypes=_SIM_FILETYPES,
-            parent=self,
-        )
-        if fp:
-            self.selected_path = fp
-            self.destroy()
+    def _on_use_share(self, mount_path: str):
+        """Select the share directory and close the dialog.
+
+        The caller (``_load_file_for_unknown_card``) receives a *directory*
+        path, scans it for data files, and looks up the ICCID.
+        """
+        self.selected_path = mount_path
+        self.destroy()
 
     def _on_browse_local(self):
         """Open the standard OS file browser."""

@@ -26,6 +26,14 @@ class Tooltip:
         widget.bind("<Leave>", self._on_leave, add="+")
         widget.bind("<ButtonPress>", self._on_leave, add="+")
 
+        # Hide tooltip when *any* window grabs focus (e.g. a modal dialog).
+        # This prevents the tooltip lingering underneath a Toplevel.
+        try:
+            top = widget.winfo_toplevel()
+            top.bind("<FocusOut>", self._on_toplevel_focus_out, add="+")
+        except Exception:
+            pass
+
     @property
     def text(self) -> str:
         return self._text
@@ -38,6 +46,11 @@ class Tooltip:
         self._schedule(event)
 
     def _on_leave(self, _event: tk.Event):
+        self._cancel()
+        self._hide()
+
+    def _on_toplevel_focus_out(self, _event: tk.Event):
+        """Hide tooltip when the parent window loses focus."""
         self._cancel()
         self._hide()
 
@@ -54,6 +67,15 @@ class Tooltip:
     def _show(self, event: tk.Event):
         if self._tip_window is not None:
             return
+        # Don't show if a modal dialog has grabbed focus away from
+        # the widget's toplevel (e.g. LoadCardFileDialog with grab_set).
+        try:
+            top = self._widget.winfo_toplevel()
+            current_grab = top.grab_current()
+            if current_grab is not None and current_grab is not top:
+                return
+        except Exception:
+            pass
         x = event.x_root + self._OFFSET_X
         y = event.y_root + self._OFFSET_Y
 
