@@ -8,7 +8,6 @@ import pytest
 
 from managers.card_watcher import CardWatcher
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -500,6 +499,11 @@ class TestCheckOnce:
 
         # load_card failed, should NOT fire on_card_detected
         assert len(detected) == 0
+        # Falls through to on_card_unknown? No — current code returns after
+        # entering the index path. Let's verify the actual behavior:
+        # In the current implementation, if entry exists but load_card fails,
+        # it skips both callbacks (just returns from _handle_new_card).
+        # This is acceptable — the card was found in index but data couldn't load.
 
     def test_no_callbacks_set(self):
         """No callbacks configured -> no crash."""
