@@ -2,7 +2,7 @@
 
 Pushes coverage from ~87% toward ~95%+ by testing:
 - Missing email headers
-- Non-text/plain body (HTML only) 
+- Non-text/plain body (HTML only)
 - Empty body (raises ValueError)
 - Malformed MIME
 - parse_csv_text with valid and invalid input
@@ -21,7 +21,6 @@ import textwrap
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from utils.eml_parser import (
@@ -281,7 +280,14 @@ class TestParseSysmocomBodyMetadata:
                               delivery_order="DO-456",
                               webshop_order="WS-789",
                               card_type="sysmoISIM-SJA5"):
-        meta_block = f"""Sale Order:\n{sale_order}\nDelivery Order:\n{delivery_order}\nWebshop Order ID:\n{webshop_order}\nType: {card_type}\n"""
+        meta_block = f"""Sale Order:
+{sale_order}
+Delivery Order:
+{delivery_order}
+Webshop Order ID:
+{webshop_order}
+Type: {card_type}
+"""
         field_block = _build_batch_body(_STANDARD_FIELDS, 2)
         return meta_block + "\n" + field_block
 
