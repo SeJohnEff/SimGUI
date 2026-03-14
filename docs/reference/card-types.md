@@ -1,0 +1,138 @@
+# Reference: Card types
+
+SimGUI supports three sysmocom SIM card types, each handled by a dedicated CLI script in sysmo-usim-tool. Understanding the differences matters for choosing the right data format and knowing which capabilities are available.
+
+**Source of truth:** `managers/card_manager.py` — `CardType` enum; `managers/csv_manager.py` — `STANDARD_COLUMNS`; `utils/iccid_utils.py` — ICCID generation constants.
+
+---
+
+## Supported card types
+
+| Card type | Enum value | sysmo-usim-tool script | SUCI support | ICCID length |
+|---|---|---|---|---|
+| sysmoISIM-SJA2 | `CardType.SJA2` | `sysmo_isim_sja2.py` | No | 23 digits |
+| sysmoISIM-SJA5 | `CardType.SJA5` | `sysmo_isim_sja5.py` | Yes (firmware option) | 19 digits (SUCI) / 23 digits (non-SUCI) |
+| sysmoISIM-SJS1 | `CardType.SJS1` | `sysmo_isim_sjs1.py` | No | 23 digits |
+
+---
+
+## SJA2 — sysmoISIM-SJA2
+
+The SJA2 is a standard ISIM card without SUCI support. It is programmed via `sysmo_isim_sja2.py`.
+
+**Use when:** You need a straightforward ISIM/USIM without 5G SUCI privacy features.
+
+**ICCID:** 23 digits (factory-assigned). Format: `89{MCC_MNC}00{MSIN}{Luhn}` per Teleaura numbering standard.
+
+**Supported fields:**
+- IMSI, Ki, OPc, ADM1
+- MNC_LENGTH, ALGO_2G, ALGO_3G, ALGO_4G5G
+- HPLMN, FPLMN, SPN, LI, ACC
+
+---
+
+## SJA5 — sysmoISIM-SJA5
+
+The SJA5 is the most capable card in the sysmocom range. With appropriate firmware, it supports SUCI (Subscription Concealed Identifier) as defined in 3GPP TS 33.501 for 5G network privacy.
+
+**Use when:** You need 5G SUCI privacy, or you are deploying in a 5G SA network that requires SUCI.
+
+**ICCID lengths:**
+
+- **Non-SUCI SJA5 cards:** 23-digit ICCID (same structure as SJA2/SJS1)
+- **SUCI-capable SJA5 cards:** 19-digit ICCID
+
+The ICCID length difference is not a software setting — it is a hardware/firmware distinction. A 19-digit ICCID is a definitive indicator that the card was manufactured with SUCI firmware.
+
+See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md) for a full explanation of what SUCI changes.
+
+**Supported fields:**
+- All SJA2 fields, plus SUCI-specific keys (SUPI protection scheme, home network public key, home network key ID)
+
+**Simulator:** The built-in SimGUI simulator loads 20 real sysmoISIM-SJA5 profiles, making SJA5 the default simulator card type.
+
+---
+
+## SJS1 — sysmoISIM-SJS1
+
+The SJS1 is a Java Card-based ISIM, primarily used for legacy or specific integration scenarios. It is programmed via `sysmo_isim_sjs1.py`.
+
+**Use when:** Your deployment specifically requires a Java Card ISIM or your existing infrastructure was built around SJS1.
+
+**ICCID:** 23 digits.
+
+**Supported fields:** Similar to SJA2. Check the sysmo-usim-tool documentation for SJS1-specific constraints.
+
+---
+
+## Card type auto-detection
+
+SimGUI does not require you to specify the card type manually. When using sysmo-usim-tool, it tries each card type script in order:
+
+```
+sysmo_isim_sja2.py → sysmo_isim_sja5.py → sysmo_isim_sjs1.py
+```
+
+The first script that succeeds determines `CardType` for the session. The detected type is displayed in the card status panel.
+
+When using pySim, `pySim-read.py -p0` is used for detection. Card type is determined from the ATR (Answer To Reset) in pySim's output.
+
+---
+
+## Teleaura IMSI/ICCID numbering standard
+
+SimGUI's `generate_imsi()` and `generate_iccid()` functions implement the Teleaura SIM PLMN Numbering Standard v2.0.
+
+### IMSI structure (15 digits)
+
+```
+MCC + MNC(5) + SSSS(4) + T(1) + NNNNN(5)
+```
+
+| Segment | Length | Description |
+|---|---|---|
+| MCC + MNC | 5 digits | Mobile Country Code + Mobile Network Code |
+| SSSS | 4 digits | Site ID from the Site Register |
+| T | 1 digit | SIM type digit |
+| NNNNN | 5 digits | Sequential card number within this site/type |
+
+**SIM type digit (T):**
+
+| Value | SIM type |
+|---|---|
+| `0` | USIM |
+| `1` | USIM + SUCI |
+| `2` | eSIM |
+| `9` | Test/Dev |
+
+### Site Register
+
+| SSSS | Code | Country | Status |
+|---|---|---|---|
+| `0001` | `uk1` | United Kingdom | Active |
+| `0002` | `se1` | Sweden | Active |
+| `0003` | `se2` | Sweden (DR) | Active |
+| `0004` | `au1` | Australia | Reserved |
+
+### ICCID structure (20 digits)
+
+```
+89 + MCC_MNC(5) + 00 + MSIN(10) + Luhn(1)
+```
+
+The final digit is a Luhn check digit computed over the preceding 19 digits.
+
+> **Note:** Factory-assigned ICCIDs may follow this numbering or a vendor-specific scheme. The `generate_iccid()` function is provided for **preview and sequence planning only** — it is not used during actual card programming. The physical ICCID is always read from the card itself.
+
+---
+
+## FPLMN defaults by country
+
+The Forbidden PLMN list is set per the card's deployment country (determined by site):
+
+| Country | FPLMN string |
+|---|---|
+| United Kingdom | `23415;23410;23420;23430` |
+| Sweden | `24007;24024;24001;24008;24002` |
+
+These defaults come from `utils/iccid_utils.py` — `FPLMN_BY_COUNTRY`. The FPLMN column in the CSV overrides these defaults when explicitly set.

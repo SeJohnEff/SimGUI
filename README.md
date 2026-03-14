@@ -1,1 +1,93 @@
-# SimGUI\n\nLightweight GUI wrapper for SIM card CLI tools. This project is independent from\n[sysmo-usim-tool](https://github.com/SeJohnEff/sysmo-usim-tool) and\n[pySim](https://github.com/osmocom/pysim) \u2014 point SimGUI at either CLI repo\nto run card operations from a desktop GUI.\n\n## Features\n\n- **CSV batch editor** \u2014 load, edit, validate, and save SIM card configurations\n- **EML import** \u2014 parse sysmocom order confirmation emails (.eml) directly, field-order independent\n- **Batch programming** \u2014 program multiple SIM cards in sequence with progress tracking\n- **Card detection** \u2014 detect inserted cards via sysmo-usim-tool or pySim\n- **Read SIM** \u2014 read card data (ICCID, IMSI, Ki, OPc, etc.) from physical cards\n- **ADM1 authentication** \u2014 secure key entry with attempt tracking and input validation\n- **ICCID cross-verification** \u2014 prevents card lockout by verifying card identity before ADM1 auth\n- **Network storage** \u2014 mount NFS and SMB/CIFS shares for reading SIM data files and saving artifacts\n- **Network discovery** \u2014 auto-discover SMB servers on the local network via mDNS and NetBIOS\n- **Artifact export** \u2014 export programming artifacts to network shares with duplicate detection\n- **Simulator mode** \u2014 built-in SIM programmer simulator with 20 real sysmoISIM-SJA5 profiles\n- **Backup / restore** \u2014 JSON backups of card data\n- **Progress tracking** \u2014 thread-safe progress bar and log output for long operations\n- **Modern theme** \u2014 platform-aware fonts and macOS-inspired styling (Linux, Windows, macOS)\n\n## Installation (Ubuntu)\n\nOn a fresh Ubuntu desktop (22.04+):\n\n```bash\ncurl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash\n```\n\nThat's it. The script installs build dependencies, builds the `.deb` package,\ninstalls it (including runtime dependencies like `smbclient`, `avahi-utils`,\n`cifs-utils`, and `nfs-common`), and cleans up.\n\nLaunch with `simgui` or find **SimGUI** in the applications menu.\n\n### Manual install\n\nIf you prefer to run the steps yourself:\n\n```bash\nsudo apt update\nsudo apt install -y git dpkg-dev debhelper\ncd /tmp\ngit clone https://github.com/SeJohnEff/SimGUI.git\ncd SimGUI\ndpkg-buildpackage -us -uc -b\nsudo dpkg -i ../simgui_0.2.0-1_all.deb; sudo apt install -f -y\nsimgui\n```\n\n### Updating to a new version\n\nRe-run the install script \u2014 it always pulls the latest code:\n\n```bash\ncurl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash\n```\n\n## Usage\n\nAfter installation, launch from the terminal or the applications menu:\n\n```bash\nsimgui\n```\n\n### CLI tool setup\n\nSimGUI shells out to external CLI tools for card operations. Set one of these\nenvironment variables so SimGUI can find the tool:\n\n```bash\n# sysmo-usim-tool\nexport SYSMO_USIM_TOOL_PATH=/path/to/sysmo-usim-tool\n\n# pySim\nexport PYSIM_PATH=/path/to/pysim\n```\n\nSimGUI also checks common locations automatically (`~/sysmo-usim-tool`,\n`~/pysim`, `/opt/sysmo-usim-tool`, `/opt/pysim`, or a sibling directory\nnext to the SimGUI repo).\n\nIf neither tool is found, CSV editing and offline preparation still work \u2014\nonly card reader operations are disabled. SimGUI will default to **Simulator\nMode** so you can still exercise the full workflow (see below).\n\n## Simulator Mode\n\nSimGUI includes a built-in SIM programmer simulator so you can test the full\nGUI workflow without a USB card reader or physical SIM cards.\n\n**Activation** \u2014 Open the *Card* menu and select *Simulator Mode*. If no CLI\ntool is detected on startup SimGUI defaults to simulator mode automatically.\n\n**Real test data** \u2014 By default the simulator loads 20 real sysmoISIM-SJA5 card\nprofiles from sysmocom (bundled in `simulator/data/sysmocom_test_cards.csv`).\nEach profile has realistic ICCID, IMSI, Ki, OPc, ADM1, PIN, and PUK values.\nYou can load your own CSV via *Card > Simulator Settings...* using the file\nbrowser.\n\n**Virtual card navigation** \u2014 Cycle through the deck with *Next Virtual Card*\n(`Ctrl+N`) and *Previous Virtual Card* (`Ctrl+P`).\n\n**Settings** \u2014 Open *Card > Simulator Settings...* to adjust:\n- **CSV Data File** \u2014 path to a custom CSV file (or leave blank for bundled data)\n- **Operation Delay** (0\u20132000 ms) \u2014 artificial delay per operation for realism\n- **Error Rate** (0\u201350 %) \u2014 probability of random failures for error-handling\n  testing\n- **Number of Cards** (1\u201350) \u2014 size of the virtual card deck (used when no CSV\n  is loaded)\n\n**Use cases** \u2014 UI development, automated testing, demos, and training without\nrequiring hardware.\n\n## Safety Features\n\n### ICCID Cross-Verification\n\nSIM cards lock permanently after 3 wrong ADM1 authentication attempts. To\nprevent accidental lockout, SimGUI verifies the card's ICCID against the\nselected CSV data row *before* sending the ADM1 key:\n\n1. When you select a row in the CSV editor and click *Authenticate*, SimGUI\n   reads the ICCID from the physical card (no authentication needed).\n2. It compares the card's ICCID with the ICCID in the selected CSV row.\n3. If they don't match, authentication is **refused** with a clear warning \u2014\n   no ADM1 attempt is consumed.\n4. If they match (or no CSV row is selected), authentication proceeds normally.\n\nThis catches the most common cause of card lockout: authenticating with the\nwrong card inserted or the wrong data row selected.\n\n## Development\n\n### Running tests\n\n```bash\nmake test          # run all tests\nmake lint          # check for lint errors (ruff)\nmake coverage      # tests with coverage report\nmake check         # lint + coverage in one command\n```\n\nOr use the all-in-one quality gate script:\n\n```bash\nbash scripts/check.sh\n```\n\n### Project configuration\n\n- `pyproject.toml` \u2014 pytest, coverage, and ruff configuration\n- `Makefile` \u2014 convenience targets for test, lint, coverage, check\n\n## Architecture\n\n```\nSimGUI/\n\u251c\u2500\u2500 main.py                          # Entry point \u2014 SimGUIApp class\n\u251c\u2500\u2500 theme.py                         # ModernTheme (colors, fonts, ttk styles)\n\u251c\u2500\u2500 pyproject.toml                   # pytest, coverage, ruff config\n\u251c\u2500\u2500 Makefile                         # make test / lint / coverage / check\n\u251c\u2500\u2500 managers/\n\u2502   \u251c\u2500\u2500 batch_manager.py             # Batch SIM programming orchestration\n\u2502   \u251c\u2500\u2500 card_manager.py              # Card detection / auth via CLI subprocess\n\u2502   \u251c\u2500\u2500 csv_manager.py               # CSV + EML load / save / validate\n\u2502   \u251c\u2500\u2500 backup_manager.py            # JSON backup / restore\n\u2502   \u251c\u2500\u2500 network_storage_manager.py   # NFS / SMB mount / unmount / profiles\n\u2502   \u2514\u2500\u2500 settings_manager.py          # Persistent app settings (JSON)\n\u251c\u2500\u2500 simulator/\n\u2502   \u251c\u2500\u2500 virtual_card.py              # VirtualCard dataclass\n\u2502   \u251c\u2500\u2500 card_deck.py                 # Card deck generation + CSV loading\n\u2502   \u251c\u2500\u2500 simulator_backend.py         # SimulatorBackend (in-memory card ops)\n\u2502   \u251c\u2500\u2500 settings.py                  # SimulatorSettings dataclass\n\u2502   \u2514\u2500\u2500 data/\n\u2502       \u2514\u2500\u2500 sysmocom_test_cards.csv  # 20 bundled sysmoISIM-SJA5 profiles\n\u251c\u2500\u2500 widgets/\n\u2502   \u251c\u2500\u2500 batch_program_panel.py       # Batch programming UI panel\n\u2502   \u251c\u2500\u2500 card_status_panel.py         # Card info + status indicator\n\u2502   \u251c\u2500\u2500 csv_editor_panel.py          # Treeview-based CSV table editor\n\u2502   \u251c\u2500\u2500 program_sim_panel.py         # Single-card programming panel\n\u2502   \u251c\u2500\u2500 progress_panel.py            # Progress bar + log output\n\u2502   \u251c\u2500\u2500 read_sim_panel.py            # Read SIM data panel\n\u2502   \u2514\u2500\u2500 tooltip.py                   # Hover tooltip widget\n\u251c\u2500\u2500 dialogs/\n\u2502   \u251c\u2500\u2500 adm1_dialog.py               # ADM1 key entry dialog\n\u2502   \u251c\u2500\u2500 artifact_export_dialog.py    # Export artifacts to network share\n\u2502   \u251c\u2500\u2500 network_storage_dialog.py    # Network storage connection manager\n\u2502   \u2514\u2500\u2500 simulator_settings_dialog.py # Simulator settings dialog\n\u251c\u2500\u2500 utils/\n\u2502   \u251c\u2500\u2500 eml_parser.py                # sysmocom .eml order email parser\n\u2502   \u251c\u2500\u2500 iccid_utils.py               # ICCID validation and Luhn check\n\u2502   \u251c\u2500\u2500 network_scanner.py           # SMB/NFS server auto-discovery\n\u2502   \u2514\u2500\u2500 validation.py                # Shared validation (ADM1, IMSI, ICCID, hex)\n\u251c\u2500\u2500 tests/                           # pytest test suite (500+ tests)\n\u251c\u2500\u2500 debian/                          # Debian packaging files\n\u2514\u2500\u2500 scripts/\n    \u251c\u2500\u2500 build-deb.sh                 # .deb build script\n    \u251c\u2500\u2500 check.sh                     # One-command quality gate (lint + tests + coverage)\n    \u2514\u2500\u2500 install.sh                   # One-line installer for Ubuntu\n```\n\n## License\n\nMIT\n
+# SimGUI
+
+Lightweight GUI wrapper for SIM card CLI tools. This project is independent from
+[sysmo-usim-tool](https://github.com/SeJohnEff/sysmo-usim-tool) and
+[pySim](https://github.com/osmocom/pysim) — point SimGUI at either CLI repo
+to run card operations from a desktop GUI.
+
+## Features
+
+- **CSV batch editor** — load, edit, validate, and save SIM card configurations
+- **EML import** — parse sysmocom order confirmation emails (.eml) directly, field-order independent
+- **Batch programming** — program multiple SIM cards in sequence with progress tracking
+- **Card detection** — detect inserted cards via sysmo-usim-tool or pySim
+- **Read SIM** — read card data (ICCID, IMSI, Ki, OPc, etc.) from physical cards
+- **ADM1 authentication** — secure key entry with attempt tracking and input validation
+- **ICCID cross-verification** — prevents card lockout by verifying card identity before ADM1 auth
+- **Network storage** — mount NFS and SMB/CIFS shares for reading SIM data files and saving artifacts
+- **Network discovery** — auto-discover SMB servers on the local network via mDNS and NetBIOS
+- **Artifact export** — export programming artifacts to network shares with duplicate detection
+- **Simulator mode** — built-in SIM programmer simulator with 20 real sysmoISIM-SJA5 profiles
+- **Backup / restore** — JSON backups of card data
+- **Progress tracking** — thread-safe progress bar and log output for long operations
+- **Modern theme** — platform-aware fonts and macOS-inspired styling (Linux, Windows, macOS)
+
+## Installation (Ubuntu)
+
+On a fresh Ubuntu desktop (22.04+):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+```
+
+That's it. The script installs build dependencies, builds the `.deb` package,
+installs it (including runtime dependencies like `smbclient`, `avahi-utils`,
+`cifs-utils`, and `nfs-common`), and cleans up.
+
+For manual installation or CLI tool setup, see the [documentation](docs/index.md).
+
+## Documentation
+
+Full documentation is in the [`docs/`](docs/index.md) directory, organised using the [Diátaxis](https://diataxis.fr/) framework:
+
+| Section | Contents |
+|---|---|
+| [Tutorials](docs/tutorials/first-card.md) | Step-by-step walkthroughs for new users |
+| [How-to guides](docs/how-to/install.md) | Task-oriented instructions for specific goals |
+| [Reference](docs/reference/csv-format.md) | Format specs, schemas, CLI interface |
+| [Explanation](docs/explanation/architecture.md) | Architecture, design decisions, background |
+
+## Quick start (after install)
+
+```bash
+simgui
+```
+
+Or follow the [first-card tutorial](docs/tutorials/first-card.md).
+
+## Requirements
+
+- Ubuntu 22.04+ (x86-64)
+- Python 3.10+
+- PyQt6
+- At least one of:
+  - [sysmo-usim-tool](https://github.com/SeJohnEff/sysmo-usim-tool) (recommended)
+  - [pySim](https://github.com/osmocom/pysim)
+- A USB PCSC card reader (for hardware operations)
+
+Simulator mode works without a card reader.
+
+## Development
+
+```bash
+git clone https://github.com/SeJohnEff/SimGUI
+cd SimGUI
+pip install -r requirements.txt
+python main.py
+```
+
+Run tests:
+
+```bash
+pytest
+```
+
+Run linter:
+
+```bash
+ruff check .
+```
+
+## Licence
+
+MIT

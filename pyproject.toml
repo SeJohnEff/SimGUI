@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+markers = [
+    "e2e: End-to-end contract tests verifying CLI interface boundaries",
+    "hardware: Tests requiring physical SIM card reader (set SIMGUI_HW_TEST=1)",
+]
 
 [tool.coverage.run]
 source = ["."]
