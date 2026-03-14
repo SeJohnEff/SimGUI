@@ -218,42 +218,7 @@ class TestBatchProgramPanelFunctions:
 
 
 # ==============================================================================
-# Tests for widgets/batch_program_panel.py — _load_adm1_csv
-# ==============================================================================
-
-class TestLoadAdm1Csv:
-    def test_valid_csv(self, tmp_path):
-        from widgets.batch_program_panel import BatchProgramPanel
-        csv_file = tmp_path / "adm1.csv"
-        csv_file.write_text("ICCID,ADM1\n89001,AABBCCDD\n89002,11223344\n")
-        result = BatchProgramPanel._load_adm1_csv(str(csv_file))
-        assert result == {"89001": "AABBCCDD", "89002": "11223344"}
-
-    def test_empty_csv(self, tmp_path):
-        from widgets.batch_program_panel import BatchProgramPanel
-        csv_file = tmp_path / "adm1.csv"
-        csv_file.write_text("ICCID,ADM1\n")
-        result = BatchProgramPanel._load_adm1_csv(str(csv_file))
-        assert result == {}
-
-    def test_missing_file(self):
-        from widgets.batch_program_panel import BatchProgramPanel
-        result = BatchProgramPanel._load_adm1_csv("/nonexistent/path.csv")
-        assert result == {}
-
-    def test_partial_rows(self, tmp_path):
-        from widgets.batch_program_panel import BatchProgramPanel
-        csv_file = tmp_path / "adm1.csv"
-        csv_file.write_text("ICCID,ADM1\n89001,\n,11223344\n89003,FFFF\n")
-        result = BatchProgramPanel._load_adm1_csv(str(csv_file))
-        assert result == {"89003": "FFFF"}
-
-    def test_extra_whitespace(self, tmp_path):
-        from widgets.batch_program_panel import BatchProgramPanel
-        csv_file = tmp_path / "adm1.csv"
-        csv_file.write_text("ICCID,ADM1\n  89001  ,  AABB  \n")
-        result = BatchProgramPanel._load_adm1_csv(str(csv_file))
-        assert result == {"89001": "AABB"}
+# _load_adm1_csv was removed — ADM1 now always comes from the vendor data file.
 
 
 # ==============================================================================
