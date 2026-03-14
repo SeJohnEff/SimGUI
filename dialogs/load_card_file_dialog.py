@@ -83,7 +83,7 @@ class LoadCardFileDialog(tk.Toplevel):
     def _build_ui(self):
         pad = ModernTheme.get_padding("medium")
 
-        # ── Card info banner ────────────────────────────────────────────
+        # ── Card info banner ────────────────────────────────────────────────
         banner = ttk.Frame(self)
         banner.pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
@@ -106,7 +106,7 @@ class LoadCardFileDialog(tk.Toplevel):
 
         ttk.Separator(self).pack(fill=tk.X, padx=pad, pady=(pad, 0))
 
-        # ── Network shares section ────────────────────────────────────
+        # ── Network shares section ────────────────────────────────────────
         shares_frame = ttk.LabelFrame(self, text="Network Shares")
         shares_frame.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(pad, 0))
 
@@ -138,13 +138,13 @@ class LoadCardFileDialog(tk.Toplevel):
 
         self._populate_shares()
 
-        # ── Bottom buttons ──────────────────────────────────────────
+        # ── Bottom buttons ────────────────────────────────────────────
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=pad, pady=pad)
 
         # Connect new share button on the left
         connect_btn = ttk.Button(
-            btn_frame, text="Connect Network Share\u2026",
+            btn_frame, text="Connect Network Share…",
             command=self._on_connect_share,
         )
         connect_btn.pack(side=tk.LEFT)
@@ -159,7 +159,7 @@ class LoadCardFileDialog(tk.Toplevel):
 
         # Browse local in the middle-right
         local_btn = ttk.Button(
-            btn_frame, text="Browse Local\u2026",
+            btn_frame, text="Browse Local…",
             command=self._on_browse_local,
         )
         local_btn.pack(side=tk.RIGHT)
@@ -177,8 +177,8 @@ class LoadCardFileDialog(tk.Toplevel):
             ttk.Label(
                 self._shares_inner,
                 text="No network shares connected.\n"
-                     "Use \"Connect Network Share\u2026\" below to add one,\n"
-                     "or \"Browse Local\u2026\" to pick a file from this computer.",
+                     "Use \"Connect Network Share…\" below to add one,\n"
+                     "or \"Browse Local…\" to pick a file from this computer.",
                 style="Small.TLabel",
                 justify=tk.CENTER,
             ).pack(expand=True, pady=20)

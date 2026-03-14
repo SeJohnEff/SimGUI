@@ -17,6 +17,10 @@ class Tooltip:
     _OFFSET_X = 12
     _OFFSET_Y = 10
 
+    # Class-level registry so we can hide all visible tooltips at once
+    # (e.g. before a messagebox or dialog appears).
+    _all_instances: list["Tooltip"] = []
+
     def __init__(self, widget: tk.Widget, text: str):
         self._widget = widget
         self._text = text
@@ -33,6 +37,15 @@ class Tooltip:
             top.bind("<FocusOut>", self._on_toplevel_focus_out, add="+")
         except Exception:
             pass
+
+        Tooltip._all_instances.append(self)
+
+    @classmethod
+    def hide_all(cls):
+        """Hide every visible tooltip.  Call before showing a messagebox."""
+        for tip in cls._all_instances:
+            tip._cancel()
+            tip._hide()
 
     @property
     def text(self) -> str:
@@ -117,6 +130,10 @@ class Tooltip:
         self._cancel()
         self._hide()
         try:
+            Tooltip._all_instances.remove(self)
+        except ValueError:
+            pass
+        try:
             self._widget.unbind("<Enter>")
             self._widget.unbind("<Leave>")
             self._widget.unbind("<ButtonPress>")
@@ -127,3 +144,13 @@ class Tooltip:
 def add_tooltip(widget: tk.Widget, text: str) -> Tooltip:
     """Convenience helper — attach a tooltip to *widget* and return it."""
     return Tooltip(widget, text)
+
+
+def hide_all_tooltips():
+    """Dismiss every visible tooltip.
+
+    Call this before showing a ``messagebox`` or any dialog that doesn't
+    use ``grab_set``, since those popups don't trigger ``<FocusOut>``
+    on the parent window.
+    """
+    Tooltip.hide_all()
