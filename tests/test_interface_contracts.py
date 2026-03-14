@@ -114,7 +114,10 @@ _INHERITED_TKINTER_METHODS = {
 # called as self.on_X() — these are dynamic attributes, not methods.
 _KNOWN_CALLBACK_PATTERNS = {"on_progress", "on_card_result",
                             "on_waiting_for_card", "on_completed",
-                            "on_csv_loaded_callback"}
+                            "on_csv_loaded_callback",
+                            "on_card_programmed_callback",
+                            "on_card_detected", "on_card_unknown",
+                            "on_card_removed", "on_error"}
 
 
 class _SelfCallVisitor(ast.NodeVisitor):
