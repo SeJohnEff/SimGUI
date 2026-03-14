@@ -1,0 +1,63 @@
+#!/bin/bash
+# simgui-setup-mount — one-time setup for passwordless mount/umount.
+#
+# Usage: sudo simgui-setup-mount
+#
+# Installs a sudoers rule that allows any user in the 'users' group
+# to mount/unmount CIFS and NFS shares under /tmp/simgui-mounts/.
+#
+# This must be run once after installing SimGUI.  After that,
+# the Network Storage dialog can mount shares without prompting
+# for the system password.
+
+set -euo pipefail
+
+SUDOERS_SRC=""
+SUDOERS_DST="/etc/sudoers.d/simgui-mount"
+
+# Find the sudoers template — check several locations
+for candidate in \
+    "/opt/simgui/etc/simgui-mount.sudoers" \
+    "$(dirname "$(realpath "$0")")/../etc/simgui-mount.sudoers" \
+    "/usr/share/simgui/simgui-mount.sudoers"; do
+    if [ -f "$candidate" ]; then
+        SUDOERS_SRC="$candidate"
+        break
+    fi
+done
+
+if [ -z "$SUDOERS_SRC" ]; then
+    echo "Error: cannot find simgui-mount.sudoers template." >&2
+    echo "Expected in /opt/simgui/etc/ or alongside this script." >&2
+    exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root (use: sudo $0)" >&2
+    exit 1
+fi
+
+# Validate the sudoers file before installing
+if ! visudo -c -f "$SUDOERS_SRC" >/dev/null 2>&1; then
+    echo "Error: sudoers template failed syntax check." >&2
+    echo "File: $SUDOERS_SRC" >&2
+    exit 1
+fi
+
+cp "$SUDOERS_SRC" "$SUDOERS_DST"
+chmod 0440 "$SUDOERS_DST"
+
+# Ensure cifs-utils and nfs-common are installed
+if ! command -v mount.cifs >/dev/null 2>&1; then
+    echo "Installing cifs-utils (for SMB/CIFS mounts)..."
+    apt-get install -y cifs-utils 2>/dev/null || true
+fi
+
+if ! command -v mount.nfs >/dev/null 2>&1; then
+    echo "Installing nfs-common (for NFS mounts)..."
+    apt-get install -y nfs-common 2>/dev/null || true
+fi
+
+echo ""
+echo "Done. SimGUI can now mount network shares without a password prompt."
+echo "Installed: $SUDOERS_DST"

@@ -1,0 +1,10 @@
+# Allow SimGUI users to mount/unmount network shares without a password.
+# Install: sudo cp simgui-mount.sudoers /etc/sudoers.d/simgui-mount
+#          sudo chmod 0440 /etc/sudoers.d/simgui-mount
+#
+# This is safe because mount.cifs and mount.nfs only affect the
+# specific mount point; they do not grant broader root access.
+
+%users ALL=(root) NOPASSWD: /usr/bin/mount -t cifs *
+%users ALL=(root) NOPASSWD: /usr/bin/mount -t nfs *
+%users ALL=(root) NOPASSWD: /usr/bin/umount /tmp/simgui-mounts/*

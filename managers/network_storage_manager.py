@@ -130,6 +130,8 @@ class NetworkStorageManager:
             )
             if result.returncode != 0:
                 err = (result.stderr or result.stdout).strip()
+                if self._is_sudo_permission_error(err):
+                    return False, self._sudo_fix_message()
                 return False, f"Mount failed: {err}"
         except FileNotFoundError as exc:
             return False, f"Mount command not found: {exc}"
@@ -152,6 +154,8 @@ class NetworkStorageManager:
             )
             if result.returncode != 0:
                 err = (result.stderr or result.stdout).strip()
+                if self._is_sudo_permission_error(err):
+                    return False, self._sudo_fix_message()
                 return False, f"Unmount failed: {err}"
         except subprocess.TimeoutExpired:
             return False, "Unmount timed out"
@@ -255,6 +259,49 @@ class NetworkStorageManager:
                 break
 
         return sorted(found)
+
+    # ---- Sudo / permission helpers --------------------------------------
+
+    _SUDO_ERROR_KEYWORDS = (
+        "a terminal is required",
+        "askpass helper",
+        "sudo: a password is required",
+        "no tty present",
+        "password is required",
+    )
+
+    @classmethod
+    def _is_sudo_permission_error(cls, msg: str) -> bool:
+        """Return True if *msg* indicates sudo cannot run without a TTY."""
+        lower = msg.lower()
+        return any(kw in lower for kw in cls._SUDO_ERROR_KEYWORDS)
+
+    @staticmethod
+    def _sudo_fix_message() -> str:
+        """User-friendly message explaining how to fix sudo permissions."""
+        return (
+            "SimGUI needs permission to mount network shares.\n\n"
+            "Run this once in a terminal to fix it:\n\n"
+            "  sudo simgui-setup-mount\n\n"
+            "Or manually:\n"
+            "  sudo cp /opt/simgui/etc/simgui-mount.sudoers "
+            "/etc/sudoers.d/simgui-mount\n"
+            "  sudo chmod 0440 /etc/sudoers.d/simgui-mount"
+        )
+
+    def check_sudo_mount(self) -> bool:
+        """Return True if passwordless sudo mount is available.
+
+        Uses ``sudo -n true`` to test without prompting.
+        """
+        try:
+            r = subprocess.run(
+                ["sudo", "-n", "mount", "--help"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
 
     # ---- Internal helpers ----------------------------------------------
 

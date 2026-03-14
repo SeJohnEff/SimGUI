@@ -398,7 +398,7 @@ class NetworkStorageDialog(tk.Toplevel):
                                         width=14,
                                         command=self._on_connect)
         self._connect_btn.pack(side=tk.LEFT, padx=2)
-        add_tooltip(self._connect_btn, "Save profile and mount the share")
+        add_tooltip(self._connect_btn, "Connect to the share (saves first if form was changed)")
 
         self._update_btn = ttk.Button(actions, text="Save", width=8,
                                        command=self._on_save)
@@ -588,6 +588,28 @@ class NetworkStorageDialog(tk.Toplevel):
         self._on_proto_change()
         self._status_label.configure(text="")
 
+    def _is_form_dirty(self) -> bool:
+        """Return True if the form differs from the saved profile.
+
+        Always returns True when creating a new profile (no saved state).
+        """
+        if self._current_idx is None:
+            return True
+        p = self._profiles[self._current_idx]
+        proto = self._proto_var.get()
+        fields = [f for f, v in self._field_vars.items() if v.get()]
+        return (
+            self._label_var.get().strip() != p.label
+            or proto != p.protocol
+            or _sanitise_server(self._server_var.get()) != p.server
+            or _sanitise_share(self._share_var.get(), proto) != p.share
+            or self._user_var.get().strip() != p.username
+            or self._pass_var.get() != p.password
+            or self._domain_var.get().strip() != p.domain
+            or (self._export_dir_var.get().strip() or "artifacts") != p.export_subdir
+            or set(fields) != set(p.export_fields)
+        )
+
     def _update_button_states(self):
         """Update button labels/states based on whether editing or new."""
         editing = self._current_idx is not None
@@ -596,8 +618,12 @@ class NetworkStorageDialog(tk.Toplevel):
             mounted = self._ns.is_mounted(p)
             self._update_btn.configure(text="Update", state=tk.NORMAL)
             self._remove_btn.configure(state=tk.NORMAL)
-            self._connect_btn.configure(
-                text="Disconnect" if mounted else "Save && Connect")
+            if mounted:
+                self._connect_btn.configure(text="Disconnect")
+            elif self._is_form_dirty():
+                self._connect_btn.configure(text="Save && Connect")
+            else:
+                self._connect_btn.configure(text="Connect")
         else:
             self._update_btn.configure(text="Save New", state=tk.NORMAL)
             self._remove_btn.configure(state=tk.DISABLED)
@@ -798,25 +824,32 @@ class NetworkStorageDialog(tk.Toplevel):
             self._update_button_states()
             return
 
-        # Save first (creates new or updates existing)
-        p = self._save_profile()
-        if p is None:
-            return
+        # If the form has unsaved changes (or is a new profile), save first.
+        # Otherwise just connect using the already-saved profile.
+        if self._is_form_dirty():
+            p = self._save_profile()
+            if p is None:
+                return
+        else:
+            p = self._profiles[self._current_idx]
 
         # For mounting, always use the entered password
         # (even if "Remember" is unchecked)
         if not p.password:
             p.password = self._pass_var.get()
 
-        self._status_label.configure(text="Mounting...")
+        self._status_label.configure(text="Connecting...")
         self.update_idletasks()
         ok, msg = self._ns.mount(p)
-        self._status_label.configure(text=msg[:80])
         if ok:
+            self._status_label.configure(text=msg[:80])
             # Mark for auto-reconnect on next app launch
             p.auto_connect = True
             self._ns.save_profiles(self._profiles)
         else:
+            # Show a short summary in the status bar, full detail in popup
+            first_line = msg.split("\n", 1)[0]
+            self._status_label.configure(text=first_line[:80])
             messagebox.showerror("Mount Failed", msg, parent=self)
 
         self._refresh_profile_list()
