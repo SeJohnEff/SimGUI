@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 MOUNT_BASE = "/tmp/simgui-mounts"
 
+# Absolute paths for system commands — critical for desktop-launcher
+# environments where PATH may not include /usr/bin or sudo's
+# secure_path may differ.  The sudoers NOPASSWD rule references
+# these exact paths, so using bare 'mount' could fail to match.
+_SUDO = "/usr/bin/sudo"
+_MOUNT = "/usr/bin/mount"
+_UMOUNT = "/usr/bin/umount"
+
 
 @dataclass
 class StorageProfile:
@@ -149,7 +157,7 @@ class NetworkStorageManager:
 
         try:
             result = subprocess.run(
-                ["sudo", "umount", mp],
+                [_SUDO, _UMOUNT, mp],
                 capture_output=True, text=True, timeout=15,
             )
             if result.returncode != 0:
@@ -292,11 +300,12 @@ class NetworkStorageManager:
     def check_sudo_mount(self) -> bool:
         """Return True if passwordless sudo mount is available.
 
-        Uses ``sudo -n true`` to test without prompting.
+        Uses ``sudo -n /usr/bin/mount --help`` to test without prompting.
+        Absolute path ensures the sudoers NOPASSWD rule matches.
         """
         try:
             r = subprocess.run(
-                ["sudo", "-n", "mount", "--help"],
+                [_SUDO, "-n", _MOUNT, "--help"],
                 capture_output=True, text=True, timeout=5,
             )
             return r.returncode == 0
@@ -312,7 +321,7 @@ class NetworkStorageManager:
 
         if profile.protocol == "nfs":
             opts = profile.mount_options or "soft,timeo=50,retrans=3"
-            return ["sudo", "mount", "-t", "nfs",
+            return [_SUDO, _MOUNT, "-t", "nfs",
                     "-o", opts, src, mp]
 
         # SMB / CIFS
@@ -338,7 +347,7 @@ class NetworkStorageManager:
         if profile.mount_options:
             opts_parts.append(profile.mount_options)
 
-        return ["sudo", "mount", "-t", "cifs",
+        return [_SUDO, _MOUNT, "-t", "cifs",
                 "-o", ",".join(opts_parts), src, mp]
 
     def _test_smb(self, profile: StorageProfile) -> tuple[bool, str]:

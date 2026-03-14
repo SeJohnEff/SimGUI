@@ -155,11 +155,16 @@ class IccidIndex:
         self._cache_size = cache_size
         self._scanned_dirs: set[str] = set()
 
-    def scan_directory(self, directory: str) -> ScanResult:
-        """Quick-scan all .eml/.csv/.txt files in *directory*.
+    def scan_directory(self, directory: str, *,
+                        recursive: bool = True) -> ScanResult:
+        """Quick-scan .eml/.csv/.txt files in *directory*.
 
         Builds range entries from ICCIDs only (no full card parse).
         Skips files whose mtime hasn't changed since last scan.
+
+        When *recursive* is True (the default), subdirectories are
+        walked automatically so that network shares with nested folder
+        structures (e.g. ``SIM/batch-01/``) are fully indexed.
         """
         result = ScanResult()
 
@@ -169,13 +174,24 @@ class IccidIndex:
 
         self._scanned_dirs.add(directory)
 
-        for fname in sorted(os.listdir(directory)):
+        if recursive:
+            all_files = []
+            for dirpath, _dirnames, filenames in os.walk(directory):
+                for fname in sorted(filenames):
+                    all_files.append((dirpath, fname))
+        else:
+            all_files = [
+                (directory, fname)
+                for fname in sorted(os.listdir(directory))
+            ]
+
+        for dirpath, fname in all_files:
             lower = fname.lower()
             if not (lower.endswith(".eml") or lower.endswith(".csv")
                     or lower.endswith(".txt")):
                 continue
 
-            fpath = os.path.join(directory, fname)
+            fpath = os.path.join(dirpath, fname)
             if not os.path.isfile(fpath):
                 continue
 

@@ -21,21 +21,24 @@ from managers.auto_artifact_manager import AutoArtifactManager
 from managers.backup_manager import BackupManager
 from managers.card_manager import CardManager, CLIBackend
 from managers.card_watcher import CardWatcher
-from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
+from managers.csv_manager import SIM_DATA_FILETYPES
 from managers.iccid_index import IccidIndex
 from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
 from managers.standards_manager import StandardsManager
 from theme import ModernTheme
 from utils import get_browse_initial_dir
+from version import __version__
 from widgets.batch_program_panel import BatchProgramPanel
 from widgets.card_status_panel import CardStatusPanel
 from widgets.csv_editor_panel import CSVEditorPanel
 from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.progress_panel import ProgressPanel
 from widgets.read_sim_panel import ReadSIMPanel
+from widgets.info_dialog import show_error as show_error_dialog
+from widgets.info_dialog import show_info as show_info_dialog
 from widgets.toast import show_toast
-from widgets.tooltip import hide_all_tooltips
+from widgets.tooltip import add_tooltip, hide_all_tooltips
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +52,7 @@ class SimGUIApp:
 
     def __init__(self):
         self.root = tk.Tk(className="simgui")
-        self.root.title("SimGUI - SIM Card Programmer")
+        self.root.title(f"SimGUI {__version__} - SIM Card Programmer")
         self.root.geometry("1024x700")
         self.root.minsize(800, 500)
 
@@ -137,6 +140,9 @@ class SimGUIApp:
             # rather than waiting for the first CardWatcher poll cycle.
             self.root.after(100, self._startup_detect_card)
 
+        # Warn once if passwordless sudo mount is not configured
+        self._check_sudo_mount_permissions()
+
         # Auto-reconnect network shares from previous session
         self._auto_reconnect_shares()
 
@@ -162,6 +168,21 @@ class SimGUIApp:
         # Right panel: notebook with workflow tabs
         notebook = ttk.Notebook(container)
         notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._notebook = notebook
+
+        # Mount indicator — floats in the empty space right of the tab bar.
+        # Uses place() so it overlays the notebook's top-right corner
+        # without affecting the pack layout.
+        self._mount_indicator = tk.Canvas(
+            notebook, width=20, height=20,
+            highlightthickness=0, borderwidth=0,
+        )
+        # place() in top-right corner; repositioned on resize
+        self._mount_indicator.place(relx=1.0, x=-28, y=3, anchor="ne")
+        notebook.bind("<Configure>", self._reposition_mount_indicator)
+        self._draw_mount_icon(connected=False)
+        self._mount_tooltip_text = ""
+        add_tooltip(self._mount_indicator, "No network share connected")
 
         # Workflow tabs
         self._read_panel = ReadSIMPanel(
@@ -230,6 +251,9 @@ class SimGUIApp:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Open CSV...", command=self._on_open_csv,
                               accelerator="Ctrl+O")
+        file_menu.add_command(label="Scan Directory...",
+                              command=self._on_scan_directory,
+                              accelerator="Ctrl+D")
         file_menu.add_command(label="Save CSV...", command=self._on_save_csv,
                               accelerator="Ctrl+S")
         file_menu.add_separator()
@@ -277,6 +301,7 @@ class SimGUIApp:
 
     def _bind_shortcuts(self):
         self.root.bind_all('<Control-o>', lambda e: self._on_open_csv())
+        self.root.bind_all('<Control-d>', lambda e: self._on_scan_directory())
         self.root.bind_all('<Control-s>', lambda e: self._on_save_csv())
         self.root.bind_all('<Control-q>', lambda e: self._on_close())
         self.root.bind_all('<Control-n>', lambda e: self._on_next_virtual_card())
@@ -364,6 +389,36 @@ class SimGUIApp:
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
+    def _check_sudo_mount_permissions(self):
+        """Warn the user at startup if passwordless sudo mount is not set up.
+
+        Only shows the warning when saved profiles exist (i.e. the user
+        actually uses network shares).  Runs the check in a thread so
+        the UI isn't blocked.
+        """
+        profiles = self._ns_manager.load_profiles()
+        if not profiles:
+            return  # no shares configured, nothing to warn about
+
+        import threading
+
+        def _check():
+            ok = self._ns_manager.check_sudo_mount()
+            if not ok:
+                self.root.after(0, self._show_sudo_warning)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _show_sudo_warning(self):
+        """Display a one-time warning about missing sudo mount permissions."""
+        show_toast(
+            self.root,
+            "Network mounts may fail — run 'sudo simgui-setup-mount' "
+            "in a terminal to fix",
+            level="warning",
+            duration=10_000,
+        )
+
     def _auto_reconnect_shares(self):
         """Reconnect network shares that were connected last session."""
         results = self._ns_manager.reconnect_saved()
@@ -392,18 +447,56 @@ class SimGUIApp:
             )
             logger.warning("Auto-reconnect failed: %s — %s", label, msg)
 
+    # ---- Mount indicator (tab-bar icon) ---------------------------------
+
+    def _draw_mount_icon(self, connected: bool = False):
+        """Draw a small HDD/network-storage icon on the mount indicator canvas.
+
+        Green fill when a share is connected, grey when disconnected.
+        """
+        c = self._mount_indicator
+        c.delete("all")
+        fill = "#2e7d32" if connected else "#999999"
+        outline = "#1b5e20" if connected else "#666666"
+        # Stylised HDD: rounded rectangle body
+        c.create_rectangle(2, 5, 18, 17, fill=fill, outline=outline, width=1)
+        # Activity LED dot
+        led = "#81c784" if connected else "#cccccc"
+        c.create_oval(13, 12, 16, 15, fill=led, outline="")
+        # Platter lines
+        line_col = "#ffffff" if connected else "#b0b0b0"
+        c.create_line(5, 9, 11, 9, fill=line_col)
+        c.create_line(5, 12, 11, 12, fill=line_col)
+
+    def _reposition_mount_indicator(self, _event=None):
+        """Keep the mount indicator pinned to the top-right of the notebook."""
+        self._mount_indicator.place(relx=1.0, x=-28, y=3, anchor="ne")
+
     def _refresh_share_indicator(self):
-        """Update the persistent share-connected indicator in the status bar."""
+        """Update both the status-bar text and the tab-bar icon."""
         mounts = self._ns_manager.get_active_mount_paths()
         if mounts:
             labels = [label for label, _path in mounts]
+            paths = [f"{label}: {path}" for label, path in mounts]
             self._share_indicator_var.set(
                 f"\u25cf NAS: {', '.join(labels)}")
-            # Green-ish foreground when shares are connected
             self._share_indicator.configure(foreground="#2e7d32")
+            # Tab-bar icon: green + tooltip with mount paths
+            self._draw_mount_icon(connected=True)
+            tooltip_text = "\n".join(paths)
+            self._update_mount_tooltip(tooltip_text)
         else:
             self._share_indicator_var.set("")
             self._share_indicator.configure(foreground="")
+            self._draw_mount_icon(connected=False)
+            self._update_mount_tooltip("No network share connected")
+
+    def _update_mount_tooltip(self, text: str):
+        """Replace the tooltip on the mount indicator canvas."""
+        if hasattr(self, "_mount_indicator_tooltip"):
+            self._mount_indicator_tooltip.destroy()
+        self._mount_indicator_tooltip = add_tooltip(
+            self._mount_indicator, text)
 
     def _rescan_iccid_index(self):
         """Scan all connected shares for ICCID data files and standards."""
@@ -502,7 +595,7 @@ class SimGUIApp:
                         scan_dir, result.total_cards,
                         result.files_scanned)
         except Exception as exc:
-            messagebox.showerror("Scan Error", str(exc))
+            show_error_dialog(self.root, "Scan Error", str(exc))
             return
         # Re-check this ICCID in the refreshed index
         entry = self._iccid_index.lookup(iccid)
@@ -513,7 +606,8 @@ class SimGUIApp:
                 self._status_var.set(
                     f"Card found in {os.path.basename(entry.file_path)}")
                 return
-        messagebox.showinfo(
+        show_info_dialog(
+            self.root,
             "Not Found",
             f"ICCID {iccid} was not found in the scanned directory.\n\n"
             f"Scanned: {scan_dir}\n"
@@ -563,9 +657,58 @@ class SimGUIApp:
                 self._status_var.set(f"Loaded {fp}")
                 self._settings.set("last_csv_path", fp)
             else:
-                messagebox.showerror("Error", f"No card data found in {fp}")
+                show_error_dialog(self.root, "Error",
+                                  f"No card data found in {fp}")
         except ValueError as exc:
-            messagebox.showerror("Import Error", str(exc))
+            show_error_dialog(self.root, "Import Error", str(exc))
+
+    def _on_scan_directory(self):
+        """Let the user pick a directory and scan it for SIM data files.
+
+        Defaults to the network share mount point if one is connected.
+        Recursively scans all subdirectories for .csv/.eml/.txt files.
+        """
+        init_dir = get_browse_initial_dir(self._ns_manager)
+        chosen = filedialog.askdirectory(
+            title="Select directory with SIM data files",
+            initialdir=init_dir or None,
+            mustexist=True,
+        )
+        if not chosen:
+            return
+
+        self._status_var.set(f"Scanning {chosen}...")
+        self.root.update_idletasks()
+
+        try:
+            result = self._iccid_index.scan_directory(chosen)
+        except Exception as exc:
+            show_error_dialog(self.root, "Scan Error", str(exc))
+            return
+
+        if result.total_cards > 0:
+            show_toast(
+                self.root,
+                f"Found {result.total_cards} cards in "
+                f"{result.files_scanned} files",
+                level="success",
+                duration=5000,
+            )
+            self._status_var.set(
+                f"Scanned {chosen}: {result.total_cards} cards in "
+                f"{result.files_scanned} files")
+        else:
+            show_toast(
+                self.root,
+                f"No SIM data found in {os.path.basename(chosen)}",
+                level="warning",
+                duration=5000,
+            )
+            self._status_var.set(
+                f"No SIM data found in {chosen}")
+
+        if result.errors:
+            logger.warning("Scan errors in %s: %s", chosen, result.errors)
 
     def _on_save_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager)
@@ -581,7 +724,8 @@ class SimGUIApp:
             if mgr.save_csv(fp):
                 self._status_var.set(f"Saved {fp}")
             else:
-                messagebox.showerror("Error", f"Failed to save {fp}")
+                show_error_dialog(self.root, "Error",
+                                  f"Failed to save {fp}")
 
     def _on_detect_card(self):
         ok, msg = self._card_manager.detect_card()
@@ -724,7 +868,8 @@ class SimGUIApp:
         if not records and self.last_read_data:
             records = [self.last_read_data]
         if not records:
-            messagebox.showinfo(
+            show_info_dialog(
+                self.root,
                 "No Data",
                 "No programming results to export.\n\n"
                 "Run a batch program or read a card first.")
@@ -738,11 +883,28 @@ class SimGUIApp:
                              default_fields)
 
     def _on_about(self):
-        messagebox.showinfo(
+        import subprocess as _sp
+        git_hash = ""
+        try:
+            r = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                        capture_output=True, text=True, timeout=3,
+                        cwd=os.path.dirname(os.path.abspath(__file__)))
+            if r.returncode == 0:
+                git_hash = r.stdout.strip()
+        except Exception:
+            pass
+
+        version_line = f"Version {__version__}"
+        if git_hash:
+            version_line += f"  (commit {git_hash})"
+
+        show_info_dialog(
+            self.root,
             "About SimGUI",
-            "SimGUI - SIM Card Programming GUI\n\n"
-            "A lightweight GUI wrapper for sysmo-usim-tool and pySim.\n"
-            "https://github.com/SeJohnEff/SimGUI",
+            f"SimGUI — SIM Card Programming GUI\n"
+            f"{version_line}\n\n"
+            f"A lightweight GUI wrapper for pySim.\n\n"
+            f"https://github.com/SeJohnEff/SimGUI",
         )
 
     def _on_close(self):

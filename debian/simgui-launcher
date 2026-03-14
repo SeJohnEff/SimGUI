@@ -1,3 +1,19 @@
 #!/bin/bash
+# SimGUI desktop launcher.
+#
+# When launched from a .desktop file (sidebar / application menu),
+# the process inherits a minimal environment from the display manager
+# rather than the user's interactive shell.  We ensure the essentials
+# are present so that:
+#   1. sudo can resolve the user for NOPASSWD rules
+#   2. Python's os.path.expanduser("~") works correctly
+#   3. /usr/bin is on PATH (needed for mount, umount, smbclient, etc.)
+
+# Guarantee sane PATH — desktop sessions sometimes omit /usr/bin
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin${PATH:+:$PATH}"
+
+# Ensure HOME is set (some display managers don't propagate it)
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
+
 cd /opt/simgui
 exec python3 /opt/simgui/main.py "$@"

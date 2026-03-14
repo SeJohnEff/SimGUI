@@ -293,11 +293,11 @@ class TestBuildMountCmd:
         assert "dir_mode=" in opts
 
     def test_sudo_first_argument(self):
-        """All mount commands start with sudo."""
+        """All mount commands start with absolute-path sudo."""
         ns = NetworkStorageManager()
         for p in [_make_smb_profile(), _make_nfs_profile()]:
             cmd = ns._build_mount_cmd(p)
-            assert cmd[0] == "sudo"
+            assert cmd[0] == "/usr/bin/sudo"
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +443,7 @@ class TestMountUnmount:
         with patch.object(ns, "is_mounted", return_value=False), \
              patch("os.makedirs"), \
              patch.object(ns, "_build_mount_cmd",
-                          return_value=["sudo", "mount"]), \
+                          return_value=["/usr/bin/sudo", "/usr/bin/mount"]), \
              patch("subprocess.run",
                    return_value=MagicMock(returncode=0, stderr="")):
             with patch.object(ns, "is_mounted", side_effect=[False, True]):
@@ -469,7 +469,7 @@ class TestMountUnmount:
         p = _make_smb_profile()
         with patch.object(ns, "is_mounted", return_value=False), \
              patch("os.makedirs"), \
-             patch.object(ns, "_build_mount_cmd", return_value=["sudo", "mount"]), \
+             patch.object(ns, "_build_mount_cmd", return_value=["/usr/bin/sudo", "/usr/bin/mount"]), \
              patch("subprocess.run",
                    return_value=MagicMock(returncode=1,
                                           stderr="Permission denied",
@@ -484,7 +484,7 @@ class TestMountUnmount:
         p = _make_smb_profile()
         with patch.object(ns, "is_mounted", return_value=False), \
              patch("os.makedirs"), \
-             patch.object(ns, "_build_mount_cmd", return_value=["sudo"]), \
+             patch.object(ns, "_build_mount_cmd", return_value=["/usr/bin/sudo"]), \
              patch("subprocess.run", side_effect=FileNotFoundError("no sudo")):
             ok, msg = ns.mount(p)
         assert ok is False
@@ -497,7 +497,7 @@ class TestMountUnmount:
         p = _make_smb_profile()
         with patch.object(ns, "is_mounted", return_value=False), \
              patch("os.makedirs"), \
-             patch.object(ns, "_build_mount_cmd", return_value=["sudo"]), \
+             patch.object(ns, "_build_mount_cmd", return_value=["/usr/bin/sudo"]), \
              patch("subprocess.run",
                    side_effect=subprocess.TimeoutExpired("mount", 30)):
             ok, msg = ns.mount(p)

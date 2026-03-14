@@ -76,6 +76,21 @@ class _FakeWidget:
     def index(self, *a): return 4
     def place(self, **kw): pass
     def see(self, *a): pass
+    def wait_window(self, *a): pass
+    def cget(self, key): return self._cfg.get(key, "")
+    def resizable(self, *a): pass
+    def winfo_toplevel(self): return self
+    # Canvas drawing methods
+    def create_rectangle(self, *a, **kw): return 1
+    def create_oval(self, *a, **kw): return 2
+    def create_line(self, *a, **kw): return 3
+    def create_text(self, *a, **kw): return 4
+    def create_window(self, *a, **kw): return 5
+    def itemconfig(self, *a, **kw): pass
+    def bbox(self, *a): return (0, 0, 100, 100)
+    def yview_scroll(self, *a): pass
+    def xview(self, *a): pass
+    def yview(self, *a): pass
 
 
 class _FakeVar:

@@ -33,6 +33,7 @@ from utils.network_scanner import (
     list_smb_shares,
     scan_smb_servers,
 )
+from widgets.info_dialog import show_error as show_error_dialog
 from widgets.tooltip import add_tooltip
 
 _ALL_EXPORT_FIELDS = [
@@ -382,12 +383,14 @@ class NetworkStorageDialog(tk.Toplevel):
                 row=r, column=c, sticky=tk.W, padx=(0, pad), pady=1)
             add_tooltip(_chk, f"Include {fname} in artifact exports")
 
-        # ── Bottom action buttons ────────────────────────────────────────────────────────────────────────────
+        # ── Status line (own row so it never pushes buttons off-screen) ─────
+        self._status_label = ttk.Label(self._body, text="",
+                                        style="Small.TLabel")
+        self._status_label.pack(fill=tk.X, padx=pad, pady=(0, 2))
+
+        # ── Bottom action buttons ────────────────────────────────────────────
         actions = ttk.Frame(self._body)
         actions.pack(fill=tk.X, padx=pad, pady=(0, pad))
-
-        self._status_label = ttk.Label(actions, text="", style="Small.TLabel")
-        self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         _test_btn = ttk.Button(actions, text="Test", width=8,
                    command=self._on_test)
@@ -850,7 +853,7 @@ class NetworkStorageDialog(tk.Toplevel):
             # Show a short summary in the status bar, full detail in popup
             first_line = msg.split("\n", 1)[0]
             self._status_label.configure(text=first_line[:80])
-            messagebox.showerror("Mount Failed", msg, parent=self)
+            show_error_dialog(self, "Mount Failed", msg)
 
         self._refresh_profile_list()
         self._update_button_states()

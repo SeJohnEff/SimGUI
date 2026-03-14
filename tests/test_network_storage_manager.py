@@ -123,8 +123,8 @@ class TestNetworkStorageManager:
         p = StorageProfile(label="nfs-test", protocol="nfs",
                            server="10.0.0.1", share="/data/sim")
         cmd = ns._build_mount_cmd(p)
-        assert cmd[0] == "sudo"
-        assert "mount" in cmd
+        assert cmd[0] == "/usr/bin/sudo"
+        assert "/usr/bin/mount" in cmd
         assert "-t" in cmd
         assert "nfs" in cmd
         assert "10.0.0.1:/data/sim" in cmd

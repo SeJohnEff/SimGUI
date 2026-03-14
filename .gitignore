@@ -34,3 +34,8 @@ backups/
 
 # Config overrides
 simgui.local.json
+
+# Coverage & session reports
+.coverage
+coverage_report*.txt
+session_summary*.md
