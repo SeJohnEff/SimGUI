@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Card Status Panel Widget"""
+"""Card Status Panel Widget
+
+Shows the current card state.  Card detection is handled automatically
+by :class:`CardWatcher` — there is no manual "Detect Card" button.
+"""
 
 import tkinter as tk
 from tkinter import ttk
@@ -18,7 +22,7 @@ class CardStatusPanel(ttk.LabelFrame):
         self.on_detect_callback = None
         self.on_authenticate_callback = None
         self._create_widgets()
-        self.set_status("waiting", "Waiting for card...")
+        self.set_status("waiting", "Insert a SIM card...")
 
     def _create_widgets(self):
         pad_s = ModernTheme.get_padding('small')
@@ -38,7 +42,8 @@ class CardStatusPanel(ttk.LabelFrame):
 
         # Card info rows
         info_labels = [('Card Type:', 'card_type'), ('IMSI:', 'imsi'),
-                       ('ICCID:', 'iccid'), ('Auth:', 'auth')]
+                       ('ICCID:', 'iccid'), ('Auth:', 'auth'),
+                       ('Source:', 'source_file')]
         self._info_vars = {}
         for i, (label_text, key) in enumerate(info_labels, start=1):
             ttk.Label(self, text=label_text, style='Subheading.TLabel').grid(
@@ -51,14 +56,14 @@ class CardStatusPanel(ttk.LabelFrame):
 
         self.columnconfigure(1, weight=1)
 
-        # Buttons
+        # Already-programmed indicator (hidden by default)
+        self._programmed_label = ttk.Label(
+            self, text="", style='Small.TLabel')
+
+        # Buttons — no "Detect Card", detection is automatic
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=len(info_labels) + 1, column=0, columnspan=2,
                        sticky=(tk.W, tk.E), pady=(pad_m, 0))
-        _detect_btn = ttk.Button(btn_frame, text="Detect Card",
-                   command=lambda: self.on_detect_callback and self.on_detect_callback())
-        _detect_btn.pack(side=tk.LEFT, padx=(0, pad_s))
-        add_tooltip(_detect_btn, "Detect an inserted SIM card")
         _auth_btn = ttk.Button(btn_frame, text="Authenticate",
                    command=lambda: self.on_authenticate_callback and self.on_authenticate_callback())
         _auth_btn.pack(side=tk.LEFT)
@@ -76,16 +81,37 @@ class CardStatusPanel(ttk.LabelFrame):
         self.status_indicator.create_oval(2, 2, 10, 10, fill=color, outline=color)
         self.status_label.configure(text=message)
 
-    def set_card_info(self, card_type=None, imsi=None, iccid=None):
+    def set_card_info(self, card_type=None, imsi=None, iccid=None,
+                       source_file=None):
         if card_type is not None:
             self._info_vars['card_type'].set(card_type)
         if imsi is not None:
             self._info_vars['imsi'].set(imsi)
         if iccid is not None:
             self._info_vars['iccid'].set(iccid)
+        if source_file is not None:
+            import os
+            self._info_vars['source_file'].set(
+                os.path.basename(source_file) if source_file else '-')
 
     def set_auth_status(self, authenticated):
         self._info_vars['auth'].set('Yes' if authenticated else 'No')
+
+    def set_programmed_indicator(self, already_programmed):
+        """Show or hide the 'already programmed' warning."""
+        if already_programmed:
+            self._programmed_label.configure(
+                text="\u26a0 Already programmed (artifact exists)")
+            self._programmed_label.grid(
+                row=7, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+        else:
+            self._programmed_label.grid_remove()
+
+    def clear_card_info(self):
+        """Reset all info fields to defaults (card removed)."""
+        for var in self._info_vars.values():
+            var.set('-')
+        self._programmed_label.grid_remove()
 
     def set_simulator_info(self, card_index, total_cards):
         """Show or hide the virtual card indicator below the buttons."""
@@ -94,7 +120,7 @@ class CardStatusPanel(ttk.LabelFrame):
         if card_index is not None and total_cards is not None:
             self._sim_label.configure(
                 text=f"Virtual card {card_index + 1} of {total_cards}")
-            self._sim_label.grid(row=6, column=0, columnspan=2,
+            self._sim_label.grid(row=8, column=0, columnspan=2,
                                  sticky=tk.W, pady=(4, 0))
         else:
             self._sim_label.grid_remove()
