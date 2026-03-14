@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from dialogs.network_storage_dialog import _auto_name, _sanitise_server, _sanitise_share
 
+
 class TestSanitiseServer:
     def test_plain_hostname_unchanged(self):
         assert _sanitise_server("nas.local") == "nas.local"
