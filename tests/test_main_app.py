@@ -184,6 +184,13 @@ def _load_main():
             def has_unsaved_changes(self): return False
             def get_programmed_records(self): return []
             def load_csv_file(self, *a, **kw): return True
+            def set_standards_manager(self, *a): pass
+            def refresh_standards(self): pass
+            def on_card_detected(self, *a, **kw): pass
+            def on_card_removed(self): pass
+            def clear_card_info(self): pass
+            def set_programmed_indicator(self, *a): pass
+            on_card_programmed_callback = None
         FakePanel.__name__ = name
         return FakePanel
 
@@ -250,7 +257,8 @@ def _make_app(mod):
     with _mock.patch("managers.card_manager.CardManager") as cm_cls, \
          _mock.patch("managers.backup_manager.BackupManager"), \
          _mock.patch("managers.settings_manager.SettingsManager") as sm_cls, \
-         _mock.patch("managers.network_storage_manager.NetworkStorageManager") as nm_cls:
+         _mock.patch("managers.network_storage_manager.NetworkStorageManager") as nm_cls, \
+         _mock.patch("managers.standards_manager.StandardsManager"):
 
         cm = _mock.MagicMock()
         cm.cli_backend = _mock.MagicMock()
