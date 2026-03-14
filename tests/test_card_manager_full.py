@@ -101,7 +101,7 @@ class TestAuthenticateWithIccid:
         cm.card_info = {}
         ok, msg = cm.authenticate("12345678",
                                    expected_iccid="89999111111111111111")
-        # No card ICCID → skip check, proceed to auth stub
+        # No card ICCID -> skip check, proceed to auth stub
         assert ok is True
 
 
@@ -174,7 +174,7 @@ class TestReadCard:
         cm.authenticated = True
         cm.card_info = {}
         result = cm.read_card_data()
-        # Returns card_info (empty dict) since card_info is falsy → None
+        # Returns card_info (empty dict) since card_info is falsy -> None
         assert result is None
 
     def test_read_card_data_hardware_with_data(self):
@@ -245,7 +245,7 @@ class TestParsePysimOutput:
         output = (
             "IMSI: 001010123456789\n"
             "ICCID: 89860012345678901234\n"
-            "ADM1: 12345678\n"  # unknown key — ignored
+            "ADM1: 12345678\n"  # unknown key - ignored
         )
         cm._parse_pysim_output(output)
         assert cm.card_info["IMSI"] == "001010123456789"
@@ -310,7 +310,7 @@ class TestFindCliTool:
         with patch.dict(os.environ,
                         {"SYSMO_USIM_TOOL_PATH": "/nonexistent/path",
                          "PYSIM_PATH": ""}):
-            # The function should fall through — result depends on system
+            # The function should fall through - result depends on system
             path, backend = _find_cli_tool()
         # Can't assert a specific path, but it should not crash
 
@@ -320,7 +320,7 @@ class TestFindCliTool:
 # ---------------------------------------------------------------------------
 
 class TestRunCli:
-    """Tests for _run_cli() — the subprocess wrapper."""
+    """Tests for _run_cli() - the subprocess wrapper."""
 
     def test_run_cli_no_cli_path_returns_error(self):
         """_run_cli() returns failure when cli_path is None."""
@@ -413,7 +413,7 @@ class TestSetCliPath:
 
 
 # ---------------------------------------------------------------------------
-# detect_card — PYSIM path
+# detect_card - PYSIM path
 # ---------------------------------------------------------------------------
 
 class TestDetectCard:
@@ -439,7 +439,8 @@ class TestDetectCard:
                           return_value=(False, "", "No card")):
             ok, msg = cm.detect_card()
         assert ok is False
-        assert "No card" in msg
+        # _clean_pysim_error maps "No card" to a friendlier message
+        assert "card" in msg.lower()
 
     def test_detect_sysmo_all_fail(self, tmp_path):
         """detect_card() SYSMO: returns failure when all scripts fail."""
@@ -487,7 +488,7 @@ class TestVerifyCard:
         assert mismatches == []
 
     def test_simulator_match(self):
-        """verify_card() in simulator mode: matching data → success."""
+        """verify_card() in simulator mode: matching data -> success."""
         cm = _make_sim_manager()
         card = cm._simulator._current_card()
         cm.authenticate(card.adm1)
@@ -496,7 +497,7 @@ class TestVerifyCard:
         assert ok is True
 
     def test_simulator_mismatch(self):
-        """verify_card() in simulator mode: mismatched data → failure."""
+        """verify_card() in simulator mode: mismatched data -> failure."""
         cm = _make_sim_manager()
         ok, mismatches = cm.verify_card({"imsi": "wrong_value"})
         assert ok is False

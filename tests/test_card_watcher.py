@@ -21,6 +21,13 @@ class FakeCardManager:
         self.detect_call_count = 0
         self.read_iccid_count = 0
 
+    def probe_card_presence(self):
+        """Fast probe — mirrors detect_card for testing."""
+        self.detect_call_count += 1
+        if self.detect_ok:
+            return True, "3B 9F 96 80 1F"  # Fake ATR
+        return False, "No card in reader"
+
     def detect_card(self):
         self.detect_call_count += 1
         if self.detect_ok:
@@ -291,9 +298,9 @@ class TestCardWatcherCallbacks:
 
 class TestCardWatcherErrors:
     def test_on_error_fired(self):
-        """Error in detect_card -> on_error callback."""
+        """Error in probe -> on_error callback."""
         cm = FakeCardManager()
-        cm.detect_card = MagicMock(side_effect=RuntimeError("Reader fail"))
+        cm.probe_card_presence = MagicMock(side_effect=RuntimeError("Reader fail"))
 
         errors = []
         w = CardWatcher(cm, poll_interval=0.05)
@@ -466,17 +473,23 @@ class TestCheckOnce:
         assert len(count) == 1  # Only once
 
     def test_detect_ok_but_no_iccid(self):
-        """detect_card ok but read_iccid returns None -> no callback."""
+        """detect_card ok but read_iccid returns None -> on_card_unknown("").
+
+        This covers blank cards that are detected by the reader but have
+        no ICCID programmed yet.
+        """
         cm = FakeCardManager()
         cm.detect_ok = True
-        cm.iccid = None  # No ICCID available
+        cm.iccid = None  # No ICCID available (blank card)
 
-        count = []
+        received = []
         w = CardWatcher(cm)
-        w.on_card_unknown = lambda ic: count.append(1)
+        w.on_card_unknown = lambda ic: received.append(ic)
         w._check_once()
 
-        assert len(count) == 0
+        # Blank card should fire on_card_unknown with empty string
+        assert len(received) == 1
+        assert received[0] == ""
 
     def test_index_lookup_match_but_load_card_fails(self):
         """Index finds entry but load_card returns None -> no on_card_detected."""
