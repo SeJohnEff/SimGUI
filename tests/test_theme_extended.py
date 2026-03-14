@@ -7,7 +7,7 @@ Strategy: mock ttk.Style so no actual Tk window is needed.
 import os
 import platform
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 

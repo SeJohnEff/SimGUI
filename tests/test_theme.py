@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from theme import ModernTheme
 
-
 # ---------------------------------------------------------------------------
 # get_color()
 # ---------------------------------------------------------------------------
@@ -252,10 +251,11 @@ class TestPlatformFonts:
 
     def test_darwin_fonts(self):
         """Darwin platform returns SF Pro fonts."""
-        from unittest.mock import patch
         import platform as _platform
+        from unittest.mock import patch
         with patch.object(_platform, 'system', return_value='Darwin'):
             from importlib import reload
+
             import theme as theme_module
             reload(theme_module)
             fonts = theme_module._platform_fonts()
@@ -264,10 +264,11 @@ class TestPlatformFonts:
 
     def test_windows_fonts(self):
         """Windows platform returns Segoe UI fonts."""
-        from unittest.mock import patch
         import platform as _platform
+        from unittest.mock import patch
         with patch.object(_platform, 'system', return_value='Windows'):
             from importlib import reload
+
             import theme as theme_module
             reload(theme_module)
             fonts = theme_module._platform_fonts()
@@ -276,10 +277,11 @@ class TestPlatformFonts:
 
     def test_linux_fonts(self):
         """Linux platform returns DejaVu Sans fonts."""
-        from unittest.mock import patch
         import platform as _platform
+        from unittest.mock import patch
         with patch.object(_platform, 'system', return_value='Linux'):
             from importlib import reload
+
             import theme as theme_module
             reload(theme_module)
             fonts = theme_module._platform_fonts()
@@ -287,12 +289,13 @@ class TestPlatformFonts:
 
     def test_all_platforms_return_required_keys(self):
         """All platform font dicts have required keys."""
-        from unittest.mock import patch
         import platform as _platform
+        from unittest.mock import patch
         required = ('default', 'heading', 'subheading', 'small', 'mono')
         for plat in ('Darwin', 'Linux', 'Windows', 'FreeBSD'):
             with patch.object(_platform, 'system', return_value=plat):
                 from importlib import reload
+
                 import theme as theme_module
                 reload(theme_module)
                 fonts = theme_module._platform_fonts()
