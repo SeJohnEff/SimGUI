@@ -44,10 +44,48 @@ AVAHI_OUTPUT_SPECIAL_CHARS = """\
 =;eth0;IPv4;My NAS (Office);_smb._tcp;local;my-nas.local;192.168.1.30;445
 """
 
+# What avahi-browse outputs WITHOUT the -r flag: only "+" (found) lines,
+# no "=" (resolved) lines.  The parser should return nothing because
+# "+" lines don't contain hostnames or IPs.
+AVAHI_OUTPUT_UNRESOLVED_ONLY = """\
++;eth0;IPv4;NAS;_smb._tcp;local
++;eth0;IPv4;FileServer;_smb._tcp;local
++;eth0;IPv6;NAS;_smb._tcp;local
+"""
+
 NMBLOOKUP_OUTPUT_BASIC = """\
 querying *<00> on 192.168.1.255
 192.168.1.10 NAS<00>
 192.168.1.20 FILESERVER<00>
+"""
+
+# Real-world nmblookup -S '*' output from user's network.
+# The query result line has "*<00>" (broadcast char, not a real name).
+# The real name is in the status section.
+NMBLOOKUP_OUTPUT_BROADCAST_STAR = """\
+querying *<00> on 172.20.10.255
+172.20.10.2 *<00>
+Looking up status of 172.20.10.2
+\tFISKARHEDEN     <00> -         B <ACTIVE>
+\tFISKARHEDEN     <03> -         B <ACTIVE>
+\tFISKARHEDEN     <20> -         B <ACTIVE>
+\tWORKGROUP       <00> - <GROUP> B <ACTIVE>
+\tWORKGROUP       <1e> - <GROUP> B <ACTIVE>
+"""
+
+# Multiple servers discovered via broadcast, both with * names
+NMBLOOKUP_OUTPUT_MULTI_STAR = """\
+172.20.10.2 *<00>
+172.20.10.3 *<00>
+Looking up status of 172.20.10.2
+\tSERVER_A        <00> -         B <ACTIVE>
+Looking up status of 172.20.10.3
+\tSERVER_B        <00> -         B <ACTIVE>
+"""
+
+# Server with no status section — only IP should be shown
+NMBLOOKUP_OUTPUT_NO_STATUS = """\
+172.20.10.5 *<00>
 """
 
 NMBLOOKUP_OUTPUT_SINGLE = """\
@@ -129,6 +167,14 @@ class TestParseAvahiOutput:
         assert len(servers) == 1
         assert "My NAS (Office)" in servers[0].name
 
+    def test_unresolved_plus_lines_return_nothing(self):
+        """Without -r flag avahi only emits '+' (found) lines, not '='
+        (resolved) lines.  The parser must return zero servers because
+        '+' lines have no hostname or IP — this is the exact failure
+        mode the user hit."""
+        servers = _parse_avahi_output(AVAHI_OUTPUT_UNRESOLVED_ONLY)
+        assert servers == []
+
     def test_shares_default_empty(self):
         servers = _parse_avahi_output(AVAHI_OUTPUT_BASIC)
         for s in servers:
@@ -155,6 +201,36 @@ class TestParseNmblookupOutput:
         assert servers[0].hostname == "MYNAS"
         assert servers[0].ip == "192.168.1.10"
         assert "MYNAS" in servers[0].name
+
+    def test_broadcast_star_resolved_from_status(self):
+        """Bug fix: '*' from broadcast query must be replaced by real name
+        from the status section (e.g. FISKARHEDEN)."""
+        servers = _parse_nmblookup_output(NMBLOOKUP_OUTPUT_BROADCAST_STAR)
+        assert len(servers) == 1
+        srv = servers[0]
+        assert srv.ip == "172.20.10.2"
+        assert srv.hostname == "FISKARHEDEN"
+        assert "FISKARHEDEN" in srv.name
+        # Must NOT contain '*'
+        assert "*" not in srv.hostname
+        assert "*" not in srv.name
+
+    def test_multiple_broadcast_stars_resolved(self):
+        """Multiple servers all returning '*' — each resolved via status."""
+        servers = _parse_nmblookup_output(NMBLOOKUP_OUTPUT_MULTI_STAR)
+        assert len(servers) == 2
+        by_ip = {s.ip: s for s in servers}
+        assert by_ip["172.20.10.2"].hostname == "SERVER_A"
+        assert by_ip["172.20.10.3"].hostname == "SERVER_B"
+
+    def test_star_without_status_shows_ip(self):
+        """Server with '*' but no status section — falls back to IP."""
+        servers = _parse_nmblookup_output(NMBLOOKUP_OUTPUT_NO_STATUS)
+        assert len(servers) == 1
+        # hostname should be IP (fallback), not '*'
+        assert servers[0].hostname == "172.20.10.5"
+        assert servers[0].ip == "172.20.10.5"
+        assert "*" not in servers[0].name
 
     def test_empty_output(self):
         assert _parse_nmblookup_output("") == []
@@ -229,6 +305,18 @@ class TestRunCmd:
         assert ok is False
 
     @patch("utils.network_scanner.subprocess.run")
+    def test_nonzero_exit_still_returns_stdout(self, mock_run):
+        """Bug fix: stdout must be returned even when rc != 0.
+        smbclient -L prints shares but often exits with rc=1."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["smbclient"], returncode=1,
+            stdout=SMBCLIENT_OUTPUT_BASIC, stderr="NT_STATUS_ACCESS_DENIED",
+        )
+        ok, out = _run_cmd(["smbclient", "-L", "//server"])
+        assert ok is False
+        assert "SimData" in out  # stdout is preserved despite rc=1
+
+    @patch("utils.network_scanner.subprocess.run")
     def test_os_error(self, mock_run):
         mock_run.side_effect = OSError("Permission denied")
         ok, out = _run_cmd(["cmd"])
@@ -254,6 +342,22 @@ class TestScanSmbServers:
 
         servers = scan_smb_servers(timeout=5)
         assert len(servers) == 2
+
+    @patch("utils.network_scanner._run_cmd")
+    def test_avahi_uses_resolve_flag(self, mock_cmd):
+        """Bug fix: avahi-browse must include -r for resolution."""
+        mock_cmd.return_value = (False, "")
+        scan_smb_servers(timeout=5)
+        # Find the avahi-browse call
+        avahi_call = [
+            c for c in mock_cmd.call_args_list
+            if c[0][0][0] == "avahi-browse"
+        ]
+        assert avahi_call, "avahi-browse was not called"
+        avahi_args = avahi_call[0][0][0]
+        # The flags arg should contain 'r'
+        flags_arg = avahi_args[1]  # e.g. "-tpkr"
+        assert "r" in flags_arg, f"Missing -r in avahi-browse flags: {avahi_args}"
 
     @patch("utils.network_scanner._run_cmd")
     def test_nmblookup_fallback(self, mock_cmd):
@@ -352,6 +456,22 @@ class TestListSmbShares:
 
     @patch("utils.network_scanner._run_cmd")
     def test_server_unreachable(self, mock_cmd):
+        mock_cmd.return_value = (False, "")
+        shares = list_smb_shares("10.0.0.99")
+        assert shares == []
+
+    @patch("utils.network_scanner._run_cmd")
+    def test_nonzero_rc_with_valid_shares(self, mock_cmd):
+        """Bug fix: smbclient -L returns rc=1 but prints valid shares.
+        list_smb_shares must parse stdout regardless of exit code."""
+        mock_cmd.return_value = (False, SMBCLIENT_OUTPUT_BASIC)
+        shares = list_smb_shares("192.168.1.10")
+        assert "SimData" in shares
+        assert "public" in shares
+
+    @patch("utils.network_scanner._run_cmd")
+    def test_nonzero_rc_empty_stdout(self, mock_cmd):
+        """rc=1 and no stdout — should return empty list."""
         mock_cmd.return_value = (False, "")
         shares = list_smb_shares("10.0.0.99")
         assert shares == []
