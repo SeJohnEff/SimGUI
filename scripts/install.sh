@@ -84,6 +84,43 @@ if ! dpkg -s simgui >/dev/null 2>&1; then
     exit 1
 fi
 
+# --- Install pySim -----------------------------------------------
+PYSIM_DIR="/opt/pysim"
+PYSIM_REPO="https://gitea.osmocom.org/sim-card/pysim.git"
+
+if [ -d "$PYSIM_DIR" ] && [ -f "$PYSIM_DIR/pySim-shell.py" ]; then
+    info "pySim already installed at $PYSIM_DIR — updating..."
+    cd "$PYSIM_DIR" && git pull --quiet 2>&1 || warn "pySim update failed (continuing with existing version)"
+else
+    info "Installing pySim to $PYSIM_DIR..."
+    rm -rf "$PYSIM_DIR"
+    if ! git clone --depth 1 "$PYSIM_REPO" "$PYSIM_DIR" 2>&1; then
+        warn "pySim clone failed — SimGUI will run in simulator-only mode."
+        warn "You can install pySim manually later: git clone $PYSIM_REPO $PYSIM_DIR"
+    fi
+fi
+
+# Set up pySim venv with dependencies
+if [ -d "$PYSIM_DIR" ] && [ -f "$PYSIM_DIR/pySim-shell.py" ]; then
+    info "Setting up pySim virtual environment..."
+    # Ensure python3-venv is available
+    apt-get install -y -qq python3-venv 2>&1 | grep -v "is already the newest" || true
+    if [ ! -d "$PYSIM_DIR/.venv" ]; then
+        python3 -m venv "$PYSIM_DIR/.venv" 2>&1
+    fi
+    # Install pySim dependencies into the venv
+    if [ -f "$PYSIM_DIR/requirements.txt" ]; then
+        "$PYSIM_DIR/.venv/bin/pip" install --quiet -r "$PYSIM_DIR/requirements.txt" 2>&1 || \
+            warn "Some pySim dependencies failed to install"
+    fi
+    # Also install pySim itself in editable mode if setup.py exists
+    if [ -f "$PYSIM_DIR/setup.py" ] || [ -f "$PYSIM_DIR/pyproject.toml" ]; then
+        "$PYSIM_DIR/.venv/bin/pip" install --quiet -e "$PYSIM_DIR" 2>&1 || \
+            warn "pySim package install failed"
+    fi
+    info "pySim ready at $PYSIM_DIR"
+fi
+
 # --- Done -------------------------------------------------------
 VERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo "unknown")
 info "SimGUI $VERSION installed successfully."

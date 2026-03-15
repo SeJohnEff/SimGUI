@@ -52,7 +52,12 @@ class SimGUIApp:
 
     def __init__(self):
         self.root = tk.Tk(className="simgui")
-        self.root.title(f"SimGUI {__version__} - SIM Card Programmer")
+        self._git_hash = self._get_git_hash()
+        title = f"SimGUI {__version__}"
+        if self._git_hash:
+            title += f" ({self._git_hash})"
+        title += " — SIM Card Programmer"
+        self.root.title(title)
         self.root.geometry("1024x700")
         self.root.minsize(800, 500)
 
@@ -151,6 +156,22 @@ class SimGUIApp:
 
         # Show persistent share indicator
         self._refresh_share_indicator()
+
+    @staticmethod
+    def _get_git_hash() -> str:
+        """Return short git commit hash, or empty string if unavailable."""
+        import subprocess as _sp
+        try:
+            r = _sp.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=3,
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+            )
+            if r.returncode == 0:
+                return r.stdout.strip()
+        except Exception:
+            pass
+        return ""
 
     # ---- Layout -----------------------------------------------------------
 
@@ -829,6 +850,11 @@ class SimGUIApp:
             self._card_manager.disable_simulator()
             self._update_sim_menu_state(tk.DISABLED)
             self._card_panel.set_simulator_info(None, None)
+            # Clear all simulator state from UI
+            self._card_panel.set_status("waiting", "Insert a SIM card...")
+            self._card_panel.clear_card_info()
+            self._program_panel.on_card_removed()
+            self._read_panel.refresh()
             self._card_watcher.resume()  # Resume hardware polling
             self._status_var.set("Hardware mode active")
             # Check for reader and attempt initial card detection
@@ -881,7 +907,8 @@ class SimGUIApp:
 
     def _on_network_storage(self):
         """Open the network storage connection dialog."""
-        NetworkStorageDialog(self.root, self._ns_manager)
+        dlg = NetworkStorageDialog(self.root, self._ns_manager)
+        self.root.wait_window(dlg)
         # Rescan after dialog closes — shares may have been mounted/unmounted
         self._rescan_iccid_index()
         self._refresh_share_indicator()
@@ -912,20 +939,9 @@ class SimGUIApp:
                              default_fields)
 
     def _on_about(self):
-        import subprocess as _sp
-        git_hash = ""
-        try:
-            r = _sp.run(["git", "rev-parse", "--short", "HEAD"],
-                        capture_output=True, text=True, timeout=3,
-                        cwd=os.path.dirname(os.path.abspath(__file__)))
-            if r.returncode == 0:
-                git_hash = r.stdout.strip()
-        except Exception:
-            pass
-
         version_line = f"Version {__version__}"
-        if git_hash:
-            version_line += f"  (commit {git_hash})"
+        if self._git_hash:
+            version_line += f"  (commit {self._git_hash})"
 
         show_info_dialog(
             self.root,

@@ -167,7 +167,7 @@ def _parse_sysmocom_body(body: str) -> tuple[list[dict[str, str]],
     if not cards:
         raise ValueError("No card data found after the field headers.")
 
-    logger.info("Parsed %d card(s) from sysmocom email", len(cards))
+    logger.debug("Parsed %d card(s) from sysmocom email", len(cards))
     return cards, meta
 
 

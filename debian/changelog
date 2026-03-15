@@ -1,3 +1,17 @@
+simgui (0.5.0-1) unstable; urgency=low
+
+  * Real pySim integration: authenticate, program with change tracking.
+  * pySim included in install.sh (cloned to /opt/pysim with venv).
+  * Already-programmed popup with previous IMSI on card detect.
+  * ICCID read-only for non-empty cards.
+  * Git commit hash shown in title bar.
+  * Fix share icon not updating after connect.
+  * Fix hardware mode not clearing simulator state.
+  * ICCID index caching to avoid re-parsing unchanged files.
+  * Auto-artifact per-card CSV on every programming.
+
+ -- SimGUI Developers <simgui@example.com>  Sat, 15 Mar 2026 14:00:00 +0100
+
 simgui (0.2.0-1) unstable; urgency=low
 
   * Add Read SIM, Program SIM, and Batch Program workflow tabs.

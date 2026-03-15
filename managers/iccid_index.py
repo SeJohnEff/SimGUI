@@ -241,6 +241,20 @@ class IccidIndex:
                 result.entries_created += 1
                 result.total_cards += count
 
+        if result.files_scanned > 0:
+            logger.info(
+                "ICCID index scan: %d files parsed, %d skipped, "
+                "%d cards in %d range(s)%s",
+                result.files_scanned, result.files_skipped,
+                result.total_cards, result.entries_created,
+                f" ({len(result.errors)} errors)" if result.errors else "",
+            )
+        elif result.files_skipped > 0:
+            logger.debug(
+                "ICCID index scan: all %d files up-to-date (cache hit)",
+                result.files_skipped,
+            )
+
         return result
 
     def lookup(self, iccid: str) -> Optional[IndexEntry]:
