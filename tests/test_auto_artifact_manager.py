@@ -332,3 +332,94 @@ class TestWasAlreadyProgrammed:
     def test_false_with_no_manager(self):
         mgr = AutoArtifactManager(None)
         assert mgr.was_already_programmed("ICCID_X") is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_previous_programming_info
+# ---------------------------------------------------------------------------
+
+class TestGetPreviousProgrammingInfo:
+    def _write_artifact(self, artifact_dir, iccid, timestamp, imsi="999880001000001"):
+        """Write a minimal artifact CSV and return its path."""
+        fname = f"{iccid}_{timestamp}.csv"
+        path = os.path.join(artifact_dir, fname)
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=["ICCID", "IMSI", "ADM1", "programmed_at"])
+            writer.writeheader()
+            writer.writerow({
+                "ICCID": iccid,
+                "IMSI": imsi,
+                "ADM1": "3838383838383838",
+                "programmed_at": f"2026-03-14T{timestamp.split('_')[1][:2]}:00:00",
+            })
+        return path
+
+    def test_returns_none_when_no_artifact(self, tmp_path):
+        mount = str(tmp_path / "share")
+        artifact_dir = os.path.join(mount, AUTO_ARTIFACT_DIR)
+        os.makedirs(artifact_dir)
+
+        ns = FakeNSManager([("Share", mount)])
+        mgr = AutoArtifactManager(ns)
+
+        assert mgr.get_previous_programming_info("ICCID_MISSING") is None
+
+    def test_returns_none_with_no_manager(self):
+        mgr = AutoArtifactManager(None)
+        assert mgr.get_previous_programming_info("ICCID_X") is None
+
+    def test_returns_data_from_single_artifact(self, tmp_path):
+        mount = str(tmp_path / "share")
+        artifact_dir = os.path.join(mount, AUTO_ARTIFACT_DIR)
+        os.makedirs(artifact_dir)
+
+        self._write_artifact(artifact_dir, "ICCID_E", "20260314_100000", imsi="111222333")
+
+        ns = FakeNSManager([("Share", mount)])
+        mgr = AutoArtifactManager(ns)
+
+        info = mgr.get_previous_programming_info("ICCID_E")
+        assert info is not None
+        assert info["ICCID"] == "ICCID_E"
+        assert info["IMSI"] == "111222333"
+        assert "programmed_at" in info
+        assert "_artifact_path" in info
+
+    def test_returns_most_recent_artifact(self, tmp_path):
+        mount = str(tmp_path / "share")
+        artifact_dir = os.path.join(mount, AUTO_ARTIFACT_DIR)
+        os.makedirs(artifact_dir)
+
+        self._write_artifact(artifact_dir, "ICCID_F", "20260314_090000", imsi="OLD_IMSI")
+        self._write_artifact(artifact_dir, "ICCID_F", "20260314_150000", imsi="NEW_IMSI")
+
+        ns = FakeNSManager([("Share", mount)])
+        mgr = AutoArtifactManager(ns)
+
+        info = mgr.get_previous_programming_info("ICCID_F")
+        assert info is not None
+        assert info["IMSI"] == "NEW_IMSI"  # Must be the later one
+
+    def test_returns_none_for_empty_iccid(self, tmp_path):
+        mount = str(tmp_path / "share")
+        artifact_dir = os.path.join(mount, AUTO_ARTIFACT_DIR)
+        os.makedirs(artifact_dir)
+
+        ns = FakeNSManager([("Share", mount)])
+        mgr = AutoArtifactManager(ns)
+
+        assert mgr.get_previous_programming_info("") is None
+
+    def test_artifact_path_included(self, tmp_path):
+        mount = str(tmp_path / "share")
+        artifact_dir = os.path.join(mount, AUTO_ARTIFACT_DIR)
+        os.makedirs(artifact_dir)
+
+        written_path = self._write_artifact(
+            artifact_dir, "ICCID_G", "20260314_120000")
+
+        ns = FakeNSManager([("Share", mount)])
+        mgr = AutoArtifactManager(ns)
+
+        info = mgr.get_previous_programming_info("ICCID_G")
+        assert info["_artifact_path"] == written_path

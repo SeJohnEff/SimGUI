@@ -518,6 +518,31 @@ class SimGUIApp:
             logger.info("Standards: loaded from %d share(s)", loaded)
         self._batch_panel.refresh_standards()
 
+    def _check_already_programmed(self, iccid: str) -> bool:
+        """Check artifact dir for prior programming and show a popup if found.
+
+        Returns True if the card was previously programmed.
+        """
+        if not iccid:
+            return False
+        prev = self._auto_artifact.get_previous_programming_info(iccid)
+        if prev is None:
+            return False
+        prev_imsi = prev.get("IMSI", "unknown")
+        prev_time = prev.get("programmed_at", "unknown")
+        prev_file = os.path.basename(prev.get("_artifact_path", ""))
+        show_info_dialog(
+            self.root,
+            "Already Programmed",
+            f"This card has been programmed before.\n\n"
+            f"ICCID: {iccid}\n"
+            f"Previous IMSI: {prev_imsi}\n"
+            f"Programmed at: {prev_time}\n"
+            f"Artifact: {prev_file}\n\n"
+            f"You can continue \u2014 this is just an informational warning.",
+        )
+        return True
+
     def _on_auto_card_detected(self, iccid, card_data, file_path):
         """Card inserted and matched in index (runs on main thread)."""
         self._card_panel.set_status("detected", f"Card detected: {iccid}")
@@ -527,8 +552,8 @@ class SimGUIApp:
             source_file=file_path,
         )
         self._card_panel.set_auth_status(False)
-        # Check if already programmed
-        already = self._auto_artifact.was_already_programmed(iccid)
+        # Check if already programmed — show popup warning with previous IMSI
+        already = self._check_already_programmed(iccid)
         self._card_panel.set_programmed_indicator(already)
         # Auto-populate Program SIM tab
         self._program_panel.on_card_detected(iccid, card_data, file_path)
@@ -551,7 +576,11 @@ class SimGUIApp:
         self._card_panel.set_card_info(
             iccid=iccid or "(blank)", source_file=None)
         self._card_panel.set_auth_status(False)
-        self._card_panel.set_programmed_indicator(False)
+
+        # Check if already programmed even though not in the ICCID index
+        already = self._check_already_programmed(iccid)
+        self._card_panel.set_programmed_indicator(already)
+
         self._program_panel.on_card_detected(iccid)
         # Sync the Read SIM tab — card_info has ICCID/IMSI from detect
         self._read_panel.refresh()

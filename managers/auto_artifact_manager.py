@@ -131,3 +131,30 @@ class AutoArtifactManager:
     def was_already_programmed(self, iccid: str) -> bool:
         """Check if an auto-artifact already exists for this ICCID."""
         return bool(self.find_existing_artifacts(iccid))
+
+    def get_previous_programming_info(self, iccid: str) -> Optional[dict[str, str]]:
+        """Load the most recent artifact data for *iccid*.
+
+        Returns a dict with at least ``IMSI``, ``programmed_at``, and the
+        artifact file path (key ``_artifact_path``).  Returns ``None`` if
+        no artifact exists.
+        """
+        paths = self.find_existing_artifacts(iccid)
+        if not paths:
+            return None
+
+        # Pick the most recent file (lexicographic sort works because the
+        # filename embeds a YYYYMMDD_HHMMSS timestamp).
+        paths.sort(reverse=True)
+        latest = paths[0]
+
+        try:
+            with open(latest, newline="", encoding="utf-8") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    row["_artifact_path"] = latest
+                    return dict(row)
+        except (OSError, csv.Error) as exc:
+            logger.warning("Could not read artifact %s: %s", latest, exc)
+
+        return None

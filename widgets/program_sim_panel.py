@@ -49,6 +49,7 @@ class ProgramSIMPanel(ttk.Frame):
         self._field_entries: dict[str, ttk.Entry] = {}
         self._step = 0  # 0=ready, 1=detected, 2=authenticated
         self._original_form_data: dict[str, str] = {}  # baseline for change tracking
+        self._detected_non_empty: bool = False  # True when a card with ICCID is detected
 
         # Callback set by main.py for cross-tab sync
         self.on_csv_loaded_callback = None
@@ -206,7 +207,11 @@ class ProgramSIMPanel(ttk.Frame):
 
         # All fields editable for manual and read_card modes
         for key, _, editable_csv in _FORM_FIELDS:
-            state = "normal" if (not is_csv or editable_csv) else "readonly"
+            if key == "ICCID" and self._detected_non_empty:
+                # ICCID is always read-only for non-empty cards
+                state = "readonly"
+            else:
+                state = "normal" if (not is_csv or editable_csv) else "readonly"
             self._field_entries[key].configure(state=state)
 
         if is_read_card:
@@ -324,10 +329,16 @@ class ProgramSIMPanel(ttk.Frame):
 
         If *card_data* is provided the form fields are auto-populated.
         The data is also saved as the baseline for change tracking.
+
+        For non-empty cards (with an ICCID), ICCID is forced read-only
+        because it comes from the factory and is used for traceability.
         """
         self._step = 1
         self._auth_btn.configure(state=tk.NORMAL)
         self._prog_btn.configure(state=tk.DISABLED)
+
+        # Track whether this is a non-empty card
+        self._detected_non_empty = bool(iccid)
 
         if card_data:
             # Auto-populate all form fields from the indexed data
@@ -354,12 +365,22 @@ class ProgramSIMPanel(ttk.Frame):
                 text=f"Card detected (ICCID {iccid}) \u2014 not in index, enter data manually",
                 style="Warning.TLabel")
 
+        # Enforce ICCID read-only for non-empty cards (factory-assigned,
+        # used for traceability — must never be changed).
+        if self._detected_non_empty:
+            self._field_entries["ICCID"].configure(state="readonly")
+        else:
+            self._field_entries["ICCID"].configure(state="normal")
+
     def on_card_removed(self):
         """Called by CardWatcher when the card is removed."""
         self._reset_step()
         self._original_form_data = {}
+        self._detected_non_empty = False
         for key, _, _ in _FORM_FIELDS:
             self._field_vars[key].set("")
+        # Restore ICCID to editable (will be locked again on next detect)
+        self._field_entries["ICCID"].configure(state="normal")
 
     def _on_authenticate(self):
         if self._step < 1:

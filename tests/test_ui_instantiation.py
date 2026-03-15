@@ -91,7 +91,7 @@ class _FakeWidget:
     def protocol(self, *a, **kw): pass
     def place(self, **kw): pass
     def select_range(self, *a): pass
-    def cget(self, k): return ""
+    def cget(self, k): return self._cfg.get(k, "")
     def start(self, *a): pass
     def stop(self): pass
     def mainloop(self): pass
@@ -793,6 +793,52 @@ class TestProgramSIMPanelInstantiation:
         panel._csv.get_card = _mock.MagicMock(return_value={
             "ICCID": "89001", "IMSI": "99988", "ADM1": "12345678"})
         panel._refresh_card_tree()
+
+    # --- ICCID read-only enforcement for non-empty cards ---
+
+    def test_iccid_readonly_on_non_empty_detect(self):
+        """ICCID must become readonly when a non-empty card is detected."""
+        mod, panel, cm = self._make_panel()
+        card_data = {"ICCID": "89001", "IMSI": "99988", "ADM1": "88888888"}
+        panel.on_card_detected("89001", card_data, "/tmp/test.csv")
+        state = str(panel._field_entries["ICCID"].cget("state"))
+        assert state == "readonly"
+
+    def test_iccid_editable_on_empty_detect(self):
+        """ICCID must remain editable for blank cards."""
+        mod, panel, cm = self._make_panel()
+        panel.on_card_detected("")  # blank card
+        state = str(panel._field_entries["ICCID"].cget("state"))
+        assert state == "normal"
+
+    def test_iccid_readonly_survives_mode_change(self):
+        """Switching to manual mode must not unlock ICCID for non-empty card."""
+        mod, panel, cm = self._make_panel()
+        card_data = {"ICCID": "89001", "IMSI": "99988", "ADM1": "88888888"}
+        panel.on_card_detected("89001", card_data, "/tmp/test.csv")
+        panel._mode_var.set("manual")
+        panel._on_mode_change()
+        state = str(panel._field_entries["ICCID"].cget("state"))
+        assert state == "readonly"
+
+    def test_iccid_editable_after_card_removed(self):
+        """Card removal must restore ICCID to editable."""
+        mod, panel, cm = self._make_panel()
+        card_data = {"ICCID": "89001", "IMSI": "99988", "ADM1": "88888888"}
+        panel.on_card_detected("89001", card_data, "/tmp/test.csv")
+        panel.on_card_removed()
+        state = str(panel._field_entries["ICCID"].cget("state"))
+        assert state == "normal"
+
+    def test_detected_non_empty_flag_set(self):
+        """The _detected_non_empty flag must track card state."""
+        mod, panel, cm = self._make_panel()
+        assert panel._detected_non_empty is False
+        card_data = {"ICCID": "89001", "IMSI": "99988"}
+        panel.on_card_detected("89001", card_data, "/tmp/f.csv")
+        assert panel._detected_non_empty is True
+        panel.on_card_removed()
+        assert panel._detected_non_empty is False
 
 
 # ---------------------------------------------------------------------------
