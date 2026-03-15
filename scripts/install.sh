@@ -2,7 +2,8 @@
 # ---------------------------------------------------------------
 #  SimGUI installer — run on a fresh Ubuntu 22.04+ desktop:
 #
-#    curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+#  Latest:   curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
+#  Specific: curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash -s -- v0.5.1
 #
 #  What it does:
 #    1. Installs build dependencies (git, dpkg-dev, debhelper)
@@ -16,7 +17,9 @@
 set -eo pipefail
 
 REPO_URL="https://github.com/SeJohnEff/SimGUI.git"
-BRANCH="main"
+# Install a specific version:  curl ... | sudo bash -s -- v0.5.1
+# or latest:                   curl ... | sudo bash
+BRANCH="${1:-main}"
 
 # --- Colours (if terminal supports them) -----------------------
 if [ -t 1 ]; then
@@ -55,9 +58,14 @@ if ! git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$BUILD_DIR/SimGUI" 2>&1
     exit 1
 fi
 
+# --- Bake build hash into source --------------------------------
+cd "$BUILD_DIR/SimGUI"
+BUILD_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+echo "$BUILD_HASH" > BUILD
+info "Build hash: $BUILD_HASH"
+
 # --- Build .deb -------------------------------------------------
 info "Building .deb package..."
-cd "$BUILD_DIR/SimGUI"
 BUILD_LOG="$BUILD_DIR/build.log"
 if ! dpkg-buildpackage -us -uc -b > "$BUILD_LOG" 2>&1; then
     error "Build failed. Last 30 lines of build log:"

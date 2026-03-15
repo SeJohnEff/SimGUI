@@ -787,6 +787,38 @@ class TestProgramSIMPanelInstantiation:
         panel._card_tree.selection = lambda: []
         panel._on_card_select()
 
+    def test_csv_select_preserves_card_detected_state(self):
+        """Selecting a CSV row when card is detected keeps step=1.
+
+        Bug fix: previously _on_card_select called _reset_step() which
+        showed 'Insert a SIM card...' even with a card present.
+        """
+        mod, panel, cm = self._make_panel()
+        # Simulate card detection (step=1)
+        panel.on_card_detected("89001")
+        assert panel._step == 1
+        # Load a CSV and select a row
+        panel._csv.get_card = _mock.MagicMock(return_value={
+            "ICCID": "89002", "IMSI": "99989", "ADM1": "88888888",
+            "Ki": "AA", "OPc": "BB", "ACC": "0001", "SPN": "TEST", "FPLMN": "",
+        })
+        panel._card_tree.selection = lambda: ["0"]
+        panel._on_card_select()
+        # Should remain at step 1, not reset to 0
+        assert panel._step == 1
+
+    def test_csv_select_resets_when_no_card(self):
+        """Selecting a CSV row when no card is present resets to step 0."""
+        mod, panel, cm = self._make_panel()
+        assert panel._step == 0
+        panel._csv.get_card = _mock.MagicMock(return_value={
+            "ICCID": "89002", "IMSI": "99989", "ADM1": "88888888",
+            "Ki": "AA", "OPc": "BB", "ACC": "0001", "SPN": "TEST", "FPLMN": "",
+        })
+        panel._card_tree.selection = lambda: ["0"]
+        panel._on_card_select()
+        assert panel._step == 0
+
     def test_refresh_card_tree(self):
         mod, panel, cm = self._make_panel()
         panel._csv.get_card_count = _mock.MagicMock(return_value=2)

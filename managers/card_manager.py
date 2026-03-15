@@ -837,7 +837,12 @@ class CardManager:
         return "Card read failed"
 
     def _parse_pysim_output(self, output: str):
-        """Parse pySim-read output for card info."""
+        """Parse pySim-read output for card info.
+
+        Extracts ICCID, IMSI, ACC, SPN, and FPLMN from pySim-read.py
+        output.  These are public fields that don't require ADM1 auth.
+        """
+        fplmn_values: list[str] = []
         for line in output.splitlines():
             if ':' not in line:
                 continue
@@ -854,3 +859,13 @@ class CardManager:
                 self.card_info['IMSI'] = val
             elif 'ICCID' in key:
                 self.card_info['ICCID'] = val
+            elif key == 'ACC' or 'ACCESS CONTROL' in key:
+                self.card_info['ACC'] = val
+            elif key == 'SPN' or 'SERVICE PROVIDER' in key:
+                self.card_info['SPN'] = val
+            elif 'FPLMN' in key or 'FORBIDDEN' in key:
+                # pySim may output multiple FPLMN lines or a single one
+                if val and val.lower() not in ('none', 'empty', 'ffffff'):
+                    fplmn_values.append(val)
+        if fplmn_values:
+            self.card_info['FPLMN'] = ';'.join(fplmn_values)

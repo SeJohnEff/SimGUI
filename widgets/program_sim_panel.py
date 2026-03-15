@@ -313,7 +313,18 @@ class ProgramSIMPanel(ttk.Frame):
             if key == "OPc" and not val:
                 val = card.get("OPC", "")
             self._field_vars[key].set(val)
-        self._reset_step()
+        # If a card is already inserted (step >= 1), keep that state
+        # so the user can authenticate.  Only reset if no card is present.
+        if self._step >= 1:
+            # Card is present — re-enable authenticate, update status
+            self._auth_btn.configure(state=tk.NORMAL)
+            self._prog_btn.configure(state=tk.DISABLED)
+            self._step = 1  # reset to "detected" (need re-auth after data change)
+            self._action_status.configure(
+                text="CSV row selected \u2014 ready to authenticate",
+                style="Success.TLabel")
+        else:
+            self._reset_step()
 
     # ---- 2-step flow (auto-detect replaces manual Detect) ---------------
 

@@ -1,3 +1,13 @@
+simgui (0.5.1-1) unstable; urgency=low
+
+  * Build hash baked into BUILD file — visible in title bar and About.
+  * Card Status panel: added ACC, SPN, FPLMN fields read from card.
+  * Parse ACC, SPN, FPLMN from pySim-read output.
+  * Fix: CSV row selection no longer resets 'Insert SIM' when card present.
+  * Versioned installs via: sudo bash -s -- v0.5.1
+
+ -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 16:30:00 +0100
+
 simgui (0.5.0-1) unstable; urgency=low
 
   * Real pySim integration: authenticate, program with change tracking.

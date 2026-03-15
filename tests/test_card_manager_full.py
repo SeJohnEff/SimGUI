@@ -282,6 +282,47 @@ class TestParsePysimOutput:
         cm._parse_pysim_output("ICCID: 89860012345678901234:extra")
         assert cm.card_info["ICCID"] == "89860012345678901234:extra"
 
+    def test_parse_acc(self):
+        """Parser extracts ACC from pySim-read output."""
+        cm = CardManager()
+        cm._parse_pysim_output("ACC: 0001")
+        assert cm.card_info["ACC"] == "0001"
+
+    def test_parse_spn(self):
+        """Parser extracts SPN from pySim-read output."""
+        cm = CardManager()
+        cm._parse_pysim_output("SPN: BOLIDEN")
+        assert cm.card_info["SPN"] == "BOLIDEN"
+
+    def test_parse_fplmn(self):
+        """Parser extracts FPLMN from pySim-read output."""
+        cm = CardManager()
+        cm._parse_pysim_output("FPLMN: 24007")
+        assert cm.card_info["FPLMN"] == "24007"
+
+    def test_parse_all_new_fields(self):
+        """Parser extracts ACC, SPN, FPLMN alongside IMSI and ICCID."""
+        cm = CardManager()
+        output = (
+            "ICCID: 89860012345678901234\n"
+            "IMSI: 001010123456789\n"
+            "ACC: 0004\n"
+            "SPN: MyProvider\n"
+            "FPLMN: 24001\n"
+        )
+        cm._parse_pysim_output(output)
+        assert cm.card_info["ICCID"] == "89860012345678901234"
+        assert cm.card_info["IMSI"] == "001010123456789"
+        assert cm.card_info["ACC"] == "0004"
+        assert cm.card_info["SPN"] == "MyProvider"
+        assert cm.card_info["FPLMN"] == "24001"
+
+    def test_parse_fplmn_ignores_empty(self):
+        """Parser ignores FPLMN lines with 'ffffff' (empty)."""
+        cm = CardManager()
+        cm._parse_pysim_output("FPLMN: ffffff")
+        assert "FPLMN" not in cm.card_info
+
 
 # ---------------------------------------------------------------------------
 # _find_cli_tool and CLI backend detection

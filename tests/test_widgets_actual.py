@@ -265,8 +265,13 @@ class TestCardStatusPanelMethods:
                     "card_type": self._FakeVar(),
                     "imsi": self._FakeVar(),
                     "iccid": self._FakeVar(),
+                    "acc": self._FakeVar(),
+                    "spn": self._FakeVar(),
+                    "fplmn": self._FakeVar(),
                     "auth": self._FakeVar(),
+                    "source_file": self._FakeVar(),
                 }
+                self._num_info_rows = 8
                 self.status_indicator = _FakeWidget()
                 self.status_indicator.delete = lambda *a: None
                 self.status_indicator.create_oval = lambda *a, **kw: 1

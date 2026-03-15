@@ -388,8 +388,13 @@ def _make_fake_panel():
                 "card_type": _FakeVar("-"),
                 "imsi": _FakeVar("-"),
                 "iccid": _FakeVar("-"),
+                "acc": _FakeVar("-"),
+                "spn": _FakeVar("-"),
+                "fplmn": _FakeVar("-"),
                 "auth": _FakeVar("-"),
+                "source_file": _FakeVar("-"),
             }
+            self._num_info_rows = 8
             self.status_indicator = _FakeWidget()
             self.status_label = _FakeWidget()
 

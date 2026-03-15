@@ -159,17 +159,29 @@ class SimGUIApp:
 
     @staticmethod
     def _get_git_hash() -> str:
-        """Return short git commit hash, or empty string if unavailable."""
+        """Return short git commit hash, or empty string if unavailable.
+
+        Tries git first (for development), then falls back to the BUILD
+        file that is baked at release time (for installed copies).
+        """
+        app_dir = os.path.dirname(os.path.abspath(__file__))
         import subprocess as _sp
         try:
             r = _sp.run(
                 ["git", "rev-parse", "--short", "HEAD"],
                 capture_output=True, text=True, timeout=3,
-                cwd=os.path.dirname(os.path.abspath(__file__)),
+                cwd=app_dir,
             )
             if r.returncode == 0:
                 return r.stdout.strip()
         except Exception:
+            pass
+        # Fallback: BUILD file written at release time
+        build_file = os.path.join(app_dir, "BUILD")
+        try:
+            with open(build_file, "r") as fh:
+                return fh.read().strip()
+        except OSError:
             pass
         return ""
 
@@ -566,10 +578,14 @@ class SimGUIApp:
 
     def _on_auto_card_detected(self, iccid, card_data, file_path):
         """Card inserted and matched in index (runs on main thread)."""
+        hw = self._card_manager.card_info  # live data read from card
         self._card_panel.set_status("detected", f"Card detected: {iccid}")
         self._card_panel.set_card_info(
-            imsi=card_data.get("IMSI"),
+            imsi=hw.get("IMSI") or card_data.get("IMSI"),
             iccid=iccid,
+            acc=hw.get("ACC", card_data.get("ACC", "-")),
+            spn=hw.get("SPN", card_data.get("SPN", "-")),
+            fplmn=hw.get("FPLMN", card_data.get("FPLMN", "-")),
             source_file=file_path,
         )
         self._card_panel.set_auth_status(False)
@@ -594,8 +610,15 @@ class SimGUIApp:
         else:
             status_msg = "Blank card detected (no ICCID)"
         self._card_panel.set_status("detected", status_msg)
+        hw = self._card_manager.card_info  # live data read from card
         self._card_panel.set_card_info(
-            iccid=iccid or "(blank)", source_file=None)
+            imsi=hw.get("IMSI", "-"),
+            iccid=iccid or "(blank)",
+            acc=hw.get("ACC", "-"),
+            spn=hw.get("SPN", "-"),
+            fplmn=hw.get("FPLMN", "-"),
+            source_file=None,
+        )
         self._card_panel.set_auth_status(False)
 
         # Check if already programmed even though not in the ICCID index
@@ -786,6 +809,9 @@ class SimGUIApp:
                 card_type=self._card_manager.card_type.name,
                 imsi=info.get('IMSI'),
                 iccid=info.get('ICCID'),
+                acc=info.get('ACC', '-'),
+                spn=info.get('SPN', '-'),
+                fplmn=info.get('FPLMN', '-'),
             )
         else:
             self._card_panel.set_status("error", msg)

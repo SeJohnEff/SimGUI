@@ -42,8 +42,9 @@ class CardStatusPanel(ttk.LabelFrame):
 
         # Card info rows
         info_labels = [('Card Type:', 'card_type'), ('IMSI:', 'imsi'),
-                       ('ICCID:', 'iccid'), ('Auth:', 'auth'),
-                       ('Source:', 'source_file')]
+                       ('ICCID:', 'iccid'), ('ACC:', 'acc'),
+                       ('SPN:', 'spn'), ('FPLMN:', 'fplmn'),
+                       ('Auth:', 'auth'), ('Source:', 'source_file')]
         self._info_vars = {}
         for i, (label_text, key) in enumerate(info_labels, start=1):
             ttk.Label(self, text=label_text, style='Subheading.TLabel').grid(
@@ -60,9 +61,11 @@ class CardStatusPanel(ttk.LabelFrame):
         self._programmed_label = ttk.Label(
             self, text="", style='Small.TLabel')
 
+        self._num_info_rows = len(info_labels)
+
         # Buttons — no "Detect Card", detection is automatic
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=len(info_labels) + 1, column=0, columnspan=2,
+        btn_frame.grid(row=self._num_info_rows + 1, column=0, columnspan=2,
                        sticky=(tk.W, tk.E), pady=(pad_m, 0))
         _auth_btn = ttk.Button(btn_frame, text="Authenticate",
                    command=lambda: self.on_authenticate_callback and self.on_authenticate_callback())
@@ -82,6 +85,7 @@ class CardStatusPanel(ttk.LabelFrame):
         self.status_label.configure(text=message)
 
     def set_card_info(self, card_type=None, imsi=None, iccid=None,
+                       acc=None, spn=None, fplmn=None,
                        source_file=None):
         if card_type is not None:
             self._info_vars['card_type'].set(card_type)
@@ -89,6 +93,12 @@ class CardStatusPanel(ttk.LabelFrame):
             self._info_vars['imsi'].set(imsi)
         if iccid is not None:
             self._info_vars['iccid'].set(iccid)
+        if acc is not None:
+            self._info_vars['acc'].set(acc)
+        if spn is not None:
+            self._info_vars['spn'].set(spn)
+        if fplmn is not None:
+            self._info_vars['fplmn'].set(fplmn)
         if source_file is not None:
             import os
             self._info_vars['source_file'].set(
@@ -103,7 +113,8 @@ class CardStatusPanel(ttk.LabelFrame):
             self._programmed_label.configure(
                 text="\u26a0 Already programmed (artifact exists)")
             self._programmed_label.grid(
-                row=7, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+                row=self._num_info_rows + 2, column=0, columnspan=2,
+                sticky=tk.W, pady=(4, 0))
         else:
             self._programmed_label.grid_remove()
 
@@ -120,7 +131,7 @@ class CardStatusPanel(ttk.LabelFrame):
         if card_index is not None and total_cards is not None:
             self._sim_label.configure(
                 text=f"Virtual card {card_index + 1} of {total_cards}")
-            self._sim_label.grid(row=8, column=0, columnspan=2,
-                                 sticky=tk.W, pady=(4, 0))
+            self._sim_label.grid(row=self._num_info_rows + 3, column=0,
+                                 columnspan=2, sticky=tk.W, pady=(4, 0))
         else:
             self._sim_label.grid_remove()
