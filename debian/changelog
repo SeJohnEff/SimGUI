@@ -1,3 +1,15 @@
+simgui (0.5.3-1) unstable; urgency=high
+
+  * CRITICAL: mount() now tracks already-mounted shares in _active_mounts.
+    Previously, shares left mounted across app restarts were invisible to
+    get_active_mount_paths(), causing ICCID index to never scan and share
+    indicator to show disconnected even though share was mounted.
+  * reconnect_saved() delegates to mount() instead of short-circuiting.
+  * Periodic share poll no longer duplicates _refresh_share_indicator at
+    startup (removed redundant call that could add latency).
+
+ -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 19:20:00 +0100
+
 simgui (0.5.2-1) unstable; urgency=low
 
   * Fix: Blank card no longer overwrites pre-loaded CSV data.

@@ -463,6 +463,31 @@ class TestMountUnmount:
         assert ok is True
         assert "Already mounted" in msg
 
+    def test_mount_already_mounted_adds_to_active_mounts(self):
+        """mount() must track the profile even when already mounted.
+
+        Bug fix v0.5.3: previously 'Already mounted' returned early
+        without adding to _active_mounts, causing get_active_mount_paths
+        to return empty and the ICCID index to never scan the share.
+        """
+        ns = NetworkStorageManager()
+        p = _make_smb_profile()
+        assert ns._active_mounts == {}
+        with patch.object(ns, "is_mounted", return_value=True):
+            ok, msg = ns.mount(p)
+        assert ok is True
+        assert p.label in ns._active_mounts
+
+    def test_get_active_mount_paths_after_already_mounted(self):
+        """get_active_mount_paths must include 'Already mounted' shares."""
+        ns = NetworkStorageManager()
+        p = _make_smb_profile()
+        with patch.object(ns, "is_mounted", return_value=True):
+            ns.mount(p)
+            paths = ns.get_active_mount_paths()
+        assert len(paths) == 1
+        assert paths[0][0] == p.label
+
     def test_mount_subprocess_failure(self):
         """mount() returns failure when subprocess exits non-zero."""
         ns = NetworkStorageManager()
@@ -595,6 +620,60 @@ class TestMountUnmount:
         labels = [lbl for lbl, _ in paths]
         assert "active" in labels
         assert "stale" not in labels
+
+
+# ---------------------------------------------------------------------------
+# reconnect_saved
+# ---------------------------------------------------------------------------
+
+class TestReconnectSaved:
+    """Tests for auto-reconnection at startup."""
+
+    def test_reconnect_already_mounted_populates_active_mounts(self):
+        """Shares that are already mounted at startup must still be
+        tracked in _active_mounts so the ICCID index can scan them.
+
+        Bug fix v0.5.3: previously reconnect_saved checked is_mounted
+        before calling mount(), skipping the _active_mounts update.
+        """
+        p = _make_smb_profile()
+        p.auto_connect = True
+        ns = NetworkStorageManager()
+        with patch.object(ns, "load_profiles", return_value=[p]), \
+             patch.object(ns, "is_mounted", return_value=True):
+            results = ns.reconnect_saved()
+        assert len(results) == 1
+        label, ok, msg = results[0]
+        assert ok is True
+        assert p.label in ns._active_mounts
+
+    def test_reconnect_not_mounted_triggers_mount(self):
+        """Shares not currently mounted should be mounted."""
+        p = _make_smb_profile()
+        p.auto_connect = True
+        ns = NetworkStorageManager()
+        # is_mounted: first False (not yet mounted), succeeds on mount
+        with patch.object(ns, "load_profiles", return_value=[p]), \
+             patch.object(ns, "is_mounted", return_value=False), \
+             patch("os.makedirs"), \
+             patch.object(ns, "_build_mount_cmd", return_value=["mount"]), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=0)):
+            results = ns.reconnect_saved()
+        assert len(results) == 1
+        _, ok, _ = results[0]
+        assert ok is True
+        assert p.label in ns._active_mounts
+
+    def test_reconnect_skips_non_auto_connect(self):
+        """Profiles without auto_connect=True are skipped."""
+        p = _make_smb_profile()
+        p.auto_connect = False
+        ns = NetworkStorageManager()
+        with patch.object(ns, "load_profiles", return_value=[p]):
+            results = ns.reconnect_saved()
+        assert results == []
+        assert ns._active_mounts == {}
 
 
 # ---------------------------------------------------------------------------

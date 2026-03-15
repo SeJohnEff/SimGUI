@@ -124,9 +124,15 @@ class NetworkStorageManager:
     # ---- Mount / unmount -----------------------------------------------
 
     def mount(self, profile: StorageProfile) -> tuple[bool, str]:
-        """Mount the share.  Returns (success, message)."""
+        """Mount the share.  Returns (success, message).
+
+        If the share is already mounted (e.g. left from a previous
+        session), we still track it in ``_active_mounts`` so that
+        ``get_active_mount_paths`` returns it.
+        """
         mp = profile.mount_point
         if self.is_mounted(profile):
+            self._active_mounts[profile.label] = profile
             return True, f"Already mounted at {mp}"
 
         os.makedirs(mp, exist_ok=True)
@@ -193,9 +199,8 @@ class NetworkStorageManager:
         for p in profiles:
             if not p.auto_connect:
                 continue
-            if self.is_mounted(p):
-                results.append((p.label, True, "Already mounted"))
-                continue
+            # Always call mount() — it handles the 'already mounted'
+            # case and ensures _active_mounts is populated.
             ok, msg = self.mount(p)
             results.append((p.label, ok, msg))
             if ok:

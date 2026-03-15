@@ -79,16 +79,22 @@ class TestReconnectSaved:
         assert ok is True
         mock_mount.assert_called_once()
 
-    @patch.object(NetworkStorageManager, "mount")
     @patch.object(NetworkStorageManager, "is_mounted", return_value=True)
-    def test_skips_already_mounted(self, mock_mounted, mock_mount):
+    def test_already_mounted_still_tracked(self, mock_mounted):
+        """Shares already mounted at startup must still be tracked
+        in _active_mounts (mount() handles the 'already mounted' path).
+        """
         p = StorageProfile(label="mounted", server="nas", share="data",
                            auto_connect=True)
         mgr = self._make_manager([p])
         results = mgr.reconnect_saved()
         assert len(results) == 1
-        assert results[0] == ("mounted", True, "Already mounted")
-        mock_mount.assert_not_called()
+        label, ok, msg = results[0]
+        assert label == "mounted"
+        assert ok is True
+        assert "Already mounted" in msg
+        # Critical: profile must be in _active_mounts
+        assert "mounted" in mgr._active_mounts
 
     @patch.object(NetworkStorageManager, "mount")
     @patch.object(NetworkStorageManager, "is_mounted", return_value=False)

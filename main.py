@@ -535,15 +535,23 @@ class SimGUIApp:
 
     _SHARE_POLL_MS = 30_000  # 30 seconds
 
-    def _start_share_indicator_poll(self):
+    def _share_indicator_poll(self):
         """Periodically refresh the share indicator to catch external
         mount/unmount events (e.g. network interruption, manual unmount).
 
-        Stores the ``after`` id so it can be cancelled cleanly.
+        Called by ``root.after`` every ``_SHARE_POLL_MS`` milliseconds.
         """
         self._refresh_share_indicator()
-        self._share_poll_id = self.root.after(
-            self._SHARE_POLL_MS, self._start_share_indicator_poll)
+        self.root.after(self._SHARE_POLL_MS, self._share_indicator_poll)
+
+    def _start_share_indicator_poll(self):
+        """Schedule the first periodic share indicator refresh.
+
+        Does NOT call _refresh_share_indicator immediately — the caller
+        is expected to have already called it (avoids redundant work
+        at startup).
+        """
+        self.root.after(self._SHARE_POLL_MS, self._share_indicator_poll)
 
     def _update_mount_tooltip(self, text: str):
         """Replace the tooltip on the mount indicator canvas."""
