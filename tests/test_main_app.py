@@ -46,8 +46,12 @@ class _FakeWidget:
     def winfo_rootx(self): return 0
     def winfo_rooty(self): return 0
     def after(self, ms, func=None, *args):
-        if func:
+        # Only execute immediately for dispatches (ms=0).
+        # Scheduled callbacks (ms > 0) are registered but not executed
+        # — they would cause infinite recursion in periodic polls.
+        if func and ms == 0:
             func(*args)
+        return 1  # fake after-id
     def delete(self, *a): pass
     def insert(self, *a, **kw): pass
     def focus_set(self): pass
@@ -179,6 +183,7 @@ def _load_main():
             def __init__(self, *a, **kw):
                 super().__init__()
                 self.on_csv_loaded_callback = None
+                self.on_file_browsed_callback = None
                 self.on_detect_callback = None
                 self.on_authenticate_callback = None
                 self._tree = _FakeWidget()

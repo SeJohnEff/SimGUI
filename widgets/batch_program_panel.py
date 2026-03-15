@@ -85,6 +85,7 @@ class BatchProgramPanel(ttk.Frame):
 
         # Callback set by main.py for cross-tab sync
         self.on_csv_loaded_callback = None
+        self.on_file_browsed_callback = None  # Called after file browse dialog closes
 
         # Wire callbacks
         self._batch_mgr.on_progress = self._on_progress
@@ -516,6 +517,9 @@ class BatchProgramPanel(ttk.Frame):
         if init_dir:
             kwargs["initialdir"] = init_dir
         path = filedialog.askopenfilename(**kwargs)
+        # Notify main.py that a file dialog has closed
+        if callable(self.on_file_browsed_callback):
+            self.on_file_browsed_callback()
         if not path:
             return
         import os

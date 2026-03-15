@@ -51,8 +51,9 @@ class ProgramSIMPanel(ttk.Frame):
         self._original_form_data: dict[str, str] = {}  # baseline for change tracking
         self._detected_non_empty: bool = False  # True when a card with ICCID is detected
 
-        # Callback set by main.py for cross-tab sync
+        # Callbacks set by main.py
         self.on_csv_loaded_callback = None
+        self.on_file_browsed_callback = None  # Called after any file browse dialog closes
 
         self._build_ui()
         self._on_mode_change()
@@ -133,8 +134,31 @@ class ProgramSIMPanel(ttk.Frame):
         self._prog_btn.pack(side=tk.LEFT)
         add_tooltip(self._prog_btn, "Write all field values to the inserted SIM card")
 
-        self._action_status = ttk.Label(act, text="Insert a SIM card...")
-        self._action_status.pack(anchor=tk.W, padx=pad, pady=(0, pad))
+        # Selectable text widget for action status (not a Label — must be
+        # copyable per user requirement).  Read-only tk.Text that looks
+        # like a label but allows select + Ctrl-C.
+        self._action_status = tk.Text(
+            act, height=1, wrap=tk.NONE, relief=tk.FLAT,
+            borderwidth=0, highlightthickness=0,
+            font=("TkDefaultFont",), padx=4, pady=2,
+            cursor="arrow",
+        )
+        self._action_status.insert("1.0", "Insert a SIM card...")
+        self._action_status.configure(state=tk.DISABLED)
+        # Match background to parent frame
+        try:
+            bg = act.winfo_toplevel().cget("bg")
+            self._action_status.configure(background=bg)
+        except (tk.TclError, AttributeError):
+            pass
+        self._action_status.pack(anchor=tk.W, fill=tk.X, padx=pad, pady=(0, pad))
+        # Right-click context menu for copy
+        self._action_status_menu = tk.Menu(self._action_status, tearoff=0)
+        self._action_status_menu.add_command(
+            label="Copy All",
+            command=self._copy_action_status)
+        self._action_status.bind("<Button-3>",
+            lambda e: self._action_status_menu.tk_popup(e.x_root, e.y_root))
 
         self._paned.add(top_pane, minsize=200)
 
@@ -184,6 +208,41 @@ class ProgramSIMPanel(ttk.Frame):
         self._card_tree.bind("<<TreeviewSelect>>", self._on_card_select)
 
         self._paned.add(self._csv_pane, minsize=100)
+
+    # ---- Action status helpers ------------------------------------------
+
+    # Map ttk style names to tk.Text foreground colours
+    _STATUS_COLOURS = {
+        "TLabel": None,  # default (inherit)
+        "Success.TLabel": "#2e7d32",
+        "Warning.TLabel": "#e65100",
+        "Error.TLabel": "#c62828",
+    }
+
+    def _set_action_status(self, text: str, style: str = "TLabel"):
+        """Update the selectable action-status text widget.
+
+        Because ``tk.Text`` is set to DISABLED (read-only), we must
+        temporarily enable it, replace the content, then disable again.
+        """
+        w = self._action_status
+        w.configure(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert("1.0", text)
+        w.configure(state=tk.DISABLED)
+        fg = self._STATUS_COLOURS.get(style)
+        if fg:
+            w.configure(foreground=fg)
+        else:
+            # Reset to default foreground
+            w.configure(foreground="")
+
+    def _copy_action_status(self):
+        """Copy full action-status text to the system clipboard."""
+        text = self._action_status.get("1.0", tk.END).strip()
+        if text:
+            self._action_status.clipboard_clear()
+            self._action_status.clipboard_append(text)
 
     # ---- mode switching ------------------------------------------------
 
@@ -236,17 +295,17 @@ class ProgramSIMPanel(ttk.Frame):
     def _populate_from_read_card(self):
         """Fill form fields from the shared last-read card data."""
         if not self._last_read_data:
-            self._action_status.configure(
-                text="No card data available — read a card first on the Read SIM tab",
-                style="Warning.TLabel")
+            self._set_action_status(
+                "No card data available \u2014 read a card first on the Read SIM tab",
+                "Warning.TLabel")
             return
         for read_key, form_key in self._READ_KEY_MAP.items():
             if form_key in self._field_vars:
                 self._field_vars[form_key].set(
                     self._last_read_data.get(read_key, ""))
-        self._action_status.configure(
-            text="Fields populated from last read card",
-            style="Success.TLabel")
+        self._set_action_status(
+            "Fields populated from last read card",
+            "Success.TLabel")
 
     # ---- CSV -----------------------------------------------------------
 
@@ -256,6 +315,11 @@ class ProgramSIMPanel(ttk.Frame):
         if init_dir:
             kwargs["initialdir"] = init_dir
         path = filedialog.askopenfilename(**kwargs)
+        # Notify main.py that a file dialog has closed — share indicator
+        # may need refreshing (the OS file dialog can reveal mount state
+        # changes that the app hasn't noticed yet).
+        if callable(self.on_file_browsed_callback):
+            self.on_file_browsed_callback()
         if not path:
             return
         import os
@@ -320,9 +384,9 @@ class ProgramSIMPanel(ttk.Frame):
             self._auth_btn.configure(state=tk.NORMAL)
             self._prog_btn.configure(state=tk.DISABLED)
             self._step = 1  # reset to "detected" (need re-auth after data change)
-            self._action_status.configure(
-                text="CSV row selected \u2014 ready to authenticate",
-                style="Success.TLabel")
+            self._set_action_status(
+                "CSV row selected \u2014 ready to authenticate",
+                "Success.TLabel")
         else:
             self._reset_step()
 
@@ -332,8 +396,21 @@ class ProgramSIMPanel(ttk.Frame):
         self._step = 0
         self._auth_btn.configure(state=tk.DISABLED)
         self._prog_btn.configure(state=tk.DISABLED)
-        self._action_status.configure(
-            text="Insert a SIM card...", style="TLabel")
+        self._set_action_status("Insert a SIM card...")
+
+    def _fields_have_data(self) -> bool:
+        """Return True if any form field (beyond ICCID) has a value.
+
+        Used to detect whether the user has already pre-loaded data
+        (e.g. from CSV selection or manual entry) so that card-detection
+        callbacks don't overwrite it.
+        """
+        for key, _, _ in _FORM_FIELDS:
+            if key == "ICCID":
+                continue  # ICCID alone doesn't count
+            if self._field_vars[key].get().strip():
+                return True
+        return False
 
     def on_card_detected(self, iccid, card_data=None, file_path=None):
         """Called by CardWatcher (via main.py) when a card is auto-detected.
@@ -343,6 +420,12 @@ class ProgramSIMPanel(ttk.Frame):
 
         For non-empty cards (with an ICCID), ICCID is forced read-only
         because it comes from the factory and is used for traceability.
+
+        **Blank-card + pre-loaded data**:  When the card is blank
+        (empty ICCID) and no *card_data* is supplied, the method checks
+        whether the form already contains data (e.g. from a CSV row
+        selection).  If so, the existing field values are preserved and
+        the panel moves straight to STEP 1 (ready to authenticate).
         """
         self._step = 1
         self._auth_btn.configure(state=tk.NORMAL)
@@ -364,17 +447,31 @@ class ProgramSIMPanel(ttk.Frame):
             }
             import os
             src = os.path.basename(file_path) if file_path else "index"
-            self._action_status.configure(
-                text=f"Card detected \u2014 data loaded from {src}",
-                style="Success.TLabel")
+            self._set_action_status(
+                f"Card detected \u2014 data loaded from {src}",
+                "Success.TLabel")
+        elif not iccid and self._fields_have_data():
+            # Blank card inserted but fields are already populated
+            # (e.g. from CSV row selection or manual entry).  Preserve
+            # the existing data — don't overwrite with empty values.
+            self._original_form_data = {}  # all fields will be written
+            self._set_action_status(
+                "Blank card detected \u2014 ready to authenticate",
+                "Success.TLabel")
         else:
             # Card found but not in index — just show ICCID
-            self._field_vars["ICCID"].set(iccid)
+            if iccid:
+                self._field_vars["ICCID"].set(iccid)
             # Empty card or unknown: no baseline (all fields will be written)
             self._original_form_data = {}
-            self._action_status.configure(
-                text=f"Card detected (ICCID {iccid}) \u2014 not in index, enter data manually",
-                style="Warning.TLabel")
+            if iccid:
+                self._set_action_status(
+                    f"Card detected (ICCID {iccid}) \u2014 not in index, enter data manually",
+                    "Warning.TLabel")
+            else:
+                self._set_action_status(
+                    "Blank card detected \u2014 select a CSV row or enter data manually",
+                    "Warning.TLabel")
 
         # Enforce ICCID read-only for non-empty cards (factory-assigned,
         # used for traceability — must never be changed).
@@ -398,8 +495,7 @@ class ProgramSIMPanel(ttk.Frame):
             return
         adm1 = self._field_vars["ADM1"].get().strip()
         if not adm1:
-            self._action_status.configure(
-                text="ADM1 is required", style="Warning.TLabel")
+            self._set_action_status("ADM1 is required", "Warning.TLabel")
             return
         expected_iccid = self._field_vars["ICCID"].get().strip() or None
         ok, msg = self._cm.authenticate(
@@ -407,9 +503,9 @@ class ProgramSIMPanel(ttk.Frame):
         if ok:
             self._step = 2
             self._prog_btn.configure(state=tk.NORMAL)
-            self._action_status.configure(text=msg, style="Success.TLabel")
+            self._set_action_status(msg, "Success.TLabel")
         else:
-            self._action_status.configure(text=msg, style="Error.TLabel")
+            self._set_action_status(msg, "Error.TLabel")
 
     def _on_program(self):
         if self._step < 2:
@@ -419,9 +515,9 @@ class ProgramSIMPanel(ttk.Frame):
         ok, msg = self._cm.program_card(
             card_data, original_data=self._original_form_data or None)
         if ok:
-            self._action_status.configure(text=msg, style="Success.TLabel")
+            self._set_action_status(msg, "Success.TLabel")
             # Notify main.py so it can save auto-artifact
             if callable(getattr(self, 'on_card_programmed_callback', None)):
                 self.on_card_programmed_callback(card_data)
         else:
-            self._action_status.configure(text=msg, style="Error.TLabel")
+            self._set_action_status(msg, "Error.TLabel")

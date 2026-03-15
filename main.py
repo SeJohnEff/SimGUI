@@ -154,8 +154,9 @@ class SimGUIApp:
         # Scan index from connected shares
         self._rescan_iccid_index()
 
-        # Show persistent share indicator
+        # Show persistent share indicator + start periodic refresh
         self._refresh_share_indicator()
+        self._start_share_indicator_poll()
 
     @staticmethod
     def _get_git_hash() -> str:
@@ -242,6 +243,14 @@ class SimGUIApp:
         )
         self._batch_panel.on_csv_loaded_callback = (
             lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
+        )
+
+        # Refresh share indicator after file browse dialogs
+        self._program_panel.on_file_browsed_callback = (
+            self._refresh_share_indicator
+        )
+        self._batch_panel.on_file_browsed_callback = (
+            self._refresh_share_indicator
         )
 
         # Auto-artifact callback: save artifact after programming
@@ -523,6 +532,18 @@ class SimGUIApp:
             self._share_indicator.configure(foreground="")
             self._draw_mount_icon(connected=False)
             self._update_mount_tooltip("No network share connected")
+
+    _SHARE_POLL_MS = 30_000  # 30 seconds
+
+    def _start_share_indicator_poll(self):
+        """Periodically refresh the share indicator to catch external
+        mount/unmount events (e.g. network interruption, manual unmount).
+
+        Stores the ``after`` id so it can be cancelled cleanly.
+        """
+        self._refresh_share_indicator()
+        self._share_poll_id = self.root.after(
+            self._SHARE_POLL_MS, self._start_share_indicator_poll)
 
     def _update_mount_tooltip(self, text: str):
         """Replace the tooltip on the mount indicator canvas."""

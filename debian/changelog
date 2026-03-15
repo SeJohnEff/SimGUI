@@ -1,3 +1,13 @@
+simgui (0.5.2-1) unstable; urgency=low
+
+  * Fix: Blank card no longer overwrites pre-loaded CSV data.
+  * Fix: Action status text is now selectable and copyable.
+  * Fix: Share indicator refreshes after file browse + periodic 30s poll.
+  * Added workflow plan document (docs/WORKFLOW_PLAN.md).
+  * Improved blank-card messaging (distinct states for data-ready vs empty).
+
+ -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 18:15:00 +0100
+
 simgui (0.5.1-1) unstable; urgency=low
 
   * Build hash baked into BUILD file — visible in title bar and About.

@@ -51,8 +51,9 @@ class _FakeWidget:
     def winfo_rooty(self): return 0
     def winfo_children(self): return []
     def after(self, ms, func=None, *args):
-        if func:
+        if func and ms == 0:
             func(*args)
+        return 1
     def delete(self, *a): pass
     def insert(self, *a, **kw): pass
     def create_oval(self, *a, **kw): return 1
@@ -67,6 +68,11 @@ class _FakeWidget:
     def update_idletasks(self): pass
     def columnconfigure(self, *a, **kw): pass
     def rowconfigure(self, *a, **kw): pass
+    def get(self, *a, **kw): return self._cfg.get("_text", "")
+    def clipboard_clear(self): pass
+    def clipboard_append(self, text): pass
+    def add_command(self, **kw): pass
+    def tk_popup(self, *a): pass
     def current(self, i=None): return 0
     def heading(self, *a, **kw): pass
     def column(self, *a, **kw): pass
@@ -871,6 +877,112 @@ class TestProgramSIMPanelInstantiation:
         assert panel._detected_non_empty is True
         panel.on_card_removed()
         assert panel._detected_non_empty is False
+
+    # --- Bug 1 (v0.5.2): Blank card must not overwrite CSV data ---
+
+    def test_blank_card_preserves_csv_data(self):
+        """Inserting a blank card when CSV data is already loaded must
+        NOT overwrite the form fields.  Bug fix v0.5.2."""
+        mod, panel, cm = self._make_panel()
+        # Pre-populate fields as if a CSV row was selected
+        panel._field_vars["ICCID"].set("89999000000001")
+        panel._field_vars["IMSI"].set("99988000301001")
+        panel._field_vars["Ki"].set("AABB" * 8)
+        panel._field_vars["OPc"].set("CCDD" * 8)
+        panel._field_vars["ADM1"].set("3838383838383838")
+        # Insert blank card (empty ICCID, no card_data)
+        panel.on_card_detected("")
+        # Fields must be preserved
+        assert panel._field_vars["IMSI"].get() == "99988000301001"
+        assert panel._field_vars["Ki"].get() == "AABB" * 8
+        assert panel._field_vars["ADM1"].get() == "3838383838383838"
+        assert panel._step == 1  # should advance to detected
+
+    def test_blank_card_empty_fields_shows_warning(self):
+        """Blank card with no pre-loaded data shows instructional message."""
+        mod, panel, cm = self._make_panel()
+        panel.on_card_detected("")
+        assert panel._step == 1
+
+    def test_blank_card_then_csv_select_enables_auth(self):
+        """Insert blank card first, then select CSV row -> step stays 1,
+        auth button enabled.  Order shouldn't matter."""
+        mod, panel, cm = self._make_panel()
+        # Insert blank card first
+        panel.on_card_detected("")
+        assert panel._step == 1
+        # Now select a CSV row
+        panel._csv.get_card = _mock.MagicMock(return_value={
+            "ICCID": "89999", "IMSI": "99988", "ADM1": "88888888",
+            "Ki": "AA", "OPc": "BB", "ACC": "0001", "SPN": "TEST", "FPLMN": "",
+        })
+        panel._card_tree.selection = lambda: ["0"]
+        panel._on_card_select()
+        # Step should be 1 (card present, CSV selected)
+        assert panel._step == 1
+        assert panel._field_vars["IMSI"].get() == "99988"
+
+    def test_csv_select_then_blank_card_preserves_order_independence(self):
+        """Load CSV, select row, insert blank card -> fields preserved.
+        This is the exact user-reported bug scenario."""
+        mod, panel, cm = self._make_panel()
+        # Select CSV row (step=0 because no card yet)
+        panel._csv.get_card = _mock.MagicMock(return_value={
+            "ICCID": "89999000000001", "IMSI": "99988000301001",
+            "ADM1": "3838383838383838", "Ki": "AA" * 16, "OPc": "BB" * 16,
+            "ACC": "0001", "SPN": "BOLIDEN", "FPLMN": "24007",
+        })
+        panel._card_tree.selection = lambda: ["0"]
+        panel._on_card_select()
+        assert panel._step == 0  # no card yet
+        assert panel._field_vars["IMSI"].get() == "99988000301001"
+        # Now insert blank card
+        panel.on_card_detected("")
+        # Fields must NOT be overwritten
+        assert panel._field_vars["IMSI"].get() == "99988000301001"
+        assert panel._field_vars["SPN"].get() == "BOLIDEN"
+        assert panel._step == 1  # ready to authenticate
+
+    # --- Bug 2 (v0.5.2): Action status text is selectable ---
+
+    def test_action_status_is_text_widget(self):
+        """Action status must be a tk.Text (selectable), not a ttk.Label."""
+        mod, panel, cm = self._make_panel()
+        # The _action_status should be a Text widget (FakeWidget in tests)
+        assert hasattr(panel, '_action_status')
+        assert hasattr(panel, '_set_action_status')
+
+    def test_set_action_status_updates_text(self):
+        """_set_action_status must update the widget content."""
+        mod, panel, cm = self._make_panel()
+        panel._set_action_status("Hello World", "Success.TLabel")
+        # Widget should be disabled (read-only)
+        assert panel._action_status._cfg.get("state") in ("disabled", mod.tk.DISABLED)
+
+    def test_fields_have_data_empty(self):
+        """_fields_have_data returns False when all fields are empty."""
+        mod, panel, cm = self._make_panel()
+        assert panel._fields_have_data() is False
+
+    def test_fields_have_data_populated(self):
+        """_fields_have_data returns True when fields have values."""
+        mod, panel, cm = self._make_panel()
+        panel._field_vars["IMSI"].set("99988000301001")
+        assert panel._fields_have_data() is True
+
+    def test_fields_have_data_only_iccid(self):
+        """_fields_have_data returns False when only ICCID is set."""
+        mod, panel, cm = self._make_panel()
+        panel._field_vars["ICCID"].set("89001")
+        assert panel._fields_have_data() is False
+
+    # --- Bug 3 (v0.5.2): on_file_browsed_callback ---
+
+    def test_on_file_browsed_callback_exists(self):
+        """ProgramSIMPanel should have on_file_browsed_callback attribute."""
+        mod, panel, cm = self._make_panel()
+        assert hasattr(panel, 'on_file_browsed_callback')
+        assert panel.on_file_browsed_callback is None
 
 
 # ---------------------------------------------------------------------------
