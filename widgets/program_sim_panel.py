@@ -48,6 +48,7 @@ class ProgramSIMPanel(ttk.Frame):
         self._field_vars: dict[str, tk.StringVar] = {}
         self._field_entries: dict[str, ttk.Entry] = {}
         self._step = 0  # 0=ready, 1=detected, 2=authenticated
+        self._original_form_data: dict[str, str] = {}  # baseline for change tracking
 
         # Callback set by main.py for cross-tab sync
         self.on_csv_loaded_callback = None
@@ -322,6 +323,7 @@ class ProgramSIMPanel(ttk.Frame):
         """Called by CardWatcher (via main.py) when a card is auto-detected.
 
         If *card_data* is provided the form fields are auto-populated.
+        The data is also saved as the baseline for change tracking.
         """
         self._step = 1
         self._auth_btn.configure(state=tk.NORMAL)
@@ -334,21 +336,28 @@ class ProgramSIMPanel(ttk.Frame):
                 if key == "OPc" and not val:
                     val = card_data.get("OPC", "")
                 self._field_vars[key].set(val)
+            # Save baseline for change tracking
+            self._original_form_data = {
+                k: self._field_vars[k].get() for k, _, _ in _FORM_FIELDS
+            }
             import os
             src = os.path.basename(file_path) if file_path else "index"
             self._action_status.configure(
-                text=f"Card detected — data loaded from {src}",
+                text=f"Card detected \u2014 data loaded from {src}",
                 style="Success.TLabel")
         else:
             # Card found but not in index — just show ICCID
             self._field_vars["ICCID"].set(iccid)
+            # Empty card or unknown: no baseline (all fields will be written)
+            self._original_form_data = {}
             self._action_status.configure(
-                text=f"Card detected (ICCID {iccid}) — not in index, enter data manually",
+                text=f"Card detected (ICCID {iccid}) \u2014 not in index, enter data manually",
                 style="Warning.TLabel")
 
     def on_card_removed(self):
         """Called by CardWatcher when the card is removed."""
         self._reset_step()
+        self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_vars[key].set("")
 
@@ -375,7 +384,8 @@ class ProgramSIMPanel(ttk.Frame):
             return
         card_data = {k: self._field_vars[k].get().strip()
                      for k, _, _ in _FORM_FIELDS}
-        ok, msg = self._cm.program_card(card_data)
+        ok, msg = self._cm.program_card(
+            card_data, original_data=self._original_form_data or None)
         if ok:
             self._action_status.configure(text=msg, style="Success.TLabel")
             # Notify main.py so it can save auto-artifact

@@ -1,0 +1,123 @@
+{
+  "$schema": "sim-standard-v1",
+  "version": 1,
+  "document": {
+    "title": "Teleaura SIM & PLMN Numbering Standard",
+    "revision": "2.1",
+    "date": "2026-03-14",
+    "scope": "Teleaura UK and all sub-networks",
+    "classification": "Confidential"
+  },
+
+  "plmns": {
+    "99988": {
+      "mcc": "999",
+      "mnc": "88",
+      "mnc_length": 2,
+      "purpose": "Teleaura Production Networks",
+      "issuer_id": "988",
+      "status": "active"
+    },
+    "99989": {
+      "mcc": "999",
+      "mnc": "89",
+      "mnc_length": 2,
+      "purpose": "Teleaura Lab / Test Networks",
+      "issuer_id": "989",
+      "status": "active"
+    }
+  },
+
+  "default_plmn": "99988",
+
+  "sites": {
+    "0001": {
+      "code": "uk1",
+      "country": "United Kingdom",
+      "country_code_e164": "44",
+      "description": "Primary UK data centre / lab",
+      "status": "active"
+    },
+    "0002": {
+      "code": "se1",
+      "country": "Sweden",
+      "country_code_e164": "46",
+      "description": "Primary Sweden data centre",
+      "status": "active"
+    },
+    "0003": {
+      "code": "se2",
+      "country": "Sweden",
+      "country_code_e164": "46",
+      "description": "Sweden DR site",
+      "status": "active"
+    },
+    "0004": {
+      "code": "au1",
+      "country": "Australia",
+      "country_code_e164": "61",
+      "description": "Primary Australia site",
+      "status": "reserved"
+    }
+  },
+
+  "sim_types": {
+    "0": {"name": "USIM",      "description": "Standard physical SIM (2FF/3FF/4FF)"},
+    "1": {"name": "USIM+SUCI", "description": "5G SUCI privacy SIM (SYSMOCOM-sourced)"},
+    "2": {"name": "eSIM",      "description": "eUICC remote provisioning (MFF2)"},
+    "9": {"name": "Test/Dev",  "description": "Lab and development cards"}
+  },
+
+  "fplmn_by_country": {
+    "United Kingdom": ["23415", "23410", "23420", "23430"],
+    "Sweden":         ["24007", "24024", "24001", "24008", "24002"]
+  },
+
+  "sim_profile_defaults": {
+    "li": "EN",
+    "hplmn": "99988",
+    "ehplmn": ["99988", "99989"],
+    "spn": "",
+    "algo_2g": "MILENAGE",
+    "algo_3g": "MILENAGE",
+    "algo_4g5g": "MILENAGE",
+    "use_opc": true,
+    "adm1_empty_cards": "3838383838383838"
+  },
+
+  "numbering": {
+    "imsi_format": "MCC + MNC + SSSS + T + NNNNN",
+    "imsi_length": 15,
+    "iccid_format": "89 + CC + III + SSSS + T + NNNNN + Luhn",
+    "iccid_length": 20,
+    "msin_length_2digit_mnc": 10,
+    "msin_length_3digit_mnc": 9,
+    "sequence_digits_2digit_mnc": 5,
+    "sequence_digits_3digit_mnc": 4,
+    "max_sequence_2digit_mnc": 99999,
+    "max_sequence_3digit_mnc": 9999
+  },
+
+  "key_generation": {
+    "method": "random",
+    "ki_bits": 128,
+    "opc_bits": 128,
+    "note": "Ki and OPc are generated as cryptographically random 128-bit values. Future option: derive OPc from a master OP key using MILENAGE. Review this decision when deploying to production HSS/UDM."
+  },
+
+  "spn_values": ["BOLIDEN", "TELEAURA", "FISKARHEDEN"],
+  "li_values": ["EN", "SV", "FI"],
+
+  "allocations": {
+    "uk1": [
+      {"site_id": "0001", "sim_type": "0", "customer": "Boliden (USIM)",      "range_start": 1,   "range_end": 19,  "notes": "Enterprise, Aitik Mine"},
+      {"site_id": "0001", "sim_type": "1", "customer": "Boliden (SUCI)",      "range_start": 1,   "range_end": 9,   "notes": "SUCI-enabled SIMs"},
+      {"site_id": "0001", "sim_type": "0", "customer": "Teleaura Internal",   "range_start": 100, "range_end": 109, "notes": "Infrastructure SIMs"},
+      {"site_id": "0001", "sim_type": "9", "customer": "Demo Pool",           "range_start": 1,   "range_end": 9,   "notes": "Trade shows, PoCs"}
+    ],
+    "se1": [
+      {"site_id": "0002", "sim_type": "0", "customer": "Boliden (legacy)",    "range_start": 1,   "range_end": 9,   "notes": "Original 99988 SIMs"},
+      {"site_id": "0002", "sim_type": "0", "customer": "Teleaura Internal",   "range_start": 100, "range_end": 109, "notes": "Infrastructure SIMs"}
+    ]
+  }
+}

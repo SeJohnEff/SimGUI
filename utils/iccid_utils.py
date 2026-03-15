@@ -8,11 +8,18 @@ Teleaura SIM PLMN Numbering Standard v2.0, and validation.
 # -- Teleaura Numbering Standard v2.0 constants ------------------------------
 
 # Site Register — maps SSSS to DC Naming Standard site code
+# country_code_e164 is the E.164 country dialling code (NOT MCC).
 SITE_REGISTER = {
-    "0001": {"code": "uk1", "country": "United Kingdom", "description": "Primary UK data centre / lab", "status": "Active"},
-    "0002": {"code": "se1", "country": "Sweden", "description": "Primary Sweden data centre", "status": "Active"},
-    "0003": {"code": "se2", "country": "Sweden", "description": "Sweden DR site", "status": "Active"},
-    "0004": {"code": "au1", "country": "Australia", "description": "Primary Australia site", "status": "Reserved"},
+    "0001": {"code": "uk1", "country": "United Kingdom", "country_code_e164": "44", "description": "Primary UK data centre / lab", "status": "Active"},
+    "0002": {"code": "se1", "country": "Sweden", "country_code_e164": "46", "description": "Primary Sweden data centre", "status": "Active"},
+    "0003": {"code": "se2", "country": "Sweden", "country_code_e164": "46", "description": "Sweden DR site", "status": "Active"},
+    "0004": {"code": "au1", "country": "Australia", "country_code_e164": "61", "description": "Primary Australia site", "status": "Reserved"},
+}
+
+# Issuer IDs per PLMN (maps MCC+MNC to 3-digit issuer ID for ICCID)
+ISSUER_IDS = {
+    "99988": "988",  # Teleaura Production Networks
+    "99989": "989",  # Teleaura Lab / Test Networks
 }
 
 # Reverse lookup: site code -> SSSS
@@ -86,11 +93,48 @@ def generate_imsi(mcc_mnc: str, site_id: str, sim_type: str, seq: int) -> str:
     return f"{mcc_mnc}{site_id}{sim_type}{seq:05d}"
 
 
-def generate_iccid(mcc_mnc: str, site_id: str, sim_type: str, seq: int) -> str:
-    """Generate an ICCID per Teleaura SIM PLMN Numbering Standard v2.0.
+def generate_iccid(country_code_e164: str, issuer_id: str,
+                   site_id: str, sim_type: str, seq: int) -> str:
+    """Generate an ICCID per Teleaura SIM PLMN Numbering Standard v2.1.
+
+    Format (20 digits):
+        89(2) + CC(2) + III(3) + 00(2, padding) + SSSS(4) + T(1) + NNNNN(5) + Luhn(1)
+        = 19 base + 1 check = 20 digits total
+
+    The country code comes from the site's physical location (44=UK,
+    46=SE), NOT from the MCC.  The issuer ID comes from the PLMN
+    config (988=production, 989=lab).  The 2-digit padding '00'
+    ensures the ICCID reaches 20 digits per ITU-T E.118.
+
+    Args:
+        country_code_e164: 2-digit E.164 country code (e.g. '44', '46').
+        issuer_id: 3-digit issuer ID (e.g. '988', '989').
+        site_id: 4-digit site ID from register (e.g. '0001').
+        sim_type: 1-digit SIM type (e.g. '0' for USIM).
+        seq: Sequence number (0-99999).
+
+    Returns:
+        20-digit ICCID string with Luhn check digit.
+
+    Example:
+        generate_iccid('44', '988', '0001', '0', 1)
+        -> '89449880000010000018'  (89+44+988+00+0001+0+00001+Luhn)
+    """
+    cc = country_code_e164.zfill(2)[:2]  # ensure 2 digits
+    iii = issuer_id.zfill(3)[:3]         # ensure 3 digits
+    ssss = site_id.zfill(4)[:4]          # ensure 4 digits
+    base = f"89{cc}{iii}00{ssss}{sim_type}{seq:05d}"
+    # base = 2+2+3+2+4+1+5 = 19 digits
+    check = compute_luhn_check(base)
+    return base + check
+
+
+def generate_iccid_legacy(mcc_mnc: str, site_id: str,
+                          sim_type: str, seq: int) -> str:
+    """Legacy ICCID generation (v2.0, deprecated).
 
     ICCID = 89 + MCC_MNC(5) + 00 + MSIN(10) + Luhn = 20 digits.
-    Note: ICCID is normally factory-assigned. This is for preview only.
+    Kept for backward compatibility.
     """
     msin = f"{site_id}{sim_type}{seq:05d}"
     base = f"89{mcc_mnc}00{msin}"

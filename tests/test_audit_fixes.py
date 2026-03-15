@@ -599,13 +599,13 @@ class TestSimulatorBackendDeckLoading:
 class TestCardManagerUncoveredPaths:
     """Cover auth guard and ICCID cross-check paths."""
 
-    def test_authenticate_stub_no_simulator(self):
-        """CardManager.authenticate stub path returns True (pending CLI integration)."""
+    def test_authenticate_no_backend_fails(self):
+        """CardManager.authenticate fails without CLI backend (no simulator)."""
         from managers.card_manager import CardManager
         cm = CardManager()
-        # No simulator active — stub path; currently returns True with a stub message
+        # No simulator active, no CLI backend
         ok, msg = cm.authenticate("12345678")
-        # The stub always returns True (CLI integration pending)
+        assert ok is False
         assert isinstance(msg, str)
 
     def test_read_protected_data_unauthenticated(self):

@@ -191,6 +191,8 @@ class CardManager:
         self.card_type: CardType = CardType.UNKNOWN
         self.authenticated: bool = False
         self.card_info: Dict[str, str] = {}
+        self._authenticated_adm1_hex: Optional[str] = None
+        self._original_card_data: Dict[str, str] = {}  # snapshot at detect time
         self._simulator = None  # Optional[SimulatorBackend]
         logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
                     self.cli_backend.name, self.cli_path, self._venv_python)
@@ -363,11 +365,13 @@ class CardManager:
             ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
             if ok:
                 self._parse_pysim_output(stdout)
+                self._original_card_data = dict(self.card_info)  # snapshot
                 return True, "Card detected via pySim"
             # Also check stdout - pySim sometimes prints data before failing
             if stdout:
                 self._parse_pysim_output(stdout)
                 if self.card_info.get('ICCID'):
+                    self._original_card_data = dict(self.card_info)
                     return True, "Card detected via pySim"
             return False, self._clean_pysim_error(stderr) or "No card detected"
 
@@ -394,6 +398,53 @@ class CardManager:
             return card.iccid if card else None
         # Hardware: ICCID is available from card_info after detect
         return self.card_info.get("ICCID")
+
+    def _adm1_to_hex(self, adm1: str) -> str:
+        """Convert ADM1 to the hex format expected by pySim -A flag.
+
+        If adm1 is 8 decimal digits, encode as ASCII hex (each char -> 2 hex).
+        If adm1 is already 16 hex chars, return as-is (uppercase).
+        """
+        import re
+        if re.match(r'^\d{8}$', adm1):
+            # ASCII-encode each digit: e.g. '8' -> 0x38 -> '38'
+            return ''.join(f'{ord(c):02X}' for c in adm1)
+        if re.match(r'^[0-9a-fA-F]{16}$', adm1):
+            return adm1.upper()
+        return adm1  # pass through, let pySim error
+
+    def _run_pysim_shell(self, adm1_hex: str, commands: str,
+                         timeout: int = 30) -> Tuple[bool, str, str]:
+        """Run pySim-shell.py with ADM1 auth and piped commands.
+
+        Starts pySim-shell with -p0 (first reader) and -A (hex ADM1),
+        then pipes *commands* via stdin.  Returns (success, stdout, stderr).
+        """
+        if self.cli_path is None:
+            return False, "", "pySim not found"
+
+        script_path = self._validate_script_path('pySim-shell.py')
+        if script_path is None:
+            return False, "", "pySim-shell.py not found"
+
+        python_exe = self._venv_python or sys.executable
+        cmd = [python_exe, script_path, '-p0', '-A', adm1_hex]
+        # Append 'exit' so the shell terminates cleanly
+        full_input = commands.rstrip('\n') + '\nexit\n'
+        try:
+            result = subprocess.run(
+                cmd, input=full_input, capture_output=True, text=True,
+                timeout=timeout, cwd=self.cli_path,
+            )
+            return (result.returncode == 0,
+                    result.stdout.strip(),
+                    result.stderr.strip())
+        except subprocess.TimeoutExpired:
+            return False, "", "pySim-shell timed out"
+        except FileNotFoundError:
+            return False, "", "pySim-shell.py not found"
+        except Exception as e:
+            return False, "", str(e)
 
     def authenticate(self, adm1: str, force: bool = False,
                      expected_iccid: Optional[str] = None) -> Tuple[bool, str]:
@@ -425,10 +476,39 @@ class CardManager:
         err = validate_adm1(adm1)
         if err:
             return False, err
-        # TODO: Call actual CLI tool authentication command when available.
-        logger.warning("authenticate() is a stub -- no real CLI call is made")
-        self.authenticated = True
-        return True, "Authentication successful (stub -- CLI integration pending)"
+
+        if self.cli_backend != CLIBackend.PYSIM:
+            # Non-pySim backends not yet implemented
+            logger.warning("authenticate(): non-pySim backend not implemented")
+            return False, "Authentication not supported for this CLI backend"
+
+        # Use pySim-shell with verify_adm to authenticate
+        adm1_hex = self._adm1_to_hex(adm1)
+        ok, stdout, stderr = self._run_pysim_shell(
+            adm1_hex, 'verify_adm', timeout=15)
+
+        if ok:
+            self.authenticated = True
+            self._authenticated_adm1_hex = adm1_hex
+            logger.info("ADM1 authentication successful")
+            return True, "Authentication successful"
+
+        # Check for specific failure patterns
+        combined = (stdout + '\n' + stderr).lower()
+        if 'sw mismatch' in combined and '6982' in combined:
+            return False, (
+                "Authentication FAILED — wrong ADM1 key. "
+                "Remaining attempts may be reduced. "
+                "3 wrong attempts = permanent card lock!"
+            )
+        if 'sw mismatch' in combined and '6983' in combined:
+            return False, (
+                "Card is PERMANENTLY LOCKED — "
+                "ADM1 authentication blocked (0 attempts remaining)"
+            )
+
+        error_msg = self._clean_pysim_error(stderr) if stderr else "Authentication failed"
+        return False, f"Authentication failed: {error_msg}"
 
     def read_public_data(self) -> Optional[Dict[str, str]]:
         """Read public fields without authentication."""
@@ -454,15 +534,239 @@ class CardManager:
             return None
         return self.card_info if self.card_info else None
 
-    def program_card(self, card_data: Dict[str, str]) -> Tuple[bool, str]:
-        """Program a card with the given parameters."""
+    # ---- pySim field-write helpers ------------------------------------
+
+    # Map from our field keys to pySim-shell commands.
+    # Each entry: (list_of_commands_fn) that takes (value) and returns
+    # a list of shell command strings.
+
+    @staticmethod
+    def _pysim_write_imsi(imsi: str) -> List[str]:
+        """Commands to write IMSI via pySim-shell."""
+        return [
+            'select MF/ADF.USIM/EF.IMSI',
+            f'update_binary_decoded \'{{"imsi": "{imsi}"}}\''  ,
+        ]
+
+    @staticmethod
+    def _pysim_write_ki_opc(ki: str, opc: str) -> List[str]:
+        """Commands to write Ki and OPc via pySim-shell.
+
+        These are stored together in EF.USIM_AUTH_KEY.
+        The JSON includes the algorithm config (milenage, use OPc).
+        """
+        import json
+        payload = json.dumps({
+            "cfg": {
+                "only_4bytes_res_in_3g": False,
+                "sres_deriv_func_in_2g": 1,
+                "use_opc_instead_of_op": True,
+                "algorithm": "milenage",
+            },
+            "key": ki.lower(),
+            "op_opc": opc.lower(),
+        })
+        return [
+            'select MF/ADF.USIM/EF.USIM_AUTH_KEY',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_write_spn(spn: str) -> List[str]:
+        """Commands to write SPN via pySim-shell."""
+        import json
+        payload = json.dumps({
+            "spn": spn,
+            "show_in_hplmn": True,
+            "hide_in_oplmn": False,
+        })
+        return [
+            'select MF/ADF.USIM/EF.SPN',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_write_fplmn(fplmn_str: str) -> List[str]:
+        """Commands to write FPLMN list via pySim-shell.
+
+        fplmn_str is semicolon-separated, e.g. '24007;24024;24001'.
+        Each PLMN is 5-6 digits (MCC+MNC).
+        """
+        import json
+        plmns = [p.strip() for p in fplmn_str.split(';') if p.strip()]
+        # Build list of {mcc, mnc} dicts
+        plmn_list = []
+        for p in plmns:
+            if len(p) == 5:
+                plmn_list.append({"mcc": p[:3], "mnc": p[3:]})
+            elif len(p) == 6:
+                plmn_list.append({"mcc": p[:3], "mnc": p[3:]})
+            # else skip malformed
+        payload = json.dumps(plmn_list)
+        return [
+            'select MF/ADF.USIM/EF.FPLMN',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_write_acc(acc: str) -> List[str]:
+        """Commands to write ACC via pySim-shell.
+
+        ACC is 4 hex digits representing 2 bytes.
+        """
+        acc_hex = acc.strip().lower().zfill(4)
+        return [
+            'select MF/ADF.USIM/EF.ACC',
+            f'update_binary {acc_hex}',
+        ]
+
+    @staticmethod
+    def _pysim_write_iccid(iccid: str) -> List[str]:
+        """Commands to write ICCID via pySim-shell (empty cards only).
+
+        ICCID is stored in EF.ICCID under MF (not ADF.USIM).
+        The binary encoding swaps nibbles of BCD digits.
+        """
+        import json
+        payload = json.dumps({"iccid": iccid})
+        return [
+            'select MF/EF.ICCID',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    def _compute_changed_fields(self, card_data: Dict[str, str],
+                                original: Dict[str, str]
+                                ) -> Dict[str, str]:
+        """Return only fields in card_data that differ from original.
+
+        Keys are compared case-insensitively. Empty/missing values in
+        card_data are skipped (don't erase existing data).
+        """
+        changed: Dict[str, str] = {}
+        orig_lower = {k.lower(): v for k, v in original.items()}
+        for key, val in card_data.items():
+            if not val:  # skip empty
+                continue
+            orig_val = orig_lower.get(key.lower(), "")
+            if val.strip() != orig_val.strip():
+                changed[key] = val.strip()
+        return changed
+
+    def program_card(self, card_data: Dict[str, str],
+                     original_data: Optional[Dict[str, str]] = None
+                     ) -> Tuple[bool, str]:
+        """Program a card with the given parameters.
+
+        Only writes fields that have changed relative to *original_data*
+        (or ``self._original_card_data`` if not provided).  For empty
+        cards where no original exists, all non-empty fields are written.
+
+        Args:
+            card_data: Dict of field values to write (IMSI, Ki, OPc, etc.).
+            original_data: Optional baseline data for change detection.
+                If None, uses self._original_card_data from the last detect.
+        """
         if self._simulator:
             return self._simulator.program_card(card_data)
         if not self.authenticated:
             return False, "Not authenticated"
-        # TODO: Build CLI args from card_data and call appropriate script
-        logger.warning("program_card() is a stub -- no real CLI call is made")
-        return True, "Card programmed successfully (stub)"
+        if self.cli_backend != CLIBackend.PYSIM:
+            return False, "Programming not supported for this CLI backend"
+        if not self._authenticated_adm1_hex:
+            return False, "No ADM1 key stored — re-authenticate first"
+
+        # Determine what changed
+        orig = original_data if original_data is not None else self._original_card_data
+        if orig:
+            changed = self._compute_changed_fields(card_data, orig)
+        else:
+            # No original (empty card) — write everything non-empty
+            changed = {k: v.strip() for k, v in card_data.items() if v.strip()}
+
+        if not changed:
+            return True, "No changes to program — card data already matches"
+
+        # Build pySim-shell command sequence
+        commands: List[str] = []
+        fields_written: List[str] = []
+
+        # Ki and OPc must be written together (same EF)
+        ki_changed = 'Ki' in changed
+        opc_changed = 'OPc' in changed
+        if ki_changed or opc_changed:
+            ki_val = changed.get('Ki', card_data.get('Ki', ''))
+            opc_val = changed.get('OPc', card_data.get('OPc', ''))
+            if ki_val and opc_val:
+                commands.extend(self._pysim_write_ki_opc(ki_val, opc_val))
+                fields_written.append('Ki/OPc')
+            elif ki_val:
+                # OPc not provided — can't write Ki alone safely
+                logger.warning("Ki changed but OPc not provided; skipping Ki/OPc write")
+            # Remove from changed so they're not processed again
+            changed.pop('Ki', None)
+            changed.pop('OPc', None)
+
+        # ICCID (only for empty cards — caller ensures this)
+        if 'ICCID' in changed:
+            commands.extend(self._pysim_write_iccid(changed['ICCID']))
+            fields_written.append('ICCID')
+            del changed['ICCID']
+
+        # IMSI
+        if 'IMSI' in changed:
+            commands.extend(self._pysim_write_imsi(changed['IMSI']))
+            fields_written.append('IMSI')
+            del changed['IMSI']
+
+        # SPN
+        if 'SPN' in changed:
+            commands.extend(self._pysim_write_spn(changed['SPN']))
+            fields_written.append('SPN')
+            del changed['SPN']
+
+        # FPLMN
+        if 'FPLMN' in changed:
+            commands.extend(self._pysim_write_fplmn(changed['FPLMN']))
+            fields_written.append('FPLMN')
+            del changed['FPLMN']
+
+        # ACC
+        if 'ACC' in changed:
+            commands.extend(self._pysim_write_acc(changed['ACC']))
+            fields_written.append('ACC')
+            del changed['ACC']
+
+        # ADM1 is never written to the card (it's the auth key, not data)
+        changed.pop('ADM1', None)
+
+        # Warn about any remaining unhandled fields
+        for key in changed:
+            logger.warning("program_card: field '%s' has no write handler, skipped", key)
+
+        if not commands:
+            return True, "No programmable fields changed"
+
+        # Execute via pySim-shell
+        cmd_str = '\n'.join(commands)
+        logger.info("Programming card: fields=%s", fields_written)
+        logger.debug("pySim-shell commands:\n%s", cmd_str)
+
+        ok, stdout, stderr = self._run_pysim_shell(
+            self._authenticated_adm1_hex, cmd_str, timeout=30)
+
+        if ok:
+            summary = ', '.join(fields_written)
+            logger.info("Card programmed successfully: %s", summary)
+            return True, f"Card programmed: {summary}"
+
+        # Check for partial success by scanning stdout for errors
+        combined = (stdout + '\n' + stderr).lower()
+        if 'sw mismatch' in combined:
+            error_detail = self._clean_pysim_error(stderr) if stderr else "write error"
+            return False, f"Programming failed (write error): {error_detail}"
+
+        error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
+        return False, f"Programming failed: {error_msg}"
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""
@@ -482,6 +786,8 @@ class CardManager:
         if self._simulator:
             self._simulator.disconnect()
         self.authenticated = False
+        self._authenticated_adm1_hex = None
+        self._original_card_data = {}
         self.card_type = CardType.UNKNOWN
         self.card_info = {}
 

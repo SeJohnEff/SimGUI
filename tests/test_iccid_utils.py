@@ -1,4 +1,4 @@
-"""Tests for utils.iccid_utils module — Teleaura PLMN Numbering Standard v2.0."""
+"""Tests for utils.iccid_utils module — Teleaura PLMN Numbering Standard v2.1."""
 
 import pytest
 
@@ -122,51 +122,70 @@ class TestGenerateImsi:
 
 
 class TestGenerateIccid:
+    """Test v2.1 ICCID format: 89(2) + CC(2) + III(3) + 00(2) + SSSS(4) + T(1) + NNNNN(5) + Luhn(1) = 20."""
+
     def test_starts_with_89(self):
-        iccid = generate_iccid("99988", "0001", "0", 1)
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
         assert iccid.startswith("89")
 
-    def test_contains_mcc_mnc(self):
-        iccid = generate_iccid("99988", "0001", "0", 1)
-        assert iccid[2:7] == "99988"
+    def test_contains_country_code(self):
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
+        assert iccid[2:4] == "44"  # E.164 country code
 
-    def test_two_zeros_padding(self):
-        """ICCID uses 2 zeros padding for 20-digit total per ITU-T E.118."""
-        iccid = generate_iccid("99988", "0001", "0", 1)
-        assert iccid[7:9] == "00"
+    def test_contains_issuer_id(self):
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
+        assert iccid[4:7] == "988"  # issuer ID
+
+    def test_contains_padding(self):
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
+        assert iccid[7:9] == "00"  # 2-digit padding
 
     def test_iccid_length(self):
-        """ICCID = 89(2) + MCC_MNC(5) + 00(2) + MSIN(10) + Luhn(1) = 20 digits."""
-        iccid = generate_iccid("99988", "0001", "0", 1)
+        """ICCID = 89(2) + CC(2) + III(3) + 00(2) + SSSS(4) + T(1) + NNNNN(5) + Luhn(1) = 20."""
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
         assert len(iccid) == 20
         assert iccid.isdigit()
 
     def test_valid_luhn(self):
-        iccid = generate_iccid("99988", "0001", "0", 1)
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
         assert validate_luhn(iccid)
 
     def test_valid_luhn_multiple(self):
         """Every generated ICCID must have a valid Luhn check digit."""
         for seq in range(0, 100):
-            iccid = generate_iccid("99988", "0001", "0", seq)
+            iccid = generate_iccid("44", "988", "0001", "0", seq)
             assert validate_luhn(iccid), f"ICCID {iccid} has invalid Luhn"
 
     def test_uk1_usim_structure(self):
-        """Worked example: uk1, USIM, SIM #00001.
-        ICCID = 89 + 99988 + 00 + 0001000001 + Luhn = 20 digits.
+        """Worked example: uk1 (CC=44), production (III=988), USIM, SIM #00001.
+        ICCID = 89 + 44 + 988 + 00 + 0001 + 0 + 00001 + Luhn = 20 digits.
         """
-        iccid = generate_iccid("99988", "0001", "0", 1)
+        iccid = generate_iccid("44", "988", "0001", "0", 1)
         assert iccid[:2] == "89"            # MII
-        assert iccid[2:7] == "99988"        # MCC+MNC
-        assert iccid[7:9] == "00"           # Padding (2 zeros)
-        # MSIN = SSSS(4) + T(1) + NNNNN(5) = 10 digits
-        assert iccid[9:19] == "0001000001"  # MSIN
-        # Last digit is Luhn check
+        assert iccid[2:4] == "44"           # E.164 country code (UK)
+        assert iccid[4:7] == "988"          # Issuer ID (production)
+        assert iccid[7:9] == "00"           # Padding
+        assert iccid[9:13] == "0001"        # Site SSSS
+        assert iccid[13] == "0"             # SIM type T
+        assert iccid[14:19] == "00001"      # Sequence NNNNN
+        # Position 19 = Luhn check digit (20th digit)
         assert len(iccid) == 20
         assert validate_luhn(iccid)
 
+    def test_se1_lab_structure(self):
+        """Sweden site se1 with lab PLMN."""
+        iccid = generate_iccid("46", "989", "0002", "9", 42)
+        assert iccid[:2] == "89"
+        assert iccid[2:4] == "46"           # Sweden
+        assert iccid[4:7] == "989"          # Lab issuer
+        assert iccid[7:9] == "00"           # Padding
+        assert iccid[9:13] == "0002"        # Site se1
+        assert iccid[13] == "9"             # Test/Dev type
+        assert iccid[14:19] == "00042"      # Sequence
+        assert validate_luhn(iccid)
+
     def test_unique_iccids(self):
-        iccids = {generate_iccid("99988", "0001", "0", i) for i in range(0, 20)}
+        iccids = {generate_iccid("44", "988", "0001", "0", i) for i in range(0, 20)}
         assert len(iccids) == 20
 
 
@@ -195,11 +214,17 @@ class TestSiteRegister:
         assert SITE_CODE_TO_ID["se2"] == "0003"
         assert SITE_CODE_TO_ID["au1"] == "0004"
 
+    def test_country_code_e164(self):
+        assert SITE_REGISTER["0001"]["country_code_e164"] == "44"  # UK
+        assert SITE_REGISTER["0002"]["country_code_e164"] == "46"  # Sweden
+        assert SITE_REGISTER["0004"]["country_code_e164"] == "61"  # Australia
+
     def test_all_entries_have_required_fields(self):
         for sid, info in SITE_REGISTER.items():
             assert len(sid) == 4 and sid.isdigit()
             assert "code" in info
             assert "country" in info
+            assert "country_code_e164" in info
             assert "description" in info
             assert "status" in info
 

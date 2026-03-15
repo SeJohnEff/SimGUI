@@ -87,22 +87,23 @@ class TestAuthenticateWithIccid:
         assert "ICCID mismatch" in msg
 
     def test_hardware_path_iccid_match_proceeds(self):
-        """Hardware path: matching ICCID proceeds to validation."""
+        """Hardware path: matching ICCID passes cross-check but fails without CLI."""
         cm = CardManager()
         cm.card_info = {"ICCID": "89999111111111111111"}
         ok, msg = cm.authenticate("12345678",
                                    expected_iccid="89999111111111111111")
-        # Stub auth succeeds after ICCID check passes
-        assert ok is True
+        # ICCID check passes but no CLI backend => fails
+        assert ok is False
+        assert 'not supported' in msg.lower() or 'not found' in msg.lower()
 
     def test_hardware_path_no_card_iccid_skips_check(self):
-        """Hardware path: if card has no ICCID yet, skip check (card_iccid is None/empty)."""
+        """Hardware path: if card has no ICCID yet, skip check."""
         cm = CardManager()
         cm.card_info = {}
         ok, msg = cm.authenticate("12345678",
                                    expected_iccid="89999111111111111111")
-        # No card ICCID -> skip check, proceed to auth stub
-        assert ok is True
+        # No card ICCID -> skip cross-check, but no CLI => fails
+        assert ok is False
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +121,13 @@ class TestProgramCard:
         assert ok is False
         assert "Not authenticated" in msg
 
-    def test_hardware_authenticated_stub_succeeds(self):
-        """program_card() stub returns success when authenticated."""
+    def test_hardware_authenticated_no_backend_fails(self):
+        """program_card() fails without CLI backend even when authenticated."""
         cm = CardManager()
         cm.authenticated = True
         ok, msg = cm.program_card({"IMSI": "123"})
-        assert ok is True
-        assert "stub" in msg.lower() or "Programmed" in msg
+        assert ok is False
+        assert 'not supported' in msg.lower() or 'no adm1' in msg.lower()
 
     def test_simulator_program_success(self):
         """Simulator mode: program_card() writes to virtual card."""

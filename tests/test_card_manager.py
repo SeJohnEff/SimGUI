@@ -31,20 +31,28 @@ class TestCardManagerAuth:
         ok, msg = card_manager.authenticate('bad')
         assert ok is False
 
-    def test_authenticate_valid_8digit(self, card_manager):
+    def test_authenticate_no_backend_fails(self, card_manager):
+        """Without a CLI backend, valid ADM1 should still fail."""
+        card_manager.cli_backend = CLIBackend.NONE
         ok, msg = card_manager.authenticate('12345678')
-        assert ok is True
-        assert card_manager.authenticated is True
+        assert ok is False
+        assert 'not supported' in msg.lower()
 
-    def test_authenticate_valid_16hex(self, card_manager):
-        ok, msg = card_manager.authenticate('ABCDEF0123456789')
-        assert ok is True
-
-    def test_authenticate_empty_rejected(self, card_manager):
-        # Empty ADM1 passes validate_adm1 (optional), but authenticate
-        # should still work since it relies on validate_adm1
+    def test_authenticate_empty_adm1_passes_validation(self, card_manager):
+        """Empty ADM1 passes validate_adm1 (field is optional in validation)."""
+        # With no backend, empty ADM1 goes through validation
+        # but fails on backend check
+        card_manager.cli_backend = CLIBackend.NONE
         ok, msg = card_manager.authenticate('')
-        assert ok is True  # empty passes validation
+        assert ok is False
+
+    def test_authenticate_iccid_mismatch(self, card_manager):
+        """ICCID cross-check prevents auth when card doesn't match."""
+        card_manager.card_info = {'ICCID': '89440000000000000001'}
+        ok, msg = card_manager.authenticate(
+            '12345678', expected_iccid='89440000000000000099')
+        assert ok is False
+        assert 'mismatch' in msg.lower()
 
 
 class TestCardManagerOperations:

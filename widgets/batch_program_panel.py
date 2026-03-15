@@ -18,6 +18,7 @@ from theme import ModernTheme
 from utils import get_browse_initial_dir
 from utils.iccid_utils import (
     FPLMN_BY_COUNTRY,
+    ISSUER_IDS,
     SIM_TYPES,
     SITE_REGISTER,
     generate_iccid,
@@ -646,7 +647,10 @@ class BatchProgramPanel(ttk.Frame):
         self._preview_data = []
         for seq in range(start, start + count):
             imsi = generate_imsi(mcc_mnc, site_id, sim_type, seq)
-            iccid = generate_iccid(mcc_mnc, site_id, sim_type, seq)
+            # v2.1: ICCID uses E.164 country code + issuer ID
+            cc_e164 = site_info.get("country_code_e164", "00")
+            issuer_id = ISSUER_IDS.get(mcc_mnc, "988")
+            iccid = generate_iccid(cc_e164, issuer_id, site_id, sim_type, seq)
             self._preview_data.append({
                 "IMSI": imsi,
                 "ICCID": iccid,
