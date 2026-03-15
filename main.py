@@ -145,18 +145,16 @@ class SimGUIApp:
             # rather than waiting for the first CardWatcher poll cycle.
             self.root.after(100, self._startup_detect_card)
 
-        # Warn once if passwordless sudo mount is not configured
-        self._check_sudo_mount_permissions()
-
-        # Auto-reconnect network shares from previous session
-        self._auto_reconnect_shares()
-
-        # Scan index from connected shares
-        self._rescan_iccid_index()
-
-        # Show persistent share indicator + start periodic refresh
+        # Show share indicator immediately (grey/disconnected) — the
+        # background startup thread will update it once mounts are ready.
         self._refresh_share_indicator()
-        self._start_share_indicator_poll()
+
+        # Network I/O (mount reconnect, ICCID scan, sudo check) runs in
+        # a background thread so the GUI appears instantly.  UI updates
+        # are dispatched back to the main thread via root.after(0, ...).
+        import threading
+        threading.Thread(
+            target=self._background_startup, daemon=True).start()
 
     @staticmethod
     def _get_git_hash() -> str:
@@ -461,33 +459,66 @@ class SimGUIApp:
             duration=10_000,
         )
 
-    def _auto_reconnect_shares(self):
-        """Reconnect network shares that were connected last session."""
-        results = self._ns_manager.reconnect_saved()
-        if not results:
-            return
+    def _background_startup(self):
+        """Run slow startup tasks in a background thread.
 
-        ok_labels = [label for label, ok, _ in results if ok]
-        fail_items = [(label, msg) for label, ok, msg in results if not ok]
+        Network reconnect, ICCID scan, and sudo-check all involve
+        subprocess calls and filesystem I/O that can block for seconds
+        (especially stale CIFS mounts).  Running them here keeps the
+        GUI responsive from the first frame.
 
-        if ok_labels:
-            names = ", ".join(ok_labels)
-            show_toast(
-                self.root,
-                f"Network share reconnected: {names}",
-                level="success",
-                duration=5000,
-            )
-            self._status_var.set(f"Network share connected: {names}")
+        All UI updates are dispatched to the main thread via
+        ``root.after(0, ...)``.
+        """
+        # 1. Check sudo mount permissions (inline — we're already in a
+        #    background thread, no need for the nested thread it normally uses)
+        try:
+            profiles = self._ns_manager.load_profiles()
+            if profiles:
+                ok = self._ns_manager.check_sudo_mount()
+                if not ok:
+                    self.root.after(0, self._show_sudo_warning)
+        except Exception as exc:
+            logger.warning("Sudo mount check failed: %s", exc)
 
-        for label, msg in fail_items:
-            show_toast(
-                self.root,
-                f"Could not reconnect \"{label}\": {msg}",
-                level="warning",
-                duration=8000,
-            )
-            logger.warning("Auto-reconnect failed: %s — %s", label, msg)
+        # 2. Reconnect network shares
+        try:
+            results = self._ns_manager.reconnect_saved()
+        except Exception as exc:
+            logger.warning("Auto-reconnect failed: %s", exc)
+            results = []
+
+        if results:
+            ok_labels = [label for label, ok, _ in results if ok]
+            fail_items = [(label, msg) for label, ok, msg in results if not ok]
+
+            if ok_labels:
+                names = ", ".join(ok_labels)
+                self.root.after(0, lambda: show_toast(
+                    self.root,
+                    f"Network share reconnected: {names}",
+                    level="success", duration=5000))
+                self.root.after(0, lambda: self._status_var.set(
+                    f"Network share connected: {names}"))
+
+            for label, msg in fail_items:
+                self.root.after(0, lambda l=label, m=msg: show_toast(
+                    self.root,
+                    f'Could not reconnect "{l}": {m}',
+                    level="warning", duration=8000))
+                logger.warning("Auto-reconnect failed: %s — %s", label, msg)
+
+        # 3. Scan ICCID index from connected shares
+        try:
+            self._rescan_iccid_index()
+        except Exception as exc:
+            logger.warning("ICCID index scan failed: %s", exc)
+
+        # 4. Update the share indicator on the main thread
+        self.root.after(0, self._refresh_share_indicator)
+
+        # 5. Start the periodic refresh (first poll after 30 s)
+        self.root.after(0, self._start_share_indicator_poll)
 
     # ---- Mount indicator (tab-bar icon) ---------------------------------
 
