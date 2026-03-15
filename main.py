@@ -140,17 +140,16 @@ class SimGUIApp:
             # Hardware Mode — a real backend is available.
             self._mode_var.set("hardware")
             self._settings.set("simulator_mode", False)
-            # Trigger an initial card detection after 100 ms so that a card
-            # already inserted before the app started is detected immediately
-            # rather than waiting for the first CardWatcher poll cycle.
-            self.root.after(100, self._startup_detect_card)
+            # Initial card detection runs in the background thread
+            # (pySim-read can take 10-30s; must not block the UI).
 
         # Show share indicator immediately (grey/disconnected) — the
         # background startup thread will update it once mounts are ready.
         self._refresh_share_indicator()
 
-        # Network I/O (mount reconnect, ICCID scan, sudo check) runs in
-        # a background thread so the GUI appears instantly.  UI updates
+        # ALL slow startup tasks run in a background thread so the GUI
+        # appears instantly.  This includes card detection (pySim-read),
+        # network reconnect, ICCID scan, and sudo-check.  UI updates
         # are dispatched back to the main thread via root.after(0, ...).
         import threading
         threading.Thread(
@@ -377,10 +376,9 @@ class SimGUIApp:
     def _startup_detect_card(self):
         """Trigger an initial card detection at startup for Hardware Mode.
 
-        Called once via ``root.after(100, ...)`` so the UI is fully
-        initialised before the detection runs.  Delegates to the
-        CardWatcher so callbacks fire and UI updates identically to a
-        live insertion.
+        Runs from the background startup thread.  CardWatcher callbacks
+        already dispatch to the main thread via ``root.after(0, ...)``.
+        Any direct UI calls here must also use ``root.after(0, ...)``.
 
         Also checks whether a USB smart-card reader is reachable.  When
         pySim returns a reader error the user gets a warning dialog.
@@ -391,6 +389,8 @@ class SimGUIApp:
             return
         # Run the watcher check — it calls detect_card() internally
         # and fires the correct callbacks (detected / unknown / removed).
+        # These callbacks are already wrapped with root.after(0, ...)
+        # by _wire_card_watcher, so they're thread-safe.
         try:
             self._card_watcher._check_once()
         except Exception as exc:
@@ -399,7 +399,8 @@ class SimGUIApp:
         if not self._card_watcher._card_present:
             ok, msg = self._card_manager.detect_card()
             if not ok and self._is_reader_error(msg):
-                self._show_no_reader_warning(msg)
+                # Dispatch UI warning to the main thread
+                self.root.after(0, self._show_no_reader_warning, msg)
 
     # ---- Reader & index helpers -------------------------------------------
 
@@ -460,18 +461,25 @@ class SimGUIApp:
         )
 
     def _background_startup(self):
-        """Run slow startup tasks in a background thread.
+        """Run ALL slow startup tasks in a background thread.
 
-        Network reconnect, ICCID scan, and sudo-check all involve
-        subprocess calls and filesystem I/O that can block for seconds
-        (especially stale CIFS mounts).  Running them here keeps the
-        GUI responsive from the first frame.
+        Card detection (pySim-read, up to 30 s), network reconnect,
+        ICCID scan, and sudo-check all involve subprocess calls and
+        filesystem I/O.  Running them here keeps the GUI responsive
+        from the very first frame.
 
         All UI updates are dispatched to the main thread via
         ``root.after(0, ...)``.
         """
-        # 1. Check sudo mount permissions (inline — we're already in a
-        #    background thread, no need for the nested thread it normally uses)
+        # 1. Initial card detection (pySim-read can take 10-30 s)
+        #    This was previously on the main thread via root.after(100,...)
+        #    which blocked the entire UI.  Now it runs here.
+        try:
+            self._startup_detect_card()
+        except Exception as exc:
+            logger.warning("Startup card detection failed: %s", exc)
+
+        # 2. Check sudo mount permissions
         try:
             profiles = self._ns_manager.load_profiles()
             if profiles:
@@ -481,7 +489,7 @@ class SimGUIApp:
         except Exception as exc:
             logger.warning("Sudo mount check failed: %s", exc)
 
-        # 2. Reconnect network shares
+        # 3. Reconnect network shares
         try:
             results = self._ns_manager.reconnect_saved()
         except Exception as exc:
@@ -508,16 +516,16 @@ class SimGUIApp:
                     level="warning", duration=8000))
                 logger.warning("Auto-reconnect failed: %s — %s", label, msg)
 
-        # 3. Scan ICCID index from connected shares
+        # 4. Scan ICCID index from connected shares
         try:
             self._rescan_iccid_index()
         except Exception as exc:
             logger.warning("ICCID index scan failed: %s", exc)
 
-        # 4. Update the share indicator on the main thread
+        # 5. Update the share indicator on the main thread
         self.root.after(0, self._refresh_share_indicator)
 
-        # 5. Start the periodic refresh (first poll after 30 s)
+        # 6. Start the periodic refresh (first poll after 30 s)
         self.root.after(0, self._start_share_indicator_poll)
 
     # ---- Mount indicator (tab-bar icon) ---------------------------------
@@ -944,7 +952,10 @@ class SimGUIApp:
             self._card_watcher.resume()  # Resume hardware polling
             self._status_var.set("Hardware mode active")
             # Check for reader and attempt initial card detection
-            self.root.after(100, self._startup_detect_card)
+            # Run in background thread — pySim-read can take 10-30 s
+            import threading
+            threading.Thread(
+                target=self._startup_detect_card, daemon=True).start()
         self._settings.set("simulator_mode", mode == "simulator")
 
     def _update_sim_menu_state(self, state):
