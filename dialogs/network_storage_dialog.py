@@ -636,7 +636,11 @@ class NetworkStorageDialog(tk.Toplevel):
 
     def _refresh_profile_list(self):
         prev_idx = self._current_idx
-        self._profile_list.delete(0, tk.END)
+        try:
+            self._profile_list.delete(0, tk.END)
+        except tk.TclError:
+            # Widget was destroyed (dialog closed during async operation)
+            return
         for p in self._profiles:
             mounted = " ✓" if self._ns.is_mounted(p) else ""
             self._profile_list.insert(tk.END,
@@ -841,13 +845,37 @@ class NetworkStorageDialog(tk.Toplevel):
         if not p.password:
             p.password = self._pass_var.get()
 
+        # Pre-check: is passwordless sudo available?  If not, fail fast
+        # instead of hanging for 30 s waiting for a TTY password prompt.
+        if not self._ns.check_sudo_mount():
+            msg = self._ns._sudo_fix_message()
+            self._status_label.configure(text="Sudo not configured")
+            show_error_dialog(self, "Permission Setup Required", msg)
+            return
+
         self._status_label.configure(text="Connecting...")
+        self._connect_btn.configure(state=tk.DISABLED)
         self.update_idletasks()
-        ok, msg = self._ns.mount(p)
+        thread = threading.Thread(
+            target=self._mount_worker, args=(p,), daemon=True)
+        thread.start()
+
+    def _mount_worker(self, profile: StorageProfile):
+        """Background worker for mounting (avoids blocking the UI)."""
+        ok, msg = self._ns.mount(profile)
+        self.after(0, self._mount_done, profile, ok, msg)
+
+    def _mount_done(self, profile: StorageProfile, ok: bool, msg: str):
+        """Handle mount result on the main thread."""
+        try:
+            self._connect_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            return  # dialog was closed while mount was running
+
         if ok:
             self._status_label.configure(text=msg[:80])
             # Mark for auto-reconnect on next app launch
-            p.auto_connect = True
+            profile.auto_connect = True
             self._ns.save_profiles(self._profiles)
         else:
             # Show a short summary in the status bar, full detail in popup

@@ -988,3 +988,75 @@ class TestFindDuplicateIccids:
         with patch.object(ns, "is_mounted", return_value=True):
             result = ns.find_duplicate_iccids(pp, ["333", "111", "222"])
         assert result == sorted(result)
+
+
+# ---------------------------------------------------------------------------
+# Sudo permission detection
+# ---------------------------------------------------------------------------
+
+class TestSudoPermissionDetection:
+    """Tests for _is_sudo_permission_error and mount's handling of it."""
+
+    def test_recognises_tty_required(self):
+        assert NetworkStorageManager._is_sudo_permission_error(
+            "sudo: a terminal is required to read the password"
+        )
+
+    def test_recognises_askpass_helper(self):
+        assert NetworkStorageManager._is_sudo_permission_error(
+            "sudo: no askpass helper specified"
+        )
+
+    def test_recognises_password_required(self):
+        assert NetworkStorageManager._is_sudo_permission_error(
+            "sudo: a password is required"
+        )
+
+    def test_recognises_no_tty_present(self):
+        assert NetworkStorageManager._is_sudo_permission_error(
+            "no tty present and no askpass program specified"
+        )
+
+    def test_non_sudo_error_not_matched(self):
+        assert not NetworkStorageManager._is_sudo_permission_error(
+            "mount: //nas/share is not a valid block device"
+        )
+
+    def test_empty_string_not_matched(self):
+        assert not NetworkStorageManager._is_sudo_permission_error("")
+
+    def test_mount_returns_sudo_fix_message(self):
+        """mount() returns the fix instructions when sudo prompts for pw."""
+        ns = NetworkStorageManager()
+        p = _make_smb_profile()
+        with patch.object(ns, "is_mounted", return_value=False), \
+             patch("os.makedirs"), \
+             patch.object(ns, "_build_mount_cmd", return_value=["/usr/bin/sudo"]), \
+             patch("subprocess.run",
+                   return_value=MagicMock(
+                       returncode=1,
+                       stderr="sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper",
+                       stdout="")):
+            ok, msg = ns.mount(p)
+        assert ok is False
+        assert "simgui-setup-mount" in msg
+
+    def test_check_sudo_mount_success(self):
+        """check_sudo_mount() returns True when sudo -n mount --help succeeds."""
+        ns = NetworkStorageManager()
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0)):
+            assert ns.check_sudo_mount() is True
+
+    def test_check_sudo_mount_failure(self):
+        """check_sudo_mount() returns False when sudo -n fails."""
+        ns = NetworkStorageManager()
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=1)):
+            assert ns.check_sudo_mount() is False
+
+    def test_check_sudo_mount_command_missing(self):
+        """check_sudo_mount() returns False when sudo is not installed."""
+        ns = NetworkStorageManager()
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert ns.check_sudo_mount() is False
