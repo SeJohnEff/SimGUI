@@ -145,6 +145,12 @@ class ProgramSIMPanel(ttk.Frame):
         )
         self._action_status.insert("1.0", "Insert a SIM card...")
         self._action_status.configure(state=tk.DISABLED)
+        # Save the default foreground so we can restore it later
+        # (tk.Text rejects foreground="" — unlike ttk widgets).
+        try:
+            self._default_fg = self._action_status.cget("foreground")
+        except (tk.TclError, AttributeError):
+            self._default_fg = "black"
         # Match background to parent frame
         try:
             bg = act.winfo_toplevel().cget("bg")
@@ -235,7 +241,7 @@ class ProgramSIMPanel(ttk.Frame):
             w.configure(foreground=fg)
         else:
             # Reset to default foreground
-            w.configure(foreground="")
+            w.configure(foreground=self._default_fg)
 
     def _copy_action_status(self):
         """Copy full action-status text to the system clipboard."""
