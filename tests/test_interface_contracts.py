@@ -110,6 +110,17 @@ _INHERITED_TKINTER_METHODS = {
     "mainloop", "quit",
 }
 
+# Methods inherited from PyQt6 base classes (QMainWindow, QWidget, QObject, etc.)
+_INHERITED_PYQT_METHODS = {
+    "setWindowTitle", "resize", "setMinimumSize", "setWindowIcon",
+    "setCentralWidget", "setStatusBar", "menuBar", "statusBar",
+    "show", "hide", "close", "width", "height", "findChild",
+    "setStyleSheet", "addAction", "addMenu", "addWidget",
+    "addPermanentWidget", "addTab", "setStretchFactor", "setSizes",
+    "setContentsMargins", "setAlignment", "setProperty", "setText",
+    "setShortcut", "setCheckable", "setChecked",
+}
+
 # Callback attributes set via assignment (self.on_X = ...) that are later
 # called as self.on_X() - these are dynamic attributes, not methods.
 _KNOWN_CALLBACK_PATTERNS = {"on_progress", "on_card_result",
@@ -131,8 +142,9 @@ class _SelfCallVisitor(ast.NodeVisitor):
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == "self"):
             name = node.func.attr
-            # Skip known inherited tkinter methods and callback patterns
+            # Skip known inherited tkinter/PyQt methods and callback patterns
             if (name not in _INHERITED_TKINTER_METHODS
+                    and name not in _INHERITED_PYQT_METHODS
                     and name not in _KNOWN_CALLBACK_PATTERNS):
                 self.calls.append((name, node.lineno))
         self.generic_visit(node)

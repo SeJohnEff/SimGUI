@@ -3,6 +3,10 @@
 # tkinter is part of the Python standard library (no pip install needed).
 # On Debian/Ubuntu you may need: sudo apt install python3-tk
 #
+# PyQt6 is required for the upcoming Qt-based UI (qt_main.py).
+# The tkinter UI (main.py) still works without PyQt6.
+PyQt6>=6.6        # Qt6 bindings for the new UI
+#
 # The following are only needed for card-reader hardware features.
 # They can be omitted for CSV-only / offline usage.
 pyscard>=2.0.0    # PC/SC smart-card interface (card reader communication)
@@ -10,3 +14,4 @@ pytlv>=0.3        # TLV parsing for SIM card data structures
 
 # Development / testing
 # pytest>=7.0
+# pytest-qt>=4.4  # Qt widget testing
