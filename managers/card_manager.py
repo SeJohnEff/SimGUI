@@ -413,12 +413,27 @@ class CardManager:
             return adm1.upper()
         return adm1  # pass through, let pySim error
 
+    # Patterns in pySim-shell stdout/stderr that indicate the shell
+    # failed to initialise properly (card not equipped).  When these
+    # appear the process may still exit 0 but no commands ran.
+    _PYSIM_SHELL_INIT_ERRORS = (
+        'not equipped',
+        'card error',
+        'card initialization',
+        'autodetection failed',
+        'no card',
+    )
+
     def _run_pysim_shell(self, adm1_hex: str, commands: str,
                          timeout: int = 30) -> Tuple[bool, str, str]:
         """Run pySim-shell.py with ADM1 auth and piped commands.
 
         Starts pySim-shell with -p0 (first reader) and -A (hex ADM1),
         then pipes *commands* via stdin.  Returns (success, stdout, stderr).
+
+        Uses ``--noprompt`` so that pySim-shell returns a non-zero exit
+        code when card initialisation fails (instead of silently dropping
+        into an unequipped interactive shell that ignores all commands).
         """
         if self.cli_path is None:
             return False, "", "pySim not found"
@@ -428,7 +443,8 @@ class CardManager:
             return False, "", "pySim-shell.py not found"
 
         python_exe = self._venv_python or sys.executable
-        cmd = [python_exe, script_path, '-p0', '-A', adm1_hex]
+        cmd = [python_exe, script_path, '-p0', '--noprompt',
+               '-A', adm1_hex]
         # Append 'exit' so the shell terminates cleanly
         full_input = commands.rstrip('\n') + '\nexit\n'
         logger.debug("pySim-shell input:\n%s", full_input)
@@ -441,6 +457,24 @@ class CardManager:
                 logger.info("pySim-shell stdout:\n%s", result.stdout.strip())
             if result.stderr:
                 logger.info("pySim-shell stderr:\n%s", result.stderr.strip())
+
+            # Even with --noprompt, some pySim versions exit 0 when the
+            # shell couldn't initialise.  Scan output for init-failure
+            # patterns to catch those cases.
+            combined_lower = (
+                (result.stdout or '') + '\n' + (result.stderr or '')
+            ).lower()
+            init_failed = any(
+                pat in combined_lower
+                for pat in self._PYSIM_SHELL_INIT_ERRORS
+            )
+            if init_failed:
+                logger.warning(
+                    "pySim-shell init failure detected in output")
+                return (False,
+                        result.stdout.strip(),
+                        result.stderr.strip())
+
             return (result.returncode == 0,
                     result.stdout.strip(),
                     result.stderr.strip())
@@ -448,6 +482,72 @@ class CardManager:
             return False, "", "pySim-shell timed out"
         except FileNotFoundError:
             return False, "", "pySim-shell.py not found"
+        except Exception as e:
+            return False, "", str(e)
+
+    def _run_pysim_prog(
+            self, card_data: Dict[str, str],
+            adm1_hex: str,
+            timeout: int = 60) -> Tuple[bool, str, str]:
+        """Program an empty card using pySim-prog.py.
+
+        ``pySim-prog.py`` is purpose-built for initial card programming
+        and handles blank sysmoISIM cards that ``pySim-shell.py`` cannot
+        auto-detect.  It writes ICCID, IMSI, Ki, OPc, ACC, and operator
+        name (SPN) in a single invocation.
+
+        Returns (success, stdout, stderr).
+        """
+        if self.cli_path is None:
+            return False, "", "pySim not found"
+
+        script_path = self._validate_script_path('pySim-prog.py')
+        if script_path is None:
+            return False, "", "pySim-prog.py not found"
+
+        python_exe = self._venv_python or sys.executable
+        cmd = [python_exe, script_path, '-p0',
+               '-A', adm1_hex, '-t', 'auto']
+
+        # Map card_data fields to pySim-prog flags
+        if card_data.get('ICCID'):
+            cmd += ['-s', card_data['ICCID']]
+        if card_data.get('IMSI'):
+            cmd += ['-i', card_data['IMSI']]
+        if card_data.get('Ki'):
+            cmd += ['-k', card_data['Ki']]
+        if card_data.get('OPc'):
+            cmd += ['-o', card_data['OPc']]
+        if card_data.get('SPN'):
+            cmd += ['-n', card_data['SPN']]
+        if card_data.get('ACC'):
+            cmd += ['--acc', card_data['ACC']]
+
+        # Derive MCC/MNC from IMSI so pySim-prog can configure HPLMN
+        imsi = card_data.get('IMSI', '')
+        if len(imsi) >= 5:
+            cmd += ['-x', imsi[:3], '-y', imsi[3:5]]
+
+        logger.info("pySim-prog command: %s",
+                    ' '.join(c if c != adm1_hex else '***' for c in cmd))
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=timeout, cwd=self.cli_path,
+            )
+            if result.stdout:
+                logger.info("pySim-prog stdout:\n%s",
+                            result.stdout.strip())
+            if result.stderr:
+                logger.info("pySim-prog stderr:\n%s",
+                            result.stderr.strip())
+            return (result.returncode == 0,
+                    result.stdout.strip(),
+                    result.stderr.strip())
+        except subprocess.TimeoutExpired:
+            return False, "", "pySim-prog timed out"
+        except FileNotFoundError:
+            return False, "", "pySim-prog.py not found"
         except Exception as e:
             return False, "", str(e)
 
@@ -498,8 +598,28 @@ class CardManager:
             logger.info("ADM1 authentication successful")
             return True, "Authentication successful"
 
-        # Check for specific failure patterns
+        # Check whether pySim-shell failed because the card is blank
+        # (init failure / "not equipped").  Blank cards cannot be
+        # verified via pySim-shell because it can't auto-detect them.
+        # Store the ADM1 anyway — pySim-prog.py will authenticate
+        # during programming.
         combined = (stdout + '\n' + stderr).lower()
+        init_failed = any(
+            pat in combined
+            for pat in self._PYSIM_SHELL_INIT_ERRORS
+        )
+        if init_failed and not self._original_card_data:
+            # Blank card: store ADM1, defer real auth to pySim-prog
+            self.authenticated = True
+            self._authenticated_adm1_hex = adm1_hex
+            logger.info("Blank card — ADM1 stored (will authenticate "
+                        "during programming via pySim-prog)")
+            return True, (
+                "Authentication stored \u2014 blank card will be "
+                "authenticated during programming"
+            )
+
+        # Check for specific failure patterns
         if 'sw mismatch' in combined and '6982' in combined:
             return False, (
                 "Authentication FAILED — wrong ADM1 key. "
@@ -550,7 +670,7 @@ class CardManager:
         """Commands to write IMSI via pySim-shell."""
         return [
             'select MF/ADF.USIM/EF.IMSI',
-            f'update_binary_decoded \'{{"imsi": "{imsi}"}}\''  ,
+            f'update_binary_decoded \'{{"imsi": "{imsi}"}}\'',
         ]
 
     @staticmethod
@@ -657,14 +777,35 @@ class CardManager:
                 changed[key] = val.strip()
         return changed
 
+    def _is_empty_card(
+            self, original_data: Optional[Dict[str, str]]) -> bool:
+        """Return True when programming a blank / empty card.
+
+        An empty card has no original baseline data — either because
+        ``detect_card`` returned nothing or the UI explicitly set the
+        baseline to ``{}`` / ``None``.
+        """
+        orig = (original_data if original_data is not None
+                else self._original_card_data)
+        return not orig
+
     def program_card(self, card_data: Dict[str, str],
                      original_data: Optional[Dict[str, str]] = None
                      ) -> Tuple[bool, str]:
         """Program a card with the given parameters.
 
-        Only writes fields that have changed relative to *original_data*
-        (or ``self._original_card_data`` if not provided).  For empty
-        cards where no original exists, all non-empty fields are written.
+        For **non-empty cards** (already have ICCID/IMSI), only the
+        fields that differ from *original_data* are written via
+        ``pySim-shell.py`` (delta-write).
+
+        For **empty / blank cards** (no original data), all non-empty
+        fields are written in a single ``pySim-prog.py`` invocation.
+        ``pySim-prog`` is purpose-built for initial card programming and
+        correctly handles blank sysmoISIM cards that ``pySim-shell``
+        cannot auto-detect.
+
+        If ``pySim-prog`` is not available, falls back to ``pySim-shell``
+        (which may work on some card variants).
 
         Args:
             card_data: Dict of field values to write (IMSI, Ki, OPc, etc.).
@@ -682,6 +823,7 @@ class CardManager:
 
         # Determine what changed
         orig = original_data if original_data is not None else self._original_card_data
+        empty_card = not orig
         if orig:
             changed = self._compute_changed_fields(card_data, orig)
         else:
@@ -691,6 +833,98 @@ class CardManager:
         if not changed:
             return True, "No changes to program — card data already matches"
 
+        # ---- Empty card: prefer pySim-prog.py --------------------------
+        if empty_card:
+            return self._program_empty_card(card_data, changed)
+
+        # ---- Non-empty card: delta-write via pySim-shell.py ------------
+        return self._program_nonempty_card(card_data, changed)
+
+    # Fields supported by pySim-prog.py command-line flags
+    _PYSIM_PROG_FIELDS = {'ICCID', 'IMSI', 'Ki', 'OPc', 'SPN', 'ACC'}
+
+    def _program_empty_card(self, card_data: Dict[str, str],
+                            changed: Dict[str, str]) -> Tuple[bool, str]:
+        """Initial programming of a blank card via pySim-prog.py.
+
+        ``pySim-prog.py`` handles ICCID, IMSI, Ki, OPc, SPN, and ACC.
+        Any remaining fields (e.g. FPLMN) are written in a follow-up
+        ``pySim-shell.py`` call after the card has been initialised.
+
+        Falls back to pySim-shell.py entirely if pySim-prog.py is not
+        available.
+        """
+        # Split fields into those pySim-prog can handle and the rest
+        prog_fields = {k: v for k, v in changed.items()
+                       if k in self._PYSIM_PROG_FIELDS}
+        extra_fields = {k: v for k, v in changed.items()
+                        if k not in self._PYSIM_PROG_FIELDS
+                        and k != 'ADM1'}
+
+        all_fields = [k for k in changed if k != 'ADM1']
+        summary = ', '.join(all_fields) or 'all fields'
+        logger.info("Empty card detected — using pySim-prog for: %s",
+                    summary)
+
+        # Try pySim-prog first (purpose-built for initial programming)
+        ok, stdout, stderr = self._run_pysim_prog(
+            prog_fields, self._authenticated_adm1_hex, timeout=60)
+
+        if ok:
+            prog_summary = ', '.join(prog_fields.keys())
+            logger.info("pySim-prog succeeded: %s", prog_summary)
+
+            # Write extra fields (FPLMN etc.) via pySim-shell now that
+            # the card is initialised and pySim-shell can detect it.
+            if extra_fields:
+                logger.info("Writing extra fields via pySim-shell: %s",
+                            list(extra_fields.keys()))
+                ex_ok, ex_msg = self._program_nonempty_card(
+                    card_data, extra_fields)
+                if not ex_ok:
+                    logger.warning(
+                        "Extra fields failed after pySim-prog: %s",
+                        ex_msg)
+                    return True, (
+                        f"Card programmed: {prog_summary}\n"
+                        f"Warning: extra fields failed: {ex_msg}"
+                    )
+
+            # Run read-back verification
+            v_ok, v_msg, v_data = self.verify_after_program(card_data)
+            if v_ok:
+                if v_data:
+                    for k, v in v_data.items():
+                        self.card_info[k] = v
+                return True, f"Card programmed and verified: {summary}"
+            else:
+                # pySim-prog reported success — trust it even if
+                # pySim-read can't read back (common on freshly
+                # programmed blank cards).
+                logger.warning(
+                    "pySim-prog OK but read-back failed: %s", v_msg)
+                return True, (
+                    f"Card programmed: {summary}\n"
+                    f"(read-back verification could not confirm "
+                    f"— re-insert card to verify)"
+                )
+
+        # pySim-prog failed — check if it's just not installed
+        prog_missing = 'not found' in stderr.lower()
+        if prog_missing:
+            logger.info("pySim-prog.py not available, "
+                        "falling back to pySim-shell")
+            return self._program_nonempty_card(card_data, changed)
+
+        # Genuine programming failure
+        error_msg = (self._clean_pysim_error(stderr)
+                     if stderr else "Programming failed")
+        return False, f"Programming failed: {error_msg}"
+
+    def _program_nonempty_card(self, card_data: Dict[str, str],
+                               changed: Dict[str, str]
+                               ) -> Tuple[bool, str]:
+        """Delta-write to a non-empty card via pySim-shell.py."""
         # Build pySim-shell command sequence
         commands: List[str] = []
         fields_written: List[str] = []
@@ -706,7 +940,8 @@ class CardManager:
                 fields_written.append('Ki/OPc')
             elif ki_val:
                 # OPc not provided — can't write Ki alone safely
-                logger.warning("Ki changed but OPc not provided; skipping Ki/OPc write")
+                logger.warning("Ki changed but OPc not provided; "
+                               "skipping Ki/OPc write")
             # Remove from changed so they're not processed again
             changed.pop('Ki', None)
             changed.pop('OPc', None)
@@ -746,7 +981,8 @@ class CardManager:
 
         # Warn about any remaining unhandled fields
         for key in changed:
-            logger.warning("program_card: field '%s' has no write handler, skipped", key)
+            logger.warning("program_card: field '%s' has no write handler, "
+                           "skipped", key)
 
         if not commands:
             return True, "No programmable fields changed"
@@ -773,7 +1009,8 @@ class CardManager:
                 logger.info("Card programmed and verified: %s", summary)
                 return True, f"Card programmed and verified: {summary}"
             else:
-                logger.warning("Card programmed but verification failed: %s", v_msg)
+                logger.warning(
+                    "Card programmed but verification failed: %s", v_msg)
                 return False, (
                     f"Programming commands sent ({summary}) but "
                     f"read-back verification FAILED.\n{v_msg}"
@@ -782,10 +1019,13 @@ class CardManager:
         # Check for partial success by scanning stdout for errors
         combined = (stdout + '\n' + stderr).lower()
         if 'sw mismatch' in combined:
-            error_detail = self._clean_pysim_error(stderr) if stderr else "write error"
-            return False, f"Programming failed (write error): {error_detail}"
+            error_detail = (self._clean_pysim_error(stderr)
+                            if stderr else "write error")
+            return False, (
+                f"Programming failed (write error): {error_detail}")
 
-        error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
+        error_msg = (self._clean_pysim_error(stderr)
+                     if stderr else "Programming failed")
         return False, f"Programming failed: {error_msg}"
 
     _VERIFY_RETRIES = 2
