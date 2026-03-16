@@ -1,3 +1,17 @@
+simgui (0.5.17-1) unstable; urgency=critical
+
+  * CRITICAL FIX: Remove --noprompt from pySim-shell invocation.
+    --noprompt prevented pySim-shell from reading piped stdin commands,
+    causing verify_adm and all write operations to be silently ignored.
+    This was the root cause of programming appearing to succeed while
+    read-back verification correctly reported failure.
+  * authenticate() via safe shell now correctly processes verify_adm.
+  * _program_nonempty_card safe shell + piped commands now work.
+  * Init-failure detection relies on output scanning (unchanged).
+  * Updated tests: assert --noprompt is NOT present.
+
+ -- SimGUI Developers <simgui@example.com>  Mon, 16 Mar 2026 14:00:00 +0100
+
 simgui (0.5.4-1) unstable; urgency=high
 
   * Fix startup timeout: network reconnect, ICCID scan, and sudo check

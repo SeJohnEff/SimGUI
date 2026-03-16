@@ -7,7 +7,7 @@ Validates:
 - ``_program_nonempty_card`` still works as before (pySim-shell delta)
 - ``program_card`` routes empty vs non-empty correctly
 - ``authenticate`` handles blank-card init failures gracefully
-- ``_run_pysim_shell`` with ``--noprompt`` detects init failures
+- ``_run_pysim_shell`` without ``--noprompt`` detects init failures via output scanning
 - FPLMN (extra field) follow-up after pySim-prog succeeds
 """
 
@@ -157,19 +157,27 @@ class TestRunPysimProg:
 
 
 # ---------------------------------------------------------------------------
-# _run_pysim_shell (--noprompt + init-failure detection)
+# _run_pysim_shell (interactive stdin + init-failure detection)
 # ---------------------------------------------------------------------------
 
 class TestRunPysimShellInitDetection:
 
-    def test_noprompt_flag_present(self, tmp_path):
+    def test_noprompt_flag_NOT_present(self, tmp_path):
+        """--noprompt must NOT be used — it prevents stdin command processing."""
         cm = _make_hw_manager(tmp_path)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout='', stderr='')
             cm._run_pysim_shell('DEADBEEF', 'verify_adm')
         cmd = mock_run.call_args[0][0]
-        assert '--noprompt' in cmd
+        assert '--noprompt' not in cmd
+        # -A flag should still be present when using _run_pysim_shell
+        assert '-A' in cmd
+        assert 'DEADBEEF' in cmd
+        # stdin must pipe commands with 'exit' appended
+        call_kwargs = mock_run.call_args.kwargs
+        assert 'input' in call_kwargs
+        assert 'exit' in call_kwargs['input']
 
     def test_detects_not_equipped(self, tmp_path):
         cm = _make_hw_manager(tmp_path)

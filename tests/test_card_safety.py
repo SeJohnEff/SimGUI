@@ -321,8 +321,8 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
 
     @patch('managers.card_manager.CardManager._validate_script_path')
     @patch('subprocess.run')
-    def test_safe_shell_includes_noprompt(self, mock_run, mock_validate):
-        """Safe shell should still use --noprompt."""
+    def test_safe_shell_no_noprompt(self, mock_run, mock_validate):
+        """Safe shell must NOT use --noprompt (it prevents stdin processing)."""
         mock_validate.return_value = '/opt/pysim/pySim-shell.py'
         mock_run.return_value = MagicMock(
             returncode=0, stdout='', stderr='')
@@ -331,7 +331,13 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
         cm._run_pysim_shell_safe('verify_adm')
 
         cmd = mock_run.call_args[0][0]
-        self.assertIn('--noprompt', cmd)
+        self.assertNotIn('--noprompt', cmd)
+        # Verify commands are piped via stdin with 'exit' appended
+        call_kwargs = mock_run.call_args[1] if mock_run.call_args[1] else {}
+        if not call_kwargs:
+            call_kwargs = mock_run.call_args.kwargs
+        self.assertIn('input', call_kwargs)
+        self.assertIn('exit', call_kwargs['input'])
 
 
 class TestBlankCardSafeAuth(unittest.TestCase):

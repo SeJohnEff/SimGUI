@@ -479,9 +479,14 @@ class CardManager:
             timeout: int = 30) -> Tuple[bool, str, str]:
         """Internal: run pySim-shell.py, optionally with -A.
 
-        Uses ``--noprompt`` so that pySim-shell returns a non-zero exit
-        code when card initialisation fails (instead of silently dropping
-        into an unequipped interactive shell that ignores all commands).
+        Commands are piped via stdin in interactive mode (no --noprompt).
+        ``--noprompt`` is intentionally NOT used because it prevents
+        pySim-shell from reading stdin commands — with --noprompt the
+        shell initialises the card and exits immediately, ignoring any
+        piped verify_adm or write commands.
+
+        Init-failure detection relies on scanning stdout/stderr for
+        known error patterns (see ``_PYSIM_SHELL_INIT_ERRORS``).
         """
         if self.cli_path is None:
             return False, "", "pySim not found"
@@ -491,7 +496,7 @@ class CardManager:
             return False, "", "pySim-shell.py not found"
 
         python_exe = self._venv_python or sys.executable
-        cmd = [python_exe, script_path, '-p0', '--noprompt']
+        cmd = [python_exe, script_path, '-p0']
         if adm1_hex:
             cmd += ['-A', adm1_hex]
         # Append 'exit' so the shell terminates cleanly
@@ -507,9 +512,9 @@ class CardManager:
             if result.stderr:
                 logger.info("pySim-shell stderr:\n%s", result.stderr.strip())
 
-            # Even with --noprompt, some pySim versions exit 0 when the
-            # shell couldn't initialise.  Scan output for init-failure
-            # patterns to catch those cases.
+            # Some pySim versions exit 0 even when the shell couldn't
+            # initialise.  Scan output for init-failure patterns to
+            # catch those cases.
             combined_lower = (
                 (result.stdout or '') + '\n' + (result.stderr or '')
             ).lower()
