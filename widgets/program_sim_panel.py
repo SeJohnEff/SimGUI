@@ -505,8 +505,18 @@ class ProgramSIMPanel(ttk.Frame):
             self._set_action_status("ADM1 is required", "Warning.TLabel")
             return
         expected_iccid = self._field_vars["ICCID"].get().strip() or None
-        ok, msg = self._cm.authenticate(
-            adm1, expected_iccid=expected_iccid)
+
+        # Pause the card watcher so its probes don't interfere with
+        # the VERIFY APDU that authenticate() sends to the card.
+        if self._card_watcher:
+            self._card_watcher.pause()
+        try:
+            ok, msg = self._cm.authenticate(
+                adm1, expected_iccid=expected_iccid)
+        finally:
+            if self._card_watcher:
+                self._card_watcher.resume()
+
         if ok:
             self._step = 2
             self._prog_btn.configure(state=tk.NORMAL)

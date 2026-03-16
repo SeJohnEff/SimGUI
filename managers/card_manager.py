@@ -983,6 +983,25 @@ class CardManager:
         if not self._authenticated_adm1_hex:
             return False, "No ADM1 key stored \u2014 re-authenticate first"
 
+        # --- Pre-flight: verify ADM1 retry counter is safe ----------------
+        # Programming sends a VERIFY APDU.  If the counter is already
+        # dangerously low (e.g. from a previous 6f00 failure that was
+        # counted), refuse to proceed to protect the card.
+        remaining = self.check_adm1_retry_counter()
+        if remaining is not None:
+            if remaining == 0:
+                self.card_blocked = True
+                return False, (
+                    "Card is PERMANENTLY LOCKED \u2014 "
+                    "ADM1 retry counter is 0. Cannot program."
+                )
+            if remaining < 2:
+                return False, (
+                    f"DANGER: Only {remaining} ADM1 attempt(s) remaining. "
+                    f"Programming aborted to protect the card. "
+                    f"Re-authenticate first to confirm the key is correct."
+                )
+
         # Determine what changed
         orig = original_data if original_data is not None else self._original_card_data
         empty_card = not orig
@@ -1149,13 +1168,19 @@ class CardManager:
         if not commands:
             return True, "No programmable fields changed"
 
-        # Execute via pySim-shell
-        cmd_str = '\n'.join(commands)
+        # Execute via pySim-shell in SAFE mode (no -A flag).
+        # We prepend verify_adm so the VERIFY APDU is sent *after*
+        # pySim-shell has fully initialised the card transport —
+        # unlike -A which sends VERIFY during init, where it can
+        # be disrupted by reader contention (→ 6f00 errors).
+        verify_cmd = f'verify_adm --pin-is-hex {self._authenticated_adm1_hex}'
+        full_commands = [verify_cmd] + commands
+        cmd_str = '\n'.join(full_commands)
         logger.info("Programming card: fields=%s", fields_written)
         logger.debug("pySim-shell commands:\n%s", cmd_str)
 
-        ok, stdout, stderr = self._run_pysim_shell(
-            self._authenticated_adm1_hex, cmd_str, timeout=30)
+        ok, stdout, stderr = self._run_pysim_shell_safe(
+            cmd_str, timeout=30)
 
         if ok:
             summary = ', '.join(fields_written)

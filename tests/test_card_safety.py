@@ -584,6 +584,134 @@ class TestProgramCardBlockedGuard(unittest.TestCase):
         self.assertIn('No changes', msg)
 
 
+class TestProgramCardRetryCounterSafety(unittest.TestCase):
+    """program_card() must check ADM1 retry counter before programming.
+
+    If the counter is dangerously low (e.g. from a previous 6f00 error),
+    programming must be refused to protect the card.
+    """
+
+    def _make_card_manager(self, remaining=3):
+        from managers.card_manager import CardManager, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/opt/pysim/.venv/bin/python'
+        cm.card_type = MagicMock()
+        cm.authenticated = True
+        cm.card_info = {}
+        cm._authenticated_adm1_hex = '3838383838383838'
+        cm._original_card_data = {'ICCID': '123', 'IMSI': '001'}
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = remaining
+        return cm
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    def test_refuses_when_counter_is_zero(self, mock_retry):
+        cm = self._make_card_manager()
+        mock_retry.return_value = 0
+        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        self.assertFalse(ok)
+        self.assertIn('PERMANENTLY LOCKED', msg)
+        self.assertTrue(cm.card_blocked)
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    def test_refuses_when_counter_is_one(self, mock_retry):
+        cm = self._make_card_manager()
+        mock_retry.return_value = 1
+        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        self.assertFalse(ok)
+        self.assertIn('DANGER', msg)
+        self.assertIn('1', msg)
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._compute_changed_fields')
+    def test_allows_when_counter_is_two(self, mock_changed, mock_retry):
+        cm = self._make_card_manager()
+        mock_retry.return_value = 2
+        mock_changed.return_value = {}  # No changes
+        ok, msg = cm.program_card({'IMSI': '001'})
+        self.assertTrue(ok)  # Passes safety check, no changes to write
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._compute_changed_fields')
+    def test_allows_when_counter_is_three(self, mock_changed, mock_retry):
+        cm = self._make_card_manager()
+        mock_retry.return_value = 3
+        mock_changed.return_value = {}  # No changes
+        ok, msg = cm.program_card({'IMSI': '001'})
+        self.assertTrue(ok)  # Passes safety check
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._compute_changed_fields')
+    def test_allows_when_counter_unavailable(self, mock_changed, mock_retry):
+        """If retry counter can't be read (None), proceed cautiously."""
+        cm = self._make_card_manager()
+        mock_retry.return_value = None
+        mock_changed.return_value = {}  # No changes
+        ok, msg = cm.program_card({'IMSI': '001'})
+        self.assertTrue(ok)  # None means we can't check, so allow
+
+
+class TestProgramNonemptyUseSafeShell(unittest.TestCase):
+    """_program_nonempty_card must use safe shell (no -A flag).
+
+    Instead of -A, it prepends verify_adm to the command sequence.
+    This prevents 6f00 errors from -A being sent during init.
+    """
+
+    def _make_card_manager(self):
+        from managers.card_manager import CardManager, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/opt/pysim/.venv/bin/python'
+        cm.card_type = MagicMock()
+        cm.authenticated = True
+        cm.card_info = {}
+        cm._authenticated_adm1_hex = '3838383838383838'
+        cm._original_card_data = {'ICCID': '123', 'IMSI': '001'}
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = 3
+        return cm
+
+    @patch('managers.card_manager.CardManager.verify_after_program')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_uses_safe_shell_not_unsafe(self, mock_safe, mock_verify):
+        """_program_nonempty_card must call _run_pysim_shell_safe, not _run_pysim_shell."""
+        cm = self._make_card_manager()
+        mock_safe.return_value = (True, 'OK', '')
+        mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
+
+        changed = {'IMSI': '001010000000001'}
+        ok, msg = cm._program_nonempty_card(
+            {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
+        self.assertTrue(ok)
+        mock_safe.assert_called_once()
+        # Verify that verify_adm is in the commands
+        call_args = mock_safe.call_args
+        commands_str = call_args[0][0]  # First positional arg
+        self.assertIn('verify_adm', commands_str)
+        self.assertIn('3838383838383838', commands_str)
+
+    @patch('managers.card_manager.CardManager.verify_after_program')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_verify_adm_is_first_command(self, mock_safe, mock_verify):
+        """verify_adm must be the FIRST command before any writes."""
+        cm = self._make_card_manager()
+        mock_safe.return_value = (True, 'OK', '')
+        mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
+
+        changed = {'IMSI': '001010000000001'}
+        cm._program_nonempty_card(
+            {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
+        commands_str = mock_safe.call_args[0][0]
+        lines = commands_str.strip().split('\n')
+        self.assertTrue(lines[0].startswith('verify_adm'))
+
+
 class TestAuthenticateDetects6983InOutput(unittest.TestCase):
     """When pySim-shell returns 6983, authenticate() must set card_blocked."""
 

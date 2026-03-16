@@ -116,10 +116,28 @@ class CardWatcher:
     def pause(self):
         """Pause polling (e.g. during programming)."""
         self._paused = True
+        logger.debug("CardWatcher paused")
 
     def resume(self):
         """Resume polling after pause."""
         self._paused = False
+        logger.debug("CardWatcher resumed")
+
+    def paused_context(self):
+        """Context manager that pauses polling for the duration of a block.
+
+        Usage::
+
+            with watcher.paused_context():
+                # CardWatcher is paused here
+                card_manager.authenticate(...)
+                card_manager.program_card(...)
+            # CardWatcher automatically resumes
+
+        Safe to nest — only the outermost ``with`` actually resumes.
+        Safe to call even if the watcher is already paused or not running.
+        """
+        return _PausedContext(self)
 
     def register_programmed_card(self, iccid: str) -> None:
         """Cache ATR→ICCID for a just-programmed card.
@@ -289,3 +307,31 @@ class CardWatcher:
                 self.on_card_unknown(iccid)
             except Exception:
                 pass
+
+
+class _PausedContext:
+    """Nestable context manager for :meth:`CardWatcher.paused_context`.
+
+    Tracks nesting depth so that only the outermost ``with`` block
+    actually resumes the watcher.  This prevents an inner block from
+    prematurely resuming polling while an outer block is still running
+    pySim operations.
+    """
+
+    def __init__(self, watcher: CardWatcher):
+        self._watcher = watcher
+
+    def __enter__(self):
+        # Track nesting depth on the watcher instance
+        depth = getattr(self._watcher, '_pause_depth', 0)
+        self._watcher._pause_depth = depth + 1
+        if depth == 0:
+            self._watcher.pause()
+        return self._watcher
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        depth = getattr(self._watcher, '_pause_depth', 1)
+        self._watcher._pause_depth = max(0, depth - 1)
+        if self._watcher._pause_depth == 0:
+            self._watcher.resume()
+        return False  # Don't suppress exceptions

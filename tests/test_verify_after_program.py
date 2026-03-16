@@ -211,11 +211,23 @@ class TestVerifyAfterProgram:
 class TestProgramCardWithVerify:
     """program_card() now auto-verifies after successful write."""
 
+    def _make_nonempty_cm(self):
+        """Create a CardManager set up for non-empty card programming."""
+        cm = _make_hw_card_manager()
+        # Set original data so program_card takes the non-empty path
+        cm._original_card_data = {
+            'ICCID': '899998', 'IMSI': 'old_imsi',
+            'Ki': 'cc' * 16, 'OPc': 'dd' * 16,
+        }
+        return cm
+
     def test_program_and_verify_success(self):
         """Successful write + successful verify → overall True."""
-        cm = _make_hw_card_manager()
+        cm = self._make_nonempty_cm()
 
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "Verification OK",
@@ -228,13 +240,15 @@ class TestProgramCardWithVerify:
 
     def test_program_ok_but_verify_fails(self):
         """Write succeeds but read-back mismatches → overall False."""
-        cm = _make_hw_card_manager()
+        cm = self._make_nonempty_cm()
 
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(False,
-                                        "Verification FAILED — IMSI: wrote X, read Y",
+                                        "Verification FAILED \u2014 IMSI: wrote X, read Y",
                                         {"IMSI": "Y"})):
             ok, msg = cm.program_card(
                 {"IMSI": "X", "Ki": "aa" * 16, "OPc": "bb" * 16})
@@ -244,9 +258,11 @@ class TestProgramCardWithVerify:
 
     def test_program_write_fails_no_verify(self):
         """If pySim-shell write itself fails, verify is never called."""
-        cm = _make_hw_card_manager()
+        cm = self._make_nonempty_cm()
 
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False, "", "sw mismatch 6982")), \
              patch.object(cm, 'verify_after_program') as mock_verify:
             ok, msg = cm.program_card(
@@ -257,11 +273,13 @@ class TestProgramCardWithVerify:
 
     def test_verify_updates_card_info(self):
         """On successful verify, card_info is updated with read-back data."""
-        cm = _make_hw_card_manager()
+        cm = self._make_nonempty_cm()
         cm.card_info = {}
 
         readback = {"ICCID": "899998800000000002", "IMSI": "999880000200001"}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", readback)):
@@ -276,7 +294,9 @@ class TestProgramCardWithVerify:
         cm = _make_hw_card_manager()
         cm._original_card_data = {"IMSI": "12345"}
 
-        with patch.object(cm, 'verify_after_program') as mock_verify:
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3), \
+             patch.object(cm, 'verify_after_program') as mock_verify:
             ok, msg = cm.program_card({"IMSI": "12345"})
 
         assert ok is True

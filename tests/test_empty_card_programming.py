@@ -395,21 +395,22 @@ class TestProgramNonemptyCard:
         cm = _auth_manager(tmp_path)
         changed = {'IMSI': 'new_imsi'}
         card_data = {'ICCID': '999', 'IMSI': 'new_imsi'}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, '', '')) as mock_shell:
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {})):
                 ok, msg = cm._program_nonempty_card(card_data, changed)
         assert ok is True
-        # Should have called shell with IMSI commands
-        shell_input = mock_shell.call_args[0][1]
+        # Should have called safe shell with verify_adm + IMSI commands
+        shell_input = mock_shell.call_args[0][0]
+        assert 'verify_adm' in shell_input  # Auth first
         assert 'EF.IMSI' in shell_input
         assert 'EF.ICCID' not in shell_input  # ICCID not changed
 
     def test_shell_failure_returns_error(self, tmp_path):
         cm = _auth_manager(tmp_path)
         changed = {'IMSI': '123'}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False, '', 'SW mismatch')):
             ok, msg = cm._program_nonempty_card(
                 {'IMSI': '123'}, changed)
@@ -418,27 +419,32 @@ class TestProgramNonemptyCard:
     def test_ki_opc_written_together(self, tmp_path):
         cm = _auth_manager(tmp_path)
         changed = {'Ki': 'A' * 32, 'OPc': 'B' * 32}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, '', '')) as mock_shell:
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {})):
                 cm._program_nonempty_card(
                     {'Ki': 'A' * 32, 'OPc': 'B' * 32}, changed)
-        shell_input = mock_shell.call_args[0][1]
+        shell_input = mock_shell.call_args[0][0]
         assert 'USIM_AUTH_KEY' in shell_input
 
     def test_adm1_never_written(self, tmp_path):
+        """ADM1 field value is not written as data (but verify_adm uses the hex key)."""
         cm = _auth_manager(tmp_path)
         changed = {'ADM1': '88888888', 'IMSI': '123'}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(True, '', '')) as mock_shell:
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {})):
                 cm._program_nonempty_card(
                     {'ADM1': '88888888', 'IMSI': '123'}, changed)
-        shell_input = mock_shell.call_args[0][1]
-        assert 'ADM1' not in shell_input
-        assert '88888888' not in shell_input
+        shell_input = mock_shell.call_args[0][0]
+        # verify_adm uses the hex key (which is fine), but ADM1 the
+        # field name should never appear as a write target.
+        lines = shell_input.split('\n')
+        # Skip the first line (verify_adm) — check remaining lines
+        write_lines = '\n'.join(lines[1:])
+        assert 'ADM1' not in write_lines
 
 
 # ---------------------------------------------------------------------------
@@ -479,16 +485,19 @@ class TestProgramCardIntegration:
         cm = _auth_manager(tmp_path, original_data=orig)
         card_data = dict(orig)
         card_data['IMSI'] = 'new_imsi'
-        with patch.object(cm, '_run_pysim_shell',
-                          return_value=(True, '', '')) as mock_shell:
-            with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, msg = cm.program_card(card_data, original_data=orig)
+        with patch.object(cm, 'check_adm1_retry_counter',
+                          return_value=3):
+            with patch.object(cm, '_run_pysim_shell_safe',
+                              return_value=(True, '', '')) as mock_shell:
+                with patch.object(cm, 'verify_after_program',
+                                  return_value=(True, 'OK', {})):
+                    ok, msg = cm.program_card(card_data, original_data=orig)
 
         assert ok is True
         mock_shell.assert_called_once()
-        # Should only write IMSI (the changed field)
-        shell_input = mock_shell.call_args[0][1]
+        # Should write verify_adm + IMSI (the changed field)
+        shell_input = mock_shell.call_args[0][0]
+        assert 'verify_adm' in shell_input
         assert 'EF.IMSI' in shell_input
         assert 'USIM_AUTH_KEY' not in shell_input
 

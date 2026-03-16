@@ -532,3 +532,116 @@ class TestCheckOnce:
         cm.iccid = None
         w._check_once()  # Should not raise
         assert w._last_iccid is None
+
+
+# ---------------------------------------------------------------------------
+# paused_context — nestable context manager
+# ---------------------------------------------------------------------------
+
+class TestPausedContext:
+    """Tests for CardWatcher.paused_context() nestable context manager."""
+
+    def test_basic_pause_resume(self):
+        """Context manager pauses on enter, resumes on exit."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+        assert not w.paused
+
+        with w.paused_context():
+            assert w.paused
+        assert not w.paused
+
+    def test_nested_pause_only_outermost_resumes(self):
+        """Nested paused_context blocks don't prematurely resume."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+
+        with w.paused_context():
+            assert w.paused
+            with w.paused_context():
+                assert w.paused
+            # Inner exited — should still be paused
+            assert w.paused
+        # Outer exited — now should be resumed
+        assert not w.paused
+
+    def test_triple_nesting(self):
+        """Triple nesting works correctly."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+
+        with w.paused_context():
+            with w.paused_context():
+                with w.paused_context():
+                    assert w.paused
+                assert w.paused
+            assert w.paused
+        assert not w.paused
+
+    def test_exception_in_block_still_resumes(self):
+        """Watcher is resumed even if exception occurs inside block."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+
+        with pytest.raises(ValueError):
+            with w.paused_context():
+                assert w.paused
+                raise ValueError("test error")
+        assert not w.paused
+
+    def test_exception_in_nested_block_still_resumes(self):
+        """Exception in nested block resumes correctly."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+
+        with pytest.raises(ValueError):
+            with w.paused_context():
+                with w.paused_context():
+                    raise ValueError("inner error")
+        # Both exited due to exception — should be resumed
+        assert not w.paused
+
+    def test_already_paused_watcher(self):
+        """Context manager works even if watcher was already paused."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+        w.pause()  # Manually paused before context
+        assert w.paused
+
+        with w.paused_context():
+            assert w.paused
+        # Context manager resumes because depth went 0→1→0
+        assert not w.paused
+
+    def test_paused_context_returns_watcher(self):
+        """The 'as' variable in 'with ... as w' is the watcher."""
+        cm = FakeCardManager()
+        w = CardWatcher(cm)
+        with w.paused_context() as ctx:
+            assert ctx is w
+
+    def test_poll_loop_respects_paused_context(self):
+        """Polling loop skips checks while paused via context manager."""
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = "89000000000000000001"
+        w = CardWatcher(cm, poll_interval=0.1)
+        detected = []
+        w.on_card_detected = lambda *a: detected.append(a)
+
+        w.start()
+        # Let it detect the card
+        time.sleep(0.3)
+        initial_count = cm.detect_call_count
+        assert initial_count > 0
+
+        # Pause via context manager — poll count should freeze
+        with w.paused_context():
+            count_at_pause = cm.detect_call_count
+            time.sleep(0.3)
+            assert cm.detect_call_count == count_at_pause
+
+        # After resume, polling should continue
+        time.sleep(0.3)
+        assert cm.detect_call_count > count_at_pause
+        w.stop()

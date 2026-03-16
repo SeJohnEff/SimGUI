@@ -956,8 +956,16 @@ class SimGUIApp:
         if adm1 is None:
             return
         expected_iccid = self._get_expected_iccid()
-        ok, msg = self._card_manager.authenticate(
-            adm1, force=force, expected_iccid=expected_iccid)
+
+        # Pause the card watcher so its probes don't interfere with
+        # the VERIFY APDU that authenticate() sends to the card.
+        self._card_watcher.pause()
+        try:
+            ok, msg = self._card_manager.authenticate(
+                adm1, force=force, expected_iccid=expected_iccid)
+        finally:
+            self._card_watcher.resume()
+
         if ok:
             self._card_panel.set_status("authenticated", msg)
             self._card_panel.set_auth_status(True)
