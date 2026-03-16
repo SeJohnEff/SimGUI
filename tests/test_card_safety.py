@@ -332,12 +332,12 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
 
         cmd = mock_run.call_args[0][0]
         self.assertNotIn('--noprompt', cmd)
-        # Verify commands are piped via stdin with 'exit' appended
+        # Verify commands are piped via stdin with 'quit' appended
         call_kwargs = mock_run.call_args[1] if mock_run.call_args[1] else {}
         if not call_kwargs:
             call_kwargs = mock_run.call_args.kwargs
         self.assertIn('input', call_kwargs)
-        self.assertIn('exit', call_kwargs['input'])
+        self.assertIn('quit', call_kwargs['input'])
 
 
 class TestBlankCardSafeAuth(unittest.TestCase):
@@ -514,7 +514,8 @@ class TestAuthenticateWrongKeyUpdatesRetryCounter(unittest.TestCase):
 
         ok, msg = cm.authenticate('99999999')
         self.assertFalse(ok)
-        self.assertIn('wrong ADM1', msg)
+        self.assertIn('FAILED', msg)
+        self.assertIn('6982', msg)
         self.assertIn('2 attempt(s) remaining', msg)
         # check_adm1_retry_counter called twice: pre-flight + post-failure
         self.assertEqual(mock_retry.call_count, 2)
@@ -765,6 +766,179 @@ class TestAuthenticateDetects6983InOutput(unittest.TestCase):
         self.assertTrue(cm.card_blocked)
         self.assertEqual(cm._adm1_remaining_attempts, 0)
         self.assertIn('PERMANENTLY LOCKED', msg)
+
+
+class TestPySimShellImplDetectsCommandErrors(unittest.TestCase):
+    """_run_pysim_shell_impl must detect APDU errors even when exit code is 0.
+
+    pySim-shell exits 0 even when verify_adm fails with SwMatchError/6f00.
+    The impl must scan stdout/stderr for error patterns and return False.
+    This is the ROOT CAUSE of the v0.5.17 card-locking bug.
+    """
+
+    def _make_card_manager(self):
+        from managers.card_manager import CardManager, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/opt/pysim/.venv/bin/python'
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = None
+        return cm
+
+    @patch('managers.card_manager.CardManager._validate_script_path')
+    @patch('subprocess.run')
+    def test_swmatcherror_6f00_detected(self, mock_run, mock_validate):
+        """SwMatchError with 6f00 in stderr must return failure.
+
+        This is the EXACT output from the v0.5.17 bug that locked a card.
+        """
+        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='pySIM-shell (MF)>',
+            stderr='SwMatchError: Expected 9000 and got 6f00',
+        )
+        cm = self._make_card_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_impl(
+            None, 'verify_adm --pin-is-hex 3838383838383838')
+        self.assertFalse(ok, "Must return False when SwMatchError in stderr")
+        self.assertIn('SwMatchError', stderr)
+
+    @patch('managers.card_manager.CardManager._validate_script_path')
+    @patch('subprocess.run')
+    def test_swmatcherror_6982_detected(self, mock_run, mock_validate):
+        """SwMatchError with 6982 (wrong key) must return failure."""
+        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='pySIM-shell (MF)>',
+            stderr='SwMatchError: Expected 9000 and got 6982',
+        )
+        cm = self._make_card_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_impl(
+            None, 'verify_adm --pin-is-hex 0000000000000000')
+        self.assertFalse(ok, "Must return False when 6982 in stderr")
+
+    @patch('managers.card_manager.CardManager._validate_script_path')
+    @patch('subprocess.run')
+    def test_swmatcherror_6983_detected(self, mock_run, mock_validate):
+        """SwMatchError with 6983 (blocked) must return failure."""
+        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='',
+            stderr='SwMatchError: Expected 9000 and got 6983',
+        )
+        cm = self._make_card_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_impl(
+            None, 'verify_adm --pin-is-hex 0000000000000000')
+        self.assertFalse(ok, "Must return False when 6983 in stderr")
+
+    @patch('managers.card_manager.CardManager._validate_script_path')
+    @patch('subprocess.run')
+    def test_clean_output_returns_success(self, mock_run, mock_validate):
+        """Clean output with exit code 0 should return True."""
+        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='pySIM-shell (MF)>',
+            stderr='',
+        )
+        cm = self._make_card_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_impl(
+            None, 'verify_adm --pin-is-hex 3838383838383838')
+        self.assertTrue(ok, "Clean output should return True")
+
+    @patch('managers.card_manager.CardManager._validate_script_path')
+    @patch('subprocess.run')
+    def test_quit_used_not_exit(self, mock_run, mock_validate):
+        """pySim-shell uses 'quit', not 'exit'."""
+        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='', stderr='')
+        cm = self._make_card_manager()
+        cm._run_pysim_shell_impl(None, 'some_command')
+        call_kwargs = mock_run.call_args.kwargs
+        stdin_input = call_kwargs.get('input', '')
+        self.assertIn('quit', stdin_input,
+                      "Must use 'quit' to terminate pySim-shell")
+        self.assertNotIn('\nexit\n', stdin_input,
+                         "Must NOT use 'exit' — pySim-shell doesn't recognize it")
+
+
+class TestAuthenticateDetects6f00(unittest.TestCase):
+    """authenticate() must detect 6f00 errors and report failure.
+
+    6f00 is a generic APDU error that consumes an ADM1 attempt.
+    Previously only 6982 and 6983 were checked.
+    """
+
+    def _make_card_manager(self):
+        from managers.card_manager import CardManager, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/opt/pysim/.venv/bin/python'
+        cm.card_type = MagicMock()
+        cm.authenticated = False
+        cm.card_info = {}
+        cm._authenticated_adm1_hex = None
+        cm._original_card_data = {'ICCID': '123'}
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = 3
+        return cm
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_6f00_returns_failure(self, mock_safe, mock_retry):
+        """Exact scenario from v0.5.17 bug: 6f00 with exit code 0."""
+        cm = self._make_card_manager()
+        mock_retry.side_effect = [3, 2]
+        # _run_pysim_shell_safe now returns False (after the _impl fix),
+        # and stderr contains the SwMatchError with 6f00
+        mock_safe.return_value = (
+            False, 'pySIM-shell (MF)>',
+            'SwMatchError: Expected 9000 and got 6f00')
+
+        ok, msg = cm.authenticate('88888888')
+        self.assertFalse(ok, "authenticate() must return False on 6f00")
+        self.assertFalse(cm.authenticated, "Must NOT set authenticated=True")
+        self.assertIn('6f00', msg.lower())
+        self.assertIn('FAILED', msg)
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_6f00_rechecks_retry_counter(self, mock_safe, mock_retry):
+        """After 6f00, retry counter should be re-checked."""
+        cm = self._make_card_manager()
+        mock_retry.side_effect = [3, 0]  # Pre-flight 3, post-failure 0 (blocked!)
+        mock_safe.return_value = (
+            False, '', 'SwMatchError: Expected 9000 and got 6f00')
+
+        ok, msg = cm.authenticate('88888888')
+        self.assertFalse(ok)
+        self.assertTrue(cm.card_blocked, "Must set card_blocked when counter=0")
+        # check_adm1_retry_counter should be called twice
+        self.assertEqual(mock_retry.call_count, 2)
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_swmatcherror_without_specific_sw_still_fails(
+            self, mock_safe, mock_retry):
+        """SwMatchError without a known SW code should still trigger failure."""
+        cm = self._make_card_manager()
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (
+            False, '', 'SwMatchError: Expected 9000 and got 6a82')
+
+        ok, msg = cm.authenticate('88888888')
+        self.assertFalse(ok)
+        # The swmatcherror pattern catches this even though 6a82 isn't
+        # in the specific SW checks
+        self.assertIn('FAILED', msg)
 
 
 if __name__ == '__main__':

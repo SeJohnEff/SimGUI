@@ -174,10 +174,10 @@ class TestRunPysimShellInitDetection:
         # -A flag should still be present when using _run_pysim_shell
         assert '-A' in cmd
         assert 'DEADBEEF' in cmd
-        # stdin must pipe commands with 'exit' appended
+        # stdin must pipe commands with 'quit' appended
         call_kwargs = mock_run.call_args.kwargs
         assert 'input' in call_kwargs
-        assert 'exit' in call_kwargs['input']
+        assert 'quit' in call_kwargs['input']
 
     def test_detects_not_equipped(self, tmp_path):
         cm = _make_hw_manager(tmp_path)

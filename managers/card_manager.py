@@ -446,6 +446,19 @@ class CardManager:
         'no card',
     )
 
+    # Command-level errors: pySim-shell can exit 0 even when an
+    # individual command (e.g. verify_adm) fails.  These patterns
+    # in stdout/stderr indicate an APDU or command failure.
+    _PYSIM_SHELL_CMD_ERRORS = (
+        'swmatcherror',       # Python exception from pySim
+        'sw: 6f00',           # Generic "no precise diagnosis"
+        'sw: 6982',           # Security status not satisfied
+        'sw: 6983',           # Auth method blocked (permanent)
+        'got 6f00',           # "Expected 9000 and got 6f00"
+        'got 6982',           # "Expected 9000 and got 6982"
+        'got 6983',           # "Expected 9000 and got 6983"
+    )
+
     def _run_pysim_shell_safe(self, commands: str,
                               timeout: int = 30) -> Tuple[bool, str, str]:
         """Run pySim-shell.py WITHOUT -A flag (no auto-authentication).
@@ -499,8 +512,9 @@ class CardManager:
         cmd = [python_exe, script_path, '-p0']
         if adm1_hex:
             cmd += ['-A', adm1_hex]
-        # Append 'exit' so the shell terminates cleanly
-        full_input = commands.rstrip('\n') + '\nexit\n'
+        # Append 'quit' so the shell terminates cleanly.
+        # NOTE: pySim-shell uses 'quit', NOT 'exit'.
+        full_input = commands.rstrip('\n') + '\nquit\n'
         logger.debug("pySim-shell input:\n%s", full_input)
         try:
             result = subprocess.run(
@@ -512,9 +526,9 @@ class CardManager:
             if result.stderr:
                 logger.info("pySim-shell stderr:\n%s", result.stderr.strip())
 
-            # Some pySim versions exit 0 even when the shell couldn't
-            # initialise.  Scan output for init-failure patterns to
-            # catch those cases.
+            # pySim-shell can exit 0 even when commands fail.
+            # Scan output for BOTH init-failure AND command-failure
+            # patterns to catch those cases.
             combined_lower = (
                 (result.stdout or '') + '\n' + (result.stderr or '')
             ).lower()
@@ -525,6 +539,20 @@ class CardManager:
             if init_failed:
                 logger.warning(
                     "pySim-shell init failure detected in output")
+                return (False,
+                        result.stdout.strip(),
+                        result.stderr.strip())
+
+            # Check for command-level APDU failures (e.g. verify_adm
+            # returning 6f00).  pySim-shell exits 0 even on these.
+            cmd_failed = any(
+                pat in combined_lower
+                for pat in self._PYSIM_SHELL_CMD_ERRORS
+            )
+            if cmd_failed:
+                logger.warning(
+                    "pySim-shell command failure detected in output "
+                    "(APDU error despite exit code 0)")
                 return (False,
                         result.stdout.strip(),
                         result.stderr.strip())
@@ -773,8 +801,23 @@ class CardManager:
                 "authenticated during programming"
             )
 
-        # Check for specific failure patterns
-        if 'sw mismatch' in combined and '6982' in combined:
+        # Check for specific failure patterns.
+        # NOTE: pySim reports errors as "Expected 9000 and got XXXX"
+        # (SwMatchError).  We check for all known VERIFY failure SWs.
+
+        # 6983 = permanently blocked — check first
+        if '6983' in combined:
+            self.card_blocked = True
+            self._adm1_remaining_attempts = 0
+            return False, (
+                "Card is PERMANENTLY LOCKED \u2014 "
+                "ADM1 authentication blocked (0 attempts remaining)"
+            )
+
+        # 6982 = wrong key (security status not satisfied)
+        # 6f00 = generic error (often means VERIFY failed)
+        # Both consume an ADM1 attempt.
+        if '6982' in combined or '6f00' in combined or 'swmatcherror' in combined:
             # Re-check retry counter after failure
             remaining = self.check_adm1_retry_counter()
             remaining_msg = ""
@@ -782,16 +825,11 @@ class CardManager:
                 remaining_msg = f" ({remaining} attempt(s) remaining)"
                 if remaining == 0:
                     self.card_blocked = True
+            sw_code = '6f00' if '6f00' in combined else '6982'
             return False, (
-                f"Authentication FAILED \u2014 wrong ADM1 key.{remaining_msg} "
+                f"Authentication FAILED \u2014 VERIFY returned SW {sw_code}."
+                f"{remaining_msg} "
                 f"3 wrong attempts = permanent card lock!"
-            )
-        if 'sw mismatch' in combined and '6983' in combined:
-            self.card_blocked = True
-            self._adm1_remaining_attempts = 0
-            return False, (
-                "Card is PERMANENTLY LOCKED \u2014 "
-                "ADM1 authentication blocked (0 attempts remaining)"
             )
 
         error_msg = self._clean_pysim_error(stderr) if stderr else "Authentication failed"
