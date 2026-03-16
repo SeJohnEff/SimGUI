@@ -41,6 +41,11 @@ _SYSMOCOM_FIELDS = {
 # Case-insensitive lookup → canonical name
 _FIELD_LOOKUP: dict[str, str] = {f.upper(): f for f in _SYSMOCOM_FIELDS}
 
+# Aliases: some sysmocom files use "ADM" instead of "ADM1", etc.
+_FIELD_LOOKUP["ADM"] = "ADM1"
+_FIELD_LOOKUP["OPC"] = "OPC"    # already there via set, but explicit
+_FIELD_LOOKUP["KI"] = "Ki"     # already there via set, but explicit
+
 # Minimum number of recognised field names to consider a block a header
 _MIN_HEADER_FIELDS = 5
 
