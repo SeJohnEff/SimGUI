@@ -99,7 +99,7 @@ class ProgramSIMPanel(ttk.Frame):
             "IMSI": "International Mobile Subscriber Identity.\n6-15 digits. Example: 99988000301001",
             "Ki": "Authentication key (hex).\n32 hex characters. Example: E049AF7D...C03FD919",
             "OPc": "Operator key (hex).\n32 hex characters. Example: 9EB1A951...D4053A0E",
-            "ADM1": "Admin key for card access.\n8 decimal digits or 16 hex chars.\n\u26a0 3 wrong attempts = permanent lock!",
+            "ADM1": "Admin key for card access.\n8 ASCII chars (e.g. 88888888) or 16 hex chars (e.g. 3838383838383838).\n\u26a0 3 wrong attempts = permanent lock!",
             "ACC": "Access Control Class.\n4 hex digits. Example: 0001",
             "SPN": "Service Provider Name.\nExample: BOLIDEN",
             "FPLMN": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",

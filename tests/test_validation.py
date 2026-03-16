@@ -28,17 +28,26 @@ class TestValidateAdm1:
         assert validate_adm1('abcdef0123456789') is None
         assert validate_adm1('ABCDEF0123456789') is None
 
-    def test_too_short_decimal(self):
-        assert validate_adm1('1234567') is not None
+    def test_short_ascii_valid(self):
+        # ≤8 ASCII chars are valid (pySim pads with FF)
+        assert validate_adm1('1234567') is None
+        assert validate_adm1('ABC') is None
 
-    def test_too_long_decimal(self):
+    def test_too_long_ascii(self):
+        # 9 ASCII chars is too long (and not 16 hex)
         assert validate_adm1('123456789') is not None
 
-    def test_non_digit_non_hex(self):
-        assert validate_adm1('abcdefgh') is not None
+    def test_8_ascii_with_letters(self):
+        # 8 ASCII chars including letters are valid
+        assert validate_adm1('abcdefgh') is None
+        assert validate_adm1('ADM1KEY!') is None
 
     def test_wrong_length_hex(self):
+        # 15 hex chars: too long for ASCII, too short for hex
         assert validate_adm1('ABCDEF012345678') is not None  # 15 chars
+
+    def test_non_printable_rejected(self):
+        assert validate_adm1('abc\x00defg') is not None  # null byte
 
 
 class TestValidateImsi:
@@ -115,7 +124,8 @@ class TestValidateCardData:
         assert any('Ki' in e for e in errors)
 
     def test_multiple_errors(self):
-        errors = validate_card_data({'IMSI': 'x', 'ICCID': 'y', 'ADM1': 'z'})
+        # ADM1 'z' is valid (1 ASCII char), so use a non-printable to trigger error
+        errors = validate_card_data({'IMSI': 'x', 'ICCID': 'y', 'ADM1': 'toolongvalue9chars'})
         assert len(errors) >= 3
 
 

@@ -82,13 +82,13 @@ class ADM1Dialog(tk.Toplevel):
         self.adm1_entry.grid(row=row, column=1, sticky='ew', pady=(0, pad('small')))
         self.adm1_entry.bind('<Return>', lambda e: self._on_ok())
         add_tooltip(self.adm1_entry,
-                    "Enter the ADM1 admin key (8 decimal digits or 16 hex characters)\n"
+                    "Enter the ADM1 admin key (\u22648 ASCII chars or 16 hex characters)\n"
                     "\u26a0 3 wrong attempts = permanent card lock!")
         row += 1
 
         # Validation label
         self.validation_label = ttk.Label(
-            main_frame, text="8 digits or 16 hex chars",
+            main_frame, text="\u22648 ASCII chars or 16 hex chars",
             foreground=ModernTheme.get_color('disabled'),
             font=ModernTheme.get_font('small'))
         self.validation_label.grid(row=row, column=1, sticky=tk.W)
@@ -123,7 +123,7 @@ class ADM1Dialog(tk.Toplevel):
             main_frame,
             text="The ADM1 key is unique to each card.\n"
                  "It should be printed on your card carrier.\n"
-                 "Accepts 8 decimal digits or 16 hex characters.",
+                 "Accepts \u22648 ASCII characters or 16 hex characters.",
             font=ModernTheme.get_font('small'),
             foreground=ModernTheme.get_color('disabled')
         ).grid(row=row, column=0, columnspan=2, pady=(pad('small'), 0))
@@ -133,7 +133,7 @@ class ADM1Dialog(tk.Toplevel):
         value = self.adm1_entry.get()
         if len(value) == 0:
             self.validation_label.config(
-                text="8 digits or 16 hex chars",
+                text="\u22648 ASCII chars or 16 hex chars",
                 foreground=ModernTheme.get_color('disabled'))
             self.ok_button.config(state=tk.DISABLED)
             return
@@ -145,12 +145,9 @@ class ADM1Dialog(tk.Toplevel):
                 foreground=ModernTheme.get_color('success'))
             self.ok_button.config(state=tk.NORMAL)
         else:
-            # Show progress hints
-            if value.isdigit() and len(value) < 8:
-                self.validation_label.config(
-                    text=f"{8 - len(value)} more digits needed",
-                    foreground=ModernTheme.get_color('warning'))
-            elif all(c in '0123456789abcdefABCDEF' for c in value) and len(value) < 16:
+            # Show progress hint for 9-15 hex chars (approaching 16-hex format)
+            if (8 < len(value) < 16
+                    and all(c in '0123456789abcdefABCDEF' for c in value)):
                 self.validation_label.config(
                     text=f"{16 - len(value)} more hex chars needed",
                     foreground=ModernTheme.get_color('warning'))
@@ -166,7 +163,7 @@ class ADM1Dialog(tk.Toplevel):
         if validate_adm1(value) is not None:
             messagebox.showerror(
                 "Invalid Input",
-                "ADM1 key must be 8 decimal digits or 16 hex characters")
+                "ADM1 key must be \u22648 ASCII characters or 16 hex characters")
             return
         if self.remaining_attempts < 3 and not self.force_auth.get():
             result = messagebox.askyesno(

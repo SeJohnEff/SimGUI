@@ -423,18 +423,28 @@ class CardManager:
         return self.card_info.get("ICCID")
 
     def _adm1_to_hex(self, adm1: str) -> str:
-        """Convert ADM1 to the hex format expected by pySim -A flag.
+        """Convert ADM1 to the 16-char hex string expected by pySim ``-A``.
 
-        If adm1 is 8 decimal digits, encode as ASCII hex (each char -> 2 hex).
-        If adm1 is already 16 hex chars, return as-is (uppercase).
+        ADM1 is an 8-byte key.  Files store it in one of two formats:
+
+        - **16 hex chars** (e.g. ``3838383838383838``) — the raw key
+          bytes in hex.  Passed through as-is.
+        - **≤8 ASCII chars** (e.g. ``88888888``) — the human-readable
+          form, identical to what you type in ``verify_adm 88888888``.
+          Each character is encoded to its ASCII hex value.
+
+        Detection is by length: 16 hex chars → already hex; otherwise
+        treat as ASCII and encode.
         """
         import re
-        if re.match(r'^\d{8}$', adm1):
-            # ASCII-encode each digit: e.g. '8' -> 0x38 -> '38'
-            return ''.join(f'{ord(c):02X}' for c in adm1)
+        # Already in hex format (16 hex chars = 8 bytes)
         if re.match(r'^[0-9a-fA-F]{16}$', adm1):
             return adm1.upper()
-        return adm1  # pass through, let pySim error
+        # ASCII key (≤8 chars) — encode each char to hex
+        if len(adm1) <= 8:
+            return ''.join(f'{ord(c):02X}' for c in adm1)
+        # Unexpected format — pass through, let pySim error
+        return adm1
 
     # Patterns in pySim-shell stdout/stderr that indicate the shell
     # failed to initialise properly (card not equipped).  When these

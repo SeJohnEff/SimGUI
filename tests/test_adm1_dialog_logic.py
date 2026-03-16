@@ -181,7 +181,7 @@ class ADM1DialogHarness:
         """Replicate _validate_input logic from ADM1Dialog."""
         value = self.adm1_entry.get()
         if len(value) == 0:
-            self.validation_label.config(text="8 digits or 16 hex chars")
+            self.validation_label.config(text="\u22648 ASCII chars or 16 hex chars")
             self.ok_button.config(state="disabled")
             return
 
@@ -190,10 +190,9 @@ class ADM1DialogHarness:
             self.validation_label.config(text="Valid format")
             self.ok_button.config(state="normal")
         else:
-            if value.isdigit() and len(value) < 8:
-                self.validation_label.config(
-                    text=f"{8 - len(value)} more digits needed")
-            elif all(c in "0123456789abcdefABCDEF" for c in value) and len(value) < 16:
+            # Show progress hint for 9-15 hex chars (approaching 16-hex format)
+            if (8 < len(value) < 16
+                    and all(c in "0123456789abcdefABCDEF" for c in value)):
                 self.validation_label.config(
                     text=f"{16 - len(value)} more hex chars needed")
             else:
@@ -206,7 +205,7 @@ class ADM1DialogHarness:
         if self._validate_adm1(value) is not None:
             self._messagebox.showerror(
                 "Invalid Input",
-                "ADM1 key must be 8 decimal digits or 16 hex characters")
+                "ADM1 key must be \u22648 ASCII characters or 16 hex characters")
             return
         if self.remaining_attempts < 3 and not self.force_auth.get():
             result = self._messagebox.askyesno(
@@ -267,26 +266,34 @@ class TestADM1ValidateInput:
         d._validate_input()
         assert d.ok_button._state == "normal"
 
-    def test_partial_digit_shows_remaining_hint(self):
-        """Partial digit input shows 'N more digits needed'."""
+    def test_short_ascii_is_valid(self):
+        """Short ASCII input (≤8 chars) is immediately valid."""
         d = self._dialog()
-        d.adm1_entry._value = "123"  # 3 digits, need 5 more
+        d.adm1_entry._value = "123"  # 3 ASCII chars — valid
         d._validate_input()
-        assert "5 more digits" in d.validation_label._text
+        assert d.ok_button._state == "normal"
+        assert "Valid" in d.validation_label._text
+
+    def test_partial_hex_over_8_shows_hint(self):
+        """9-15 hex chars shows 'N more hex chars needed'."""
+        d = self._dialog()
+        d.adm1_entry._value = "0A1B2C3D4E"  # 10 hex chars, need 6 more
+        d._validate_input()
+        assert "6 more hex" in d.validation_label._text
         assert d.ok_button._state == "disabled"
 
-    def test_partial_hex_shows_remaining_hint(self):
-        """Partial hex input shows 'N more hex chars needed'."""
+    def test_short_hex_is_valid_as_ascii(self):
+        """6 hex chars (≤8) is valid as ASCII — no progress hint."""
         d = self._dialog()
-        d.adm1_entry._value = "0A1B2C"  # 6 hex chars, need 10 more
+        d.adm1_entry._value = "0A1B2C"  # 6 chars — valid as ≤8 ASCII
         d._validate_input()
-        assert "10 more hex" in d.validation_label._text
-        assert d.ok_button._state == "disabled"
+        assert d.ok_button._state == "normal"
+        assert "Valid" in d.validation_label._text
 
     def test_invalid_input_shows_error(self):
-        """Input that is neither digits-only nor hex shows error text."""
+        """Input that is too long for ASCII and not 16-hex shows error."""
         d = self._dialog()
-        d.adm1_entry._value = "GGGG!"  # non-hex characters
+        d.adm1_entry._value = "toolongvalue!"  # >8 chars, not 16 hex
         d._validate_input()
         assert d.ok_button._state == "disabled"
 
@@ -317,7 +324,7 @@ class TestADM1OnOk:
     def test_invalid_input_shows_error_dialog(self):
         """_on_ok with invalid input shows error messagebox."""
         _msgbox_mod.reset_mock()
-        d = self._dialog(adm1_val="BAD")
+        d = self._dialog(adm1_val="toolongvalue9")
         d._on_ok()
         _msgbox_mod.showerror.assert_called_once()
         assert d.adm1_value is None  # not set
@@ -424,6 +431,7 @@ class TestADM1DialogImport:
         from utils.validation import validate_adm1
         assert validate_adm1("12345678") is None   # valid 8 digits
         assert validate_adm1("0A1B2C3D4E5F6789") is None  # valid 16 hex
-        assert validate_adm1("BAD") is not None   # invalid
+        assert validate_adm1("BAD") is None         # valid: 3 ASCII chars
+        assert validate_adm1("toolong99") is not None # invalid: >8 and not 16 hex
         # Note: empty string returns None (caller handles length-0 case before calling)
         # This matches ADM1Dialog._validate_input which checks len(value) == 0 first

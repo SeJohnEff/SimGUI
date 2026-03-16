@@ -1,9 +1,11 @@
 """
 Shared validation utilities for SIM card data.
 
-ADM1 keys can be either:
-- 8 decimal digits (e.g. "12345678") — most sysmo-usim-tool cards
-- 16 hexadecimal characters (e.g. "4142434445464748") — some card models / pySim
+ADM1 keys can be in two formats:
+- ≤8 ASCII characters (e.g. "88888888") — the human-readable form,
+  identical to what you type in ``verify_adm 88888888``.
+- 16 hexadecimal characters (e.g. "3838383838383838") — the raw 8-byte
+  key in hex notation, as stored in some delivery files.
 """
 
 import re
@@ -19,15 +21,17 @@ def validate_adm1(value: str) -> Optional[str]:
     """Validate an ADM1 key.
 
     Returns None if valid, or an error message string.
-    Accepts 8 decimal digits or 16 hex characters.
+    Accepts ≤8 ASCII characters or 16 hex characters.
     """
     if not value:
         return None  # empty is OK (field may be optional)
-    if _ADM1_DECIMAL_RE.match(value):
-        return None
+    # 16 hex chars = raw key in hex notation
     if _ADM1_HEX_RE.match(value):
         return None
-    return "ADM1 must be 8 decimal digits or 16 hex characters"
+    # ≤8 printable ASCII chars = human-readable key
+    if len(value) <= 8 and all(32 <= ord(c) <= 126 for c in value):
+        return None
+    return "ADM1 must be ≤8 ASCII characters or 16 hex characters"
 
 
 def validate_imsi(value: str) -> Optional[str]:
