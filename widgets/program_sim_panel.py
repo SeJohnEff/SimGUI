@@ -400,10 +400,31 @@ class ProgramSIMPanel(ttk.Frame):
     # ---- 2-step flow (auto-detect replaces manual Detect) ---------------
 
     def _reset_step(self):
-        self._step = 0
-        self._auth_btn.configure(state=tk.DISABLED)
-        self._prog_btn.configure(state=tk.DISABLED)
-        self._set_action_status("Insert a SIM card...")
+        """Reset the workflow step.
+
+        If a card is currently detected (step >= 1), reset back to
+        step 1 (detected, needs auth) instead of step 0 (no card).
+        This prevents the panel from showing 'Insert a SIM card'
+        when a card is already inserted.
+        """
+        if self._detected_non_empty or self._step >= 1:
+            # Card is present — reset to 'detected' (needs re-auth)
+            self._step = 1
+            self._auth_btn.configure(state=tk.NORMAL)
+            self._prog_btn.configure(state=tk.DISABLED)
+            iccid = self._field_vars["ICCID"].get().strip()
+            if iccid:
+                self._set_action_status(
+                    f"Card detected (ICCID {iccid}) \u2014 authenticate to program")
+            else:
+                self._set_action_status(
+                    "Blank card detected \u2014 authenticate to program")
+        else:
+            # No card present
+            self._step = 0
+            self._auth_btn.configure(state=tk.DISABLED)
+            self._prog_btn.configure(state=tk.DISABLED)
+            self._set_action_status("Insert a SIM card...")
 
     def _fields_have_data(self) -> bool:
         """Return True if any form field (beyond ICCID) has a value.
@@ -489,9 +510,10 @@ class ProgramSIMPanel(ttk.Frame):
 
     def on_card_removed(self):
         """Called by CardWatcher when the card is removed."""
+        self._detected_non_empty = False
+        self._step = 0  # clear before _reset_step so it shows 'Insert SIM'
         self._reset_step()
         self._original_form_data = {}
-        self._detected_non_empty = False
         for key, _, _ in _FORM_FIELDS:
             self._field_vars[key].set("")
         # Restore ICCID to editable (will be locked again on next detect)
