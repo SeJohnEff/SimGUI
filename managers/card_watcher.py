@@ -55,6 +55,9 @@ class CardWatcher:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._paused = False
+        # Lock held while a poll is in progress.  pause() acquires it
+        # to guarantee the reader is idle before returning.
+        self._poll_lock = threading.Lock()
 
         # Last known state
         self._last_iccid: Optional[str] = None
@@ -114,9 +117,18 @@ class CardWatcher:
         logger.info("CardWatcher stopped")
 
     def pause(self):
-        """Pause polling (e.g. during programming)."""
+        """Pause polling (e.g. during programming).
+
+        BLOCKS until any in-flight poll completes.  This guarantees
+        the PC/SC reader is idle and not held by the watcher when
+        this method returns — critical for avoiding 6f00 errors on
+        USB readers (especially VM passthrough).
+        """
         self._paused = True
-        logger.debug("CardWatcher paused")
+        # Wait for any in-flight poll to release the reader.
+        self._poll_lock.acquire()
+        self._poll_lock.release()
+        logger.debug("CardWatcher paused (reader idle)")
 
     def resume(self):
         """Resume polling after pause."""
@@ -156,15 +168,21 @@ class CardWatcher:
         """Main polling loop — runs on background thread."""
         while not self._stop_event.is_set():
             if not self._paused:
-                try:
-                    self._check_once()
-                except Exception as exc:
-                    logger.error("CardWatcher poll error: %s", exc)
-                    if self.on_error:
+                with self._poll_lock:
+                    # Re-check after acquiring the lock — pause() may
+                    # have been called while we were waiting.
+                    if self._paused:
+                        pass  # skip this cycle
+                    else:
                         try:
-                            self.on_error(str(exc))
-                        except Exception:
-                            pass
+                            self._check_once()
+                        except Exception as exc:
+                            logger.error("CardWatcher poll error: %s", exc)
+                            if self.on_error:
+                                try:
+                                    self.on_error(str(exc))
+                                except Exception:
+                                    pass
 
             self._stop_event.wait(self._poll_interval)
 

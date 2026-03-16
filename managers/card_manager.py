@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
 
@@ -771,6 +772,14 @@ class CardManager:
         # Pipe verify_adm with the hex key interactively.
         adm1_hex = self._adm1_to_hex(adm1)
         verify_cmd = f'verify_adm --pin-is-hex {adm1_hex}'
+
+        # Brief pause after the retry-counter check to ensure the
+        # PC/SC reader is fully released before pySim-shell opens it.
+        # USB readers (especially through VM passthrough) need time
+        # to settle after a disconnect — without this, pySim-shell
+        # can get a 6f00 error on the VERIFY APDU.
+        time.sleep(0.3)
+
         ok, stdout, stderr = self._run_pysim_shell_safe(
             verify_cmd, timeout=15)
 
@@ -1062,6 +1071,8 @@ class CardManager:
             return self._program_empty_card(card_data, changed)
 
         # ---- Non-empty card: delta-write via pySim-shell.py ------------
+        # Brief pause after retry-counter check to let the reader settle
+        time.sleep(0.3)
         return self._program_nonempty_card(card_data, changed)
 
     # Fields supported by pySim-prog.py command-line flags
