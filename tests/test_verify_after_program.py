@@ -124,22 +124,19 @@ class TestVerifyAfterProgram:
         assert "IMSI" in msg
         assert "FAILED" in msg
 
-    def test_verify_iccid_not_in_readback_is_ok(self):
-        """ICCID missing from read-back is normal for blank cards → pass.
-
-        pySim-read often does not return ICCID/IMSI after writing to a
-        freshly programmed blank card.  A missing field is NOT a mismatch.
-        """
+    def test_verify_iccid_not_in_readback(self):
+        """ICCID written but not found in pySim-read output → fail."""
         cm = _make_hw_card_manager()
         written = {"ICCID": "89999880000000000200001", "IMSI": "999880000200001"}
 
         with patch.object(cm, '_run_cli',
-                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")):
+                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")), \
+             patch('time.sleep'):
             ok, msg, data = cm.verify_after_program(written)
 
-        # ICCID missing from read-back is a soft miss, IMSI matches → OK
-        assert ok is True
-        assert "OK" in msg
+        assert ok is False
+        assert "ICCID" in msg
+        assert "not found" in msg
 
     def test_verify_pysim_read_fails_completely(self):
         """pySim-read returns error with no stdout → fail after retries."""
@@ -230,7 +227,7 @@ class TestProgramCardWithVerify:
         assert "verified" in msg.lower()
 
     def test_program_ok_but_verify_fails(self):
-        """Write succeeds but read-back mismatches → overall True with warning."""
+        """Write succeeds but read-back mismatches → overall False."""
         cm = _make_hw_card_manager()
 
         with patch.object(cm, '_run_pysim_shell',
@@ -242,10 +239,8 @@ class TestProgramCardWithVerify:
             ok, msg = cm.program_card(
                 {"IMSI": "X", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
-        # Programming itself succeeded — ok is True even when verify fails
-        assert ok is True
-        assert "WARNING" in msg
-        assert "could not confirm" in msg.lower()
+        assert ok is False
+        assert "FAILED" in msg
 
     def test_program_write_fails_no_verify(self):
         """If pySim-shell write itself fails, verify is never called."""

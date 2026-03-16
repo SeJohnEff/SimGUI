@@ -431,11 +431,16 @@ class CardManager:
         cmd = [python_exe, script_path, '-p0', '-A', adm1_hex]
         # Append 'exit' so the shell terminates cleanly
         full_input = commands.rstrip('\n') + '\nexit\n'
+        logger.debug("pySim-shell input:\n%s", full_input)
         try:
             result = subprocess.run(
                 cmd, input=full_input, capture_output=True, text=True,
                 timeout=timeout, cwd=self.cli_path,
             )
+            if result.stdout:
+                logger.info("pySim-shell stdout:\n%s", result.stdout.strip())
+            if result.stderr:
+                logger.info("pySim-shell stderr:\n%s", result.stderr.strip())
             return (result.returncode == 0,
                     result.stdout.strip(),
                     result.stderr.strip())
@@ -768,15 +773,10 @@ class CardManager:
                 logger.info("Card programmed and verified: %s", summary)
                 return True, f"Card programmed and verified: {summary}"
             else:
-                # Programming itself succeeded — the write commands
-                # returned OK.  Only the read-back check failed.  This
-                # can happen when the reader is slow to re-initialise.
-                # Return True so the UI treats it as success (with a
-                # warning in the message text).
                 logger.warning("Card programmed but verification failed: %s", v_msg)
-                return True, (
-                    f"Card programmed ({summary}) — WARNING: "
-                    f"read-back verification could not confirm.\n{v_msg}"
+                return False, (
+                    f"Programming commands sent ({summary}) but "
+                    f"read-back verification FAILED.\n{v_msg}"
                 )
 
         # Check for partial success by scanning stdout for errors
@@ -825,6 +825,13 @@ class CardManager:
                 logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
             ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            logger.info("Verify read-back (attempt %d): ok=%s, "
+                        "stdout_lines=%d, stderr_lines=%d",
+                        attempt, ok,
+                        len(stdout.splitlines()) if stdout else 0,
+                        len(stderr.splitlines()) if stderr else 0)
+            if stdout:
+                logger.debug("Verify stdout:\n%s", stdout[:500])
             if not ok and not stdout:
                 last_mismatches = [
                     f"pySim-read error: "
@@ -839,32 +846,21 @@ class CardManager:
             readback = dict(self.card_info)
             self.card_info = saved_info  # restore
 
-            # Compare key fields.  Only flag a real mismatch when
-            # BOTH values exist and differ.  A missing field in the
-            # read-back is expected on freshly programmed blank cards
-            # (pySim-read may not output ICCID/IMSI after write).
-            hard_mismatches = []
-            soft_missing = []
+            # Compare key fields
+            last_mismatches = []
             for field in ('ICCID', 'IMSI'):
                 expected = written_data.get(field, '').strip()
                 actual = readback.get(field, '').strip()
                 if expected and actual and expected != actual:
-                    hard_mismatches.append(
+                    last_mismatches.append(
                         f"{field}: wrote {expected}, read back {actual}")
                 elif expected and not actual:
-                    soft_missing.append(field)
+                    last_mismatches.append(
+                        f"{field}: wrote {expected}, not found in read-back")
 
-            if not hard_mismatches:
-                if soft_missing:
-                    logger.info(
-                        "Post-program verification OK (fields not in "
-                        "read-back, normal for blank cards: %s)",
-                        ', '.join(soft_missing))
-                else:
-                    logger.info("Post-program verification OK: %s", readback)
+            if not last_mismatches:
+                logger.info("Post-program verification OK: %s", readback)
                 return True, "Verification OK", readback
-
-            last_mismatches = hard_mismatches
 
         # All retries exhausted
         detail = '; '.join(last_mismatches)

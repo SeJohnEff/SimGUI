@@ -532,10 +532,7 @@ class ProgramSIMPanel(ttk.Frame):
                 self._card_watcher.resume()
 
         if ok:
-            # Distinguish clean success from success-with-warning
-            style = ("Warning.TLabel" if "warning" in msg.lower()
-                     else "Success.TLabel")
-            self._set_action_status(msg, style)
+            self._set_action_status(msg, "Success.TLabel")
             # Notify main.py so it can save auto-artifact
             if callable(getattr(self, 'on_card_programmed_callback', None)):
                 self.on_card_programmed_callback(card_data)
