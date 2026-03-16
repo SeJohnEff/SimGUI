@@ -322,16 +322,17 @@ class NetworkStorageManager:
     def check_sudo_mount(self) -> bool:
         """Return True if passwordless sudo mount is available.
 
-        Uses ``sudo -n /usr/bin/mount --help`` to test without prompting.
-        Absolute path ensures the sudoers NOPASSWD rule matches.
+        Checks for the existence of the sudoers drop-in file that
+        grants NOPASSWD mount/umount access.  This is more reliable
+        than running ``sudo -n mount ...`` because the sudoers rule
+        only matches specific argument patterns (``-t cifs *``,
+        ``-t nfs *``) — generic probes like ``mount --help`` don't
+        match and falsely report failure.
         """
+        sudoers_path = '/etc/sudoers.d/simgui-mount'
         try:
-            r = subprocess.run(
-                [_SUDO, "-n", _MOUNT, "--help"],
-                capture_output=True, text=True, timeout=5,
-            )
-            return r.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return os.path.isfile(sudoers_path)
+        except OSError:
             return False
 
     # ---- Internal helpers ----------------------------------------------

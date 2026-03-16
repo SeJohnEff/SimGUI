@@ -1042,21 +1042,19 @@ class TestSudoPermissionDetection:
         assert "simgui-setup-mount" in msg
 
     def test_check_sudo_mount_success(self):
-        """check_sudo_mount() returns True when sudo -n mount --help succeeds."""
+        """check_sudo_mount() returns True when sudoers file exists."""
         ns = NetworkStorageManager()
-        with patch("subprocess.run",
-                   return_value=MagicMock(returncode=0)):
+        with patch("os.path.isfile", return_value=True):
             assert ns.check_sudo_mount() is True
 
     def test_check_sudo_mount_failure(self):
-        """check_sudo_mount() returns False when sudo -n fails."""
+        """check_sudo_mount() returns False when sudoers file is missing."""
         ns = NetworkStorageManager()
-        with patch("subprocess.run",
-                   return_value=MagicMock(returncode=1)):
+        with patch("os.path.isfile", return_value=False):
             assert ns.check_sudo_mount() is False
 
-    def test_check_sudo_mount_command_missing(self):
-        """check_sudo_mount() returns False when sudo is not installed."""
+    def test_check_sudo_mount_os_error(self):
+        """check_sudo_mount() returns False on OSError."""
         ns = NetworkStorageManager()
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        with patch("os.path.isfile", side_effect=OSError):
             assert ns.check_sudo_mount() is False

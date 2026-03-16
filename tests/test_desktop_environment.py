@@ -100,17 +100,14 @@ class TestAbsolutePathsInCommands:
         assert args[1] == "/usr/bin/umount", (
             f"umount should be absolute, got: {args[1]}")
 
-    def test_check_sudo_mount_uses_absolute_paths(self):
-        """check_sudo_mount() must test with absolute paths."""
+    def test_check_sudo_mount_checks_sudoers_file(self):
+        """check_sudo_mount() checks for the sudoers drop-in file."""
         ns = NetworkStorageManager()
-        with patch("subprocess.run",
-                   return_value=MagicMock(returncode=0)) as mock_run:
-            ns.check_sudo_mount()
-        args = mock_run.call_args[0][0]
-        assert args[0] == "/usr/bin/sudo"
-        # -n flag for non-interactive
-        assert "-n" in args
-        assert "/usr/bin/mount" in args
+        with patch("os.path.isfile",
+                   return_value=True) as mock_isfile:
+            result = ns.check_sudo_mount()
+        assert result is True
+        mock_isfile.assert_called_once_with('/etc/sudoers.d/simgui-mount')
 
     def test_no_bare_mount_in_any_command(self):
         """No mount command should use bare 'mount' or 'sudo' anywhere."""
