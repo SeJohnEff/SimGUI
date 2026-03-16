@@ -756,8 +756,23 @@ class CardManager:
 
         if ok:
             summary = ', '.join(fields_written)
-            logger.info("Card programmed successfully: %s", summary)
-            return True, f"Card programmed: {summary}"
+            logger.info("Card programmed (pre-verify): %s", summary)
+
+            # --- Post-programming read-back verification ---------------
+            v_ok, v_msg, v_data = self.verify_after_program(card_data)
+            if v_ok:
+                # Update card_info so the watcher sees the new ICCID
+                if v_data:
+                    for k, v in v_data.items():
+                        self.card_info[k] = v
+                logger.info("Card programmed and verified: %s", summary)
+                return True, f"Card programmed and verified: {summary}"
+            else:
+                logger.warning("Card programmed but verification failed: %s", v_msg)
+                return False, (
+                    f"Programming commands sent ({summary}) but "
+                    f"read-back verification FAILED.\n{v_msg}"
+                )
 
         # Check for partial success by scanning stdout for errors
         combined = (stdout + '\n' + stderr).lower()
@@ -767,6 +782,58 @@ class CardManager:
 
         error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
         return False, f"Programming failed: {error_msg}"
+
+    def verify_after_program(
+            self, written_data: Dict[str, str],
+    ) -> Tuple[bool, str, Dict[str, str]]:
+        """Read-back verification after programming.
+
+        Runs ``pySim-read.py -p0`` to confirm fields written to the card.
+        Compares ICCID and IMSI against *written_data*.
+
+        Returns:
+            (ok, message, read_back_data)
+            *read_back_data* is the dict parsed from pySim-read output.
+        """
+        if self._simulator:
+            # Simulator: trust the programming result
+            return True, "Simulator — verification skipped", {}
+
+        if self.cli_backend != CLIBackend.PYSIM:
+            return True, "Verification not supported for this backend", {}
+
+        ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+        if not ok and not stdout:
+            return False, (
+                f"Verification read-back FAILED — pySim-read returned an error.\n"
+                f"{self._clean_pysim_error(stderr) or 'Unknown error'}"
+            ), {}
+
+        # Parse the output into a fresh dict
+        saved_info = self.card_info
+        self.card_info = {}
+        self._parse_pysim_output(stdout)
+        readback = dict(self.card_info)
+        self.card_info = saved_info  # restore
+
+        # Compare key fields
+        mismatches: List[str] = []
+        for field in ('ICCID', 'IMSI'):
+            expected = written_data.get(field, '').strip()
+            actual = readback.get(field, '').strip()
+            if expected and actual and expected != actual:
+                mismatches.append(
+                    f"{field}: wrote {expected}, read back {actual}")
+            elif expected and not actual:
+                mismatches.append(
+                    f"{field}: wrote {expected}, not found in read-back")
+
+        if mismatches:
+            detail = '; '.join(mismatches)
+            return False, f"Verification MISMATCH — {detail}", readback
+
+        logger.info("Post-program verification OK: %s", readback)
+        return True, "Verification OK", readback
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""

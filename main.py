@@ -770,7 +770,17 @@ class SimGUIApp:
             self._status_var.set("No card reader — check USB connection")
 
     def _on_card_programmed(self, card_data):
-        """Called after successful card programming — save auto-artifact."""
+        """Called after successful card programming — save auto-artifact.
+
+        Also registers the ICCID with the card watcher so that
+        re-inserting the same card is recognised immediately.
+        """
+        # Register the ICCID in the watcher's ATR→ICCID cache so
+        # re-insertion won't show "Blank card".
+        iccid = card_data.get('ICCID', '')
+        if iccid and hasattr(self, '_card_watcher'):
+            self._card_watcher.register_programmed_card(iccid)
+
         try:
             paths = self._auto_artifact.save_card_artifact(card_data)
             if paths:

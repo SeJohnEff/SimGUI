@@ -28,7 +28,6 @@ Thread safety:
 
 import logging
 import threading
-import time
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -63,6 +62,11 @@ class CardWatcher:
         self._card_present: bool = False
         # Whether pyscard fast probe is available
         self._probe_available: Optional[bool] = None
+        # ATR → ICCID cache for just-programmed cards.  When we program
+        # an empty card and verify the write, we cache the mapping so
+        # that re-insertion of the same card (same ATR) is recognised
+        # immediately without relying on pySim-read succeeding.
+        self._atr_iccid_cache: dict[str, str] = {}
 
         # Callbacks (set by UI layer)
         self.on_card_detected: Optional[
@@ -116,6 +120,19 @@ class CardWatcher:
     def resume(self):
         """Resume polling after pause."""
         self._paused = False
+
+    def register_programmed_card(self, iccid: str) -> None:
+        """Cache ATR→ICCID for a just-programmed card.
+
+        Call this after a successful programming + verification cycle so
+        that re-inserting the same card (same ATR) is recognised without
+        relying on pySim-read.  Also updates ``_last_iccid`` so the next
+        poll doesn't re-trigger the new-card flow.
+        """
+        if self._last_atr and iccid:
+            self._atr_iccid_cache[self._last_atr] = iccid
+            self._last_iccid = iccid
+            logger.info("Cached ATR→ICCID: %s → %s", self._last_atr, iccid)
 
     def _poll_loop(self):
         """Main polling loop — runs on background thread."""
@@ -181,36 +198,44 @@ class CardWatcher:
                         pass
 
     def _read_and_notify(self):
-        """Do a full pySim-read and fire the appropriate callback."""
+        """Do a full pySim-read and fire the appropriate callback.
+
+        If pySim-read fails or returns no ICCID but we have a cached
+        ATR→ICCID mapping (from a prior programming+verification), use
+        the cached ICCID instead of declaring the card blank.
+        """
         ok, msg = self._cm.detect_card()
         if ok:
             iccid = self._cm.read_iccid()
             if iccid:
                 self._last_iccid = iccid
                 self._handle_new_card(iccid)
-            else:
-                # Card detected but no ICCID (blank card)
-                self._last_iccid = None
-                if self.on_card_unknown:
-                    try:
-                        self.on_card_unknown("")
-                    except Exception:
-                        pass
-        else:
-            # pySim couldn't read the card but PC/SC says it's there.
-            # Treat as unknown card with an error message.
-            self._last_iccid = None
+                return
+
+        # pySim-read failed or returned no ICCID.  Check the ATR cache
+        # in case this is a just-programmed card being re-inserted.
+        cached_iccid = self._atr_iccid_cache.get(self._last_atr)
+        if cached_iccid:
+            logger.info("CardWatcher: using cached ICCID %s for ATR %s",
+                        cached_iccid, self._last_atr)
+            self._last_iccid = cached_iccid
+            self._handle_new_card(cached_iccid)
+            return
+
+        # Genuinely unknown / blank card
+        self._last_iccid = None
+        if not ok:
             logger.warning("CardWatcher: card present but pySim-read failed: %s", msg)
-            if self.on_card_unknown:
-                try:
-                    self.on_card_unknown("")
-                except Exception:
-                    pass
-            if self.on_error:
-                try:
-                    self.on_error(msg)
-                except Exception:
-                    pass
+        if self.on_card_unknown:
+            try:
+                self.on_card_unknown("")
+            except Exception:
+                pass
+        if not ok and self.on_error:
+            try:
+                self.on_error(msg)
+            except Exception:
+                pass
 
     def _check_once_slow(self):
         """Slow polling path — full pySim-read every cycle."""
