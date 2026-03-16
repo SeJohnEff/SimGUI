@@ -59,10 +59,11 @@ class ReadSIMPanel(ttk.Frame):
 
     def __init__(self, parent, card_manager: CardManager, *,
                  last_read_data: dict | None = None,
-                 ns_manager=None, **kwargs):
+                 ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._ns_manager = ns_manager
+        self._card_watcher = card_watcher
         self._last_browse_dir: str | None = None
         self._last_read_data = last_read_data if last_read_data is not None else {}
         self._public_data: dict = {}
@@ -274,10 +275,38 @@ class ReadSIMPanel(ttk.Frame):
             return
         if not self._detected_iccid:
             self._auth_status.configure(
-                text="No card detected — use Detect Card in the left panel")
+                text="No card detected \u2014 use Detect Card in the left panel")
             return
-        ok, msg = self._cm.authenticate(
-            adm1, expected_iccid=self._detected_iccid or None)
+
+        expected_iccid = self._detected_iccid or None
+
+        # Pause the card watcher so its probes don't interfere with
+        # the VERIFY APDU that authenticate() sends to the card.
+        if self._card_watcher:
+            self._card_watcher.pause()
+        try:
+            ok, msg = self._cm.authenticate(
+                adm1, expected_iccid=expected_iccid)
+
+            # If auth was refused due to low retry counter, offer a
+            # force-override so the operator can still proceed.
+            if not ok and "DANGER" in msg and "attempt" in msg:
+                confirm = messagebox.askyesno(
+                    "Low ADM1 Attempts",
+                    f"{msg}\n\n"
+                    "Are you SURE the ADM1 key is correct?\n"
+                    "A wrong key will permanently lock this card.\n\n"
+                    "Force authentication?",
+                    icon=messagebox.WARNING,
+                )
+                if confirm:
+                    ok, msg = self._cm.authenticate(
+                        adm1, force=True,
+                        expected_iccid=expected_iccid)
+        finally:
+            if self._card_watcher:
+                self._card_watcher.resume()
+
         if ok:
             self._auth_status.configure(text=msg)
             self._authenticated = True

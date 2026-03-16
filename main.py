@@ -219,7 +219,8 @@ class SimGUIApp:
         self._read_panel = ReadSIMPanel(
             notebook, self._card_manager,
             last_read_data=self.last_read_data,
-            ns_manager=self._ns_manager)
+            ns_manager=self._ns_manager,
+            card_watcher=self._card_watcher)
         notebook.add(self._read_panel, text="Read SIM")
 
         self._program_panel = ProgramSIMPanel(
