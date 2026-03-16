@@ -2,9 +2,11 @@
 # Install: sudo cp simgui-mount.sudoers /etc/sudoers.d/simgui-mount
 #          sudo chmod 0440 /etc/sudoers.d/simgui-mount
 #
+# Uses %sudo (Ubuntu default admin group) so that any user who can
+# already sudo can also mount shares without a password prompt.
 # This is safe because mount.cifs and mount.nfs only affect the
 # specific mount point; they do not grant broader root access.
 
-%users ALL=(root) NOPASSWD: /usr/bin/mount -t cifs *
-%users ALL=(root) NOPASSWD: /usr/bin/mount -t nfs *
-%users ALL=(root) NOPASSWD: /usr/bin/umount /tmp/simgui-mounts/*
+%sudo ALL=(root) NOPASSWD: /usr/bin/mount -t cifs *
+%sudo ALL=(root) NOPASSWD: /usr/bin/mount -t nfs *
+%sudo ALL=(root) NOPASSWD: /usr/bin/umount /tmp/simgui-mounts/*
