@@ -5,4 +5,4 @@ should mirror this version.  The About dialog, --version flag, and
 package metadata all read from here.
 """
 
-__version__ = "0.5.18"
+__version__ = "0.5.19"

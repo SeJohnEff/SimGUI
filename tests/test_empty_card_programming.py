@@ -228,21 +228,32 @@ class TestRunPysimShellInitDetection:
 
 class TestAuthenticateBlankCard:
 
-    def test_blank_card_stores_adm1_on_init_failure(self, tmp_path):
-        """Blank card: auth stores ADM1 even when pySim-shell can't init."""
+    def test_blank_card_skips_verify_and_stores_adm1(self, tmp_path):
+        """Blank card: VERIFY is never sent; ADM1 is stored for pySim-prog."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
         cm._original_card_data = {}  # empty card
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
-             patch.object(cm, '_run_pysim_shell_safe',
-                          return_value=(False,
-                                        'pySim-shell not equipped!',
-                                        '')):
+             patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')
         assert ok is True
         assert cm.authenticated is True
         assert cm._authenticated_adm1_hex == '3838383838383838'
         assert 'stored' in msg.lower() or 'blank' in msg.lower()
+        # VERIFY must never be called on blank cards
+        mock_shell.assert_not_called()
+
+    def test_blank_card_skips_verify_with_none_original(self, tmp_path):
+        """Blank card (None original data): same early-return path."""
+        cm = _make_hw_manager(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._original_card_data = None  # type: ignore[assignment]
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            ok, msg = cm.authenticate('88888888')
+        assert ok is True
+        assert cm.authenticated is True
+        mock_shell.assert_not_called()
 
     def test_nonempty_card_init_failure_is_real_error(self, tmp_path):
         """Non-empty card: init failure is a genuine auth problem."""
@@ -257,11 +268,11 @@ class TestAuthenticateBlankCard:
             ok, msg = cm.authenticate('88888888')
         assert ok is False
 
-    def test_wrong_adm1_not_stored(self, tmp_path):
-        """Wrong ADM1 error (6982) is never treated as blank-card deferral."""
+    def test_nonempty_card_wrong_adm1_fails(self, tmp_path):
+        """Non-empty card with wrong ADM1 (6982) returns failure."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {}
+        cm._original_card_data = {'ICCID': '123'}  # non-empty
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,

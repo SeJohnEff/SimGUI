@@ -781,6 +781,25 @@ class CardManager:
         # Use pySim-shell WITHOUT -A (safe: no auto-auth at startup)
         # Pipe verify_adm with the hex key interactively.
         adm1_hex = self._adm1_to_hex(adm1)
+
+        # --- Blank-card safety check ---
+        # Blank / unpersonalised cards (no ICCID, no IMSI from detect)
+        # cannot process a standard VERIFY ADM1 APDU.  On sysmoISIM
+        # cards this causes a 6f00 (internal card error) that STILL
+        # consumes a retry-counter attempt, bricking the card after 3
+        # tries.  Skip VERIFY entirely and store the ADM1 for deferred
+        # authentication via pySim-prog during programming.
+        if not self._original_card_data:
+            self.authenticated = True
+            self._authenticated_adm1_hex = adm1_hex
+            logger.info(
+                "Blank card detected (no original data) \u2014 ADM1 stored "
+                "(will authenticate during programming via pySim-prog)")
+            return True, (
+                "Authentication stored \u2014 blank card detected. "
+                "ADM1 will be used during programming via pySim-prog."
+            )
+
         verify_cmd = f'verify_adm --pin-is-hex {adm1_hex}'
 
         # Brief pause after the retry-counter check to ensure the
@@ -834,8 +853,8 @@ class CardManager:
             )
 
         # 6982 = wrong key (security status not satisfied)
-        # 6f00 = generic error (often means VERIFY failed)
-        # Both consume an ADM1 attempt.
+        # 6f00 = generic card error (internal card OS failure, may still
+        #        consume an ADM1 attempt on some card types)
         if '6982' in combined or '6f00' in combined or 'swmatcherror' in combined:
             # Re-check retry counter after failure
             remaining = self.check_adm1_retry_counter()
@@ -845,11 +864,20 @@ class CardManager:
                 if remaining == 0:
                     self.card_blocked = True
             sw_code = '6f00' if '6f00' in combined else '6982'
-            return False, (
-                f"Authentication FAILED \u2014 VERIFY returned SW {sw_code}."
-                f"{remaining_msg} "
-                f"3 wrong attempts = permanent card lock!"
-            )
+            if sw_code == '6f00':
+                detail = (
+                    f"Authentication FAILED \u2014 VERIFY returned SW 6f00 "
+                    f"(internal card error).{remaining_msg} "
+                    f"This may indicate a card that cannot process "
+                    f"VERIFY ADM1. 3 wrong attempts = permanent card lock!"
+                )
+            else:
+                detail = (
+                    f"Authentication FAILED \u2014 wrong ADM1 key "
+                    f"(SW {sw_code}).{remaining_msg} "
+                    f"3 wrong attempts = permanent card lock!"
+                )
+            return False, detail
 
         error_msg = self._clean_pysim_error(stderr) if stderr else "Authentication failed"
         return False, f"Authentication failed: {error_msg}"
