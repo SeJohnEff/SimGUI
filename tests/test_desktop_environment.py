@@ -500,7 +500,101 @@ class TestSetupScript:
 
 
 # ---------------------------------------------------------------------------
-# 8. Reconnect resilience
+# 8. Packaging — sudoers and mount helpers must be shipped and installed
+# ---------------------------------------------------------------------------
+
+class TestPackagingShipsSudoers:
+    """Verify that the .deb package and install script actually deploy
+    the sudoers rule automatically.
+
+    These tests exist because etc/simgui-mount.sudoers and
+    bin/simgui-setup-mount were once dead files — present in the repo
+    but never shipped in the .deb or run by the installer.  Mounts
+    silently relied on cached sudo credentials and broke when the
+    cache expired.
+    """
+
+    RULES_PATH = os.path.join(
+        os.path.dirname(__file__), '..', 'debian', 'rules')
+    POSTINST_PATH = os.path.join(
+        os.path.dirname(__file__), '..', 'debian', 'postinst')
+    INSTALL_SH_PATH = os.path.join(
+        os.path.dirname(__file__), '..', 'scripts', 'install.sh')
+
+    # ---- debian/rules ships the files --------------------------------
+
+    def test_rules_ships_etc_directory(self):
+        """debian/rules must copy etc/ into the .deb."""
+        with open(self.RULES_PATH) as f:
+            content = f.read()
+        assert "etc/" in content, (
+            "debian/rules must ship etc/ (contains simgui-mount.sudoers)")
+
+    def test_rules_ships_setup_mount_script(self):
+        """debian/rules must install bin/simgui-setup-mount."""
+        with open(self.RULES_PATH) as f:
+            content = f.read()
+        assert "simgui-setup-mount" in content, (
+            "debian/rules must ship the simgui-setup-mount script")
+
+    # ---- debian/postinst installs the sudoers rule -------------------
+
+    def test_postinst_installs_sudoers(self):
+        """postinst must copy the sudoers file to /etc/sudoers.d/."""
+        with open(self.POSTINST_PATH) as f:
+            content = f.read()
+        assert "simgui-mount.sudoers" in content, (
+            "postinst must reference the sudoers template")
+        assert "/etc/sudoers.d/" in content, (
+            "postinst must install into /etc/sudoers.d/")
+
+    def test_postinst_validates_with_visudo(self):
+        """postinst must run visudo -c before installing the sudoers file."""
+        with open(self.POSTINST_PATH) as f:
+            content = f.read()
+        assert "visudo" in content, (
+            "postinst must validate sudoers syntax with visudo")
+
+    def test_postinst_sets_permissions(self):
+        """postinst must chmod 0440 the sudoers file."""
+        with open(self.POSTINST_PATH) as f:
+            content = f.read()
+        assert "0440" in content, (
+            "postinst must set 0440 permissions on sudoers file")
+
+    def test_postinst_installs_cifs_utils(self):
+        """postinst must ensure cifs-utils is installed for SMB mounts."""
+        with open(self.POSTINST_PATH) as f:
+            content = f.read()
+        assert "cifs-utils" in content, (
+            "postinst must install cifs-utils for SMB support")
+
+    # ---- scripts/install.sh also installs the sudoers rule -----------
+
+    def test_install_sh_installs_sudoers(self):
+        """install.sh must also install the sudoers rule (belt and suspenders)."""
+        with open(self.INSTALL_SH_PATH) as f:
+            content = f.read()
+        assert "simgui-mount.sudoers" in content, (
+            "install.sh must reference the sudoers template")
+        assert "/etc/sudoers.d/" in content, (
+            "install.sh must install into /etc/sudoers.d/")
+
+    def test_install_sh_validates_with_visudo(self):
+        """install.sh must run visudo -c before installing."""
+        with open(self.INSTALL_SH_PATH) as f:
+            content = f.read()
+        assert "visudo" in content
+
+    def test_install_sh_installs_cifs_utils(self):
+        """install.sh must ensure cifs-utils is installed."""
+        with open(self.INSTALL_SH_PATH) as f:
+            content = f.read()
+        assert "cifs-utils" in content
+
+
+# ---------------------------------------------------------------------------
+# 9. Reconnect resilience
 # ---------------------------------------------------------------------------
 
 class TestReconnectResilience:
