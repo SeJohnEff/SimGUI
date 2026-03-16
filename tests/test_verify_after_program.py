@@ -124,19 +124,22 @@ class TestVerifyAfterProgram:
         assert "IMSI" in msg
         assert "FAILED" in msg
 
-    def test_verify_iccid_not_in_readback(self):
-        """ICCID written but not found in pySim-read output → fail after retries."""
+    def test_verify_iccid_not_in_readback_is_ok(self):
+        """ICCID missing from read-back is normal for blank cards → pass.
+
+        pySim-read often does not return ICCID/IMSI after writing to a
+        freshly programmed blank card.  A missing field is NOT a mismatch.
+        """
         cm = _make_hw_card_manager()
         written = {"ICCID": "89999880000000000200001", "IMSI": "999880000200001"}
 
         with patch.object(cm, '_run_cli',
-                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")), \
-             patch('time.sleep'):
+                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")):
             ok, msg, data = cm.verify_after_program(written)
 
-        assert ok is False
-        assert "ICCID" in msg
-        assert "not found" in msg
+        # ICCID missing from read-back is a soft miss, IMSI matches → OK
+        assert ok is True
+        assert "OK" in msg
 
     def test_verify_pysim_read_fails_completely(self):
         """pySim-read returns error with no stdout → fail after retries."""

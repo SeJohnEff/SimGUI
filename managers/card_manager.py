@@ -839,21 +839,32 @@ class CardManager:
             readback = dict(self.card_info)
             self.card_info = saved_info  # restore
 
-            # Compare key fields
-            last_mismatches = []
+            # Compare key fields.  Only flag a real mismatch when
+            # BOTH values exist and differ.  A missing field in the
+            # read-back is expected on freshly programmed blank cards
+            # (pySim-read may not output ICCID/IMSI after write).
+            hard_mismatches = []
+            soft_missing = []
             for field in ('ICCID', 'IMSI'):
                 expected = written_data.get(field, '').strip()
                 actual = readback.get(field, '').strip()
                 if expected and actual and expected != actual:
-                    last_mismatches.append(
+                    hard_mismatches.append(
                         f"{field}: wrote {expected}, read back {actual}")
                 elif expected and not actual:
-                    last_mismatches.append(
-                        f"{field}: wrote {expected}, not found in read-back")
+                    soft_missing.append(field)
 
-            if not last_mismatches:
-                logger.info("Post-program verification OK: %s", readback)
+            if not hard_mismatches:
+                if soft_missing:
+                    logger.info(
+                        "Post-program verification OK (fields not in "
+                        "read-back, normal for blank cards: %s)",
+                        ', '.join(soft_missing))
+                else:
+                    logger.info("Post-program verification OK: %s", readback)
                 return True, "Verification OK", readback
+
+            last_mismatches = hard_mismatches
 
         # All retries exhausted
         detail = '; '.join(last_mismatches)
