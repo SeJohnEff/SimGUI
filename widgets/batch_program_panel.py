@@ -69,13 +69,13 @@ class BatchProgramPanel(ttk.Frame):
 
     def __init__(self, parent, card_manager: CardManager,
                  settings: SettingsManager, *,
-                 ns_manager=None, **kwargs):
+                 ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._settings = settings
         self._ns_manager = ns_manager
         self._last_browse_dir: str | None = None
-        self._batch_mgr = BatchManager(card_manager)
+        self._batch_mgr = BatchManager(card_manager, card_watcher=card_watcher)
         self._csv = CSVManager()
         self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV
         self._preview_data: list[dict[str, str]] = []

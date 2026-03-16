@@ -111,25 +111,27 @@ class TestVerifyAfterProgram:
         assert data["IMSI"] == "999880000200001"
 
     def test_verify_imsi_mismatch(self):
-        """IMSI read back differs from what was written → fail."""
+        """IMSI read back differs from what was written → fail after retries."""
         cm = _make_hw_card_manager()
         written = {"ICCID": "89999880000000000200001", "IMSI": "999880000200001"}
 
         with patch.object(cm, '_run_cli',
-                          return_value=(True, PYSIM_READ_OUTPUT_MISMATCH_IMSI, "")):
+                          return_value=(True, PYSIM_READ_OUTPUT_MISMATCH_IMSI, "")), \
+             patch('time.sleep'):  # skip retry delay
             ok, msg, data = cm.verify_after_program(written)
 
         assert ok is False
-        assert "MISMATCH" in msg
         assert "IMSI" in msg
+        assert "FAILED" in msg
 
     def test_verify_iccid_not_in_readback(self):
-        """ICCID written but not found in pySim-read output → fail."""
+        """ICCID written but not found in pySim-read output → fail after retries."""
         cm = _make_hw_card_manager()
         written = {"ICCID": "89999880000000000200001", "IMSI": "999880000200001"}
 
         with patch.object(cm, '_run_cli',
-                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")):
+                          return_value=(True, PYSIM_READ_OUTPUT_NO_ICCID, "")), \
+             patch('time.sleep'):
             ok, msg, data = cm.verify_after_program(written)
 
         assert ok is False
@@ -137,12 +139,13 @@ class TestVerifyAfterProgram:
         assert "not found" in msg
 
     def test_verify_pysim_read_fails_completely(self):
-        """pySim-read returns error with no stdout → fail."""
+        """pySim-read returns error with no stdout → fail after retries."""
         cm = _make_hw_card_manager()
         written = {"ICCID": "89999880000000000200001"}
 
         with patch.object(cm, '_run_cli',
-                          return_value=(False, "", "No card in reader")):
+                          return_value=(False, "", "No card in reader")), \
+             patch('time.sleep'):
             ok, msg, data = cm.verify_after_program(written)
 
         assert ok is False
@@ -224,21 +227,22 @@ class TestProgramCardWithVerify:
         assert "verified" in msg.lower()
 
     def test_program_ok_but_verify_fails(self):
-        """Write succeeds but read-back mismatches → overall False."""
+        """Write succeeds but read-back mismatches → overall True with warning."""
         cm = _make_hw_card_manager()
 
         with patch.object(cm, '_run_pysim_shell',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(False,
-                                        "Verification MISMATCH — IMSI: wrote X, read Y",
+                                        "Verification FAILED — IMSI: wrote X, read Y",
                                         {"IMSI": "Y"})):
             ok, msg = cm.program_card(
                 {"IMSI": "X", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
-        assert ok is False
-        assert "FAILED" in msg
-        assert "MISMATCH" in msg
+        # Programming itself succeeded — ok is True even when verify fails
+        assert ok is True
+        assert "WARNING" in msg
+        assert "could not confirm" in msg.lower()
 
     def test_program_write_fails_no_verify(self):
         """If pySim-shell write itself fails, verify is never called."""

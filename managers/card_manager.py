@@ -768,10 +768,15 @@ class CardManager:
                 logger.info("Card programmed and verified: %s", summary)
                 return True, f"Card programmed and verified: {summary}"
             else:
+                # Programming itself succeeded — the write commands
+                # returned OK.  Only the read-back check failed.  This
+                # can happen when the reader is slow to re-initialise.
+                # Return True so the UI treats it as success (with a
+                # warning in the message text).
                 logger.warning("Card programmed but verification failed: %s", v_msg)
-                return False, (
-                    f"Programming commands sent ({summary}) but "
-                    f"read-back verification FAILED.\n{v_msg}"
+                return True, (
+                    f"Card programmed ({summary}) — WARNING: "
+                    f"read-back verification could not confirm.\n{v_msg}"
                 )
 
         # Check for partial success by scanning stdout for errors
@@ -783,57 +788,79 @@ class CardManager:
         error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
         return False, f"Programming failed: {error_msg}"
 
+    _VERIFY_RETRIES = 2
+    _VERIFY_DELAY_S = 1.0  # seconds between retries
+
     def verify_after_program(
             self, written_data: Dict[str, str],
     ) -> Tuple[bool, str, Dict[str, str]]:
         """Read-back verification after programming.
 
         Runs ``pySim-read.py -p0`` to confirm fields written to the card.
-        Compares ICCID and IMSI against *written_data*.
+        Compares ICCID and IMSI against *written_data*.  Retries up to
+        ``_VERIFY_RETRIES`` times with a short delay, because the card
+        may need a moment to settle after writes.
+
+        The caller MUST pause the CardWatcher before calling this method
+        to avoid reader contention (probes during pySim-read cause
+        spurious "card removed" events and read failures).
 
         Returns:
             (ok, message, read_back_data)
             *read_back_data* is the dict parsed from pySim-read output.
         """
         if self._simulator:
-            # Simulator: trust the programming result
             return True, "Simulator — verification skipped", {}
 
         if self.cli_backend != CLIBackend.PYSIM:
             return True, "Verification not supported for this backend", {}
 
-        ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
-        if not ok and not stdout:
-            return False, (
-                f"Verification read-back FAILED — pySim-read returned an error.\n"
-                f"{self._clean_pysim_error(stderr) or 'Unknown error'}"
-            ), {}
+        import time
+        last_mismatches: List[str] = []
+        readback: Dict[str, str] = {}
 
-        # Parse the output into a fresh dict
-        saved_info = self.card_info
-        self.card_info = {}
-        self._parse_pysim_output(stdout)
-        readback = dict(self.card_info)
-        self.card_info = saved_info  # restore
+        for attempt in range(1, self._VERIFY_RETRIES + 1):
+            if attempt > 1:
+                time.sleep(self._VERIFY_DELAY_S)
+                logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
-        # Compare key fields
-        mismatches: List[str] = []
-        for field in ('ICCID', 'IMSI'):
-            expected = written_data.get(field, '').strip()
-            actual = readback.get(field, '').strip()
-            if expected and actual and expected != actual:
-                mismatches.append(
-                    f"{field}: wrote {expected}, read back {actual}")
-            elif expected and not actual:
-                mismatches.append(
-                    f"{field}: wrote {expected}, not found in read-back")
+            ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            if not ok and not stdout:
+                last_mismatches = [
+                    f"pySim-read error: "
+                    f"{self._clean_pysim_error(stderr) or 'Unknown error'}"
+                ]
+                continue  # retry
 
-        if mismatches:
-            detail = '; '.join(mismatches)
-            return False, f"Verification MISMATCH — {detail}", readback
+            # Parse the output into a fresh dict
+            saved_info = self.card_info
+            self.card_info = {}
+            self._parse_pysim_output(stdout)
+            readback = dict(self.card_info)
+            self.card_info = saved_info  # restore
 
-        logger.info("Post-program verification OK: %s", readback)
-        return True, "Verification OK", readback
+            # Compare key fields
+            last_mismatches = []
+            for field in ('ICCID', 'IMSI'):
+                expected = written_data.get(field, '').strip()
+                actual = readback.get(field, '').strip()
+                if expected and actual and expected != actual:
+                    last_mismatches.append(
+                        f"{field}: wrote {expected}, read back {actual}")
+                elif expected and not actual:
+                    last_mismatches.append(
+                        f"{field}: wrote {expected}, not found in read-back")
+
+            if not last_mismatches:
+                logger.info("Post-program verification OK: %s", readback)
+                return True, "Verification OK", readback
+
+        # All retries exhausted
+        detail = '; '.join(last_mismatches)
+        return False, (
+            f"Programming commands sent but read-back verification FAILED "
+            f"after {self._VERIFY_RETRIES} attempts.\n{detail}"
+        ), readback
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""

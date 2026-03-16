@@ -44,8 +44,9 @@ class BatchManager:
     ``widget.after(0, …)``).
     """
 
-    def __init__(self, card_manager: CardManager):
+    def __init__(self, card_manager: CardManager, card_watcher=None):
         self._cm = card_manager
+        self._card_watcher = card_watcher
         self.state: BatchState = BatchState.IDLE
         self.results: List[CardResult] = []
         self._batch_data: List[Dict[str, str]] = []
@@ -165,7 +166,16 @@ class BatchManager:
             if self.on_progress:
                 self.on_progress(i, len(self._batch_data), f"Processing card {i + 1}")
 
-            result = self._process_one(i, card_data, iccid, adm1)
+            # Pause card watcher during programming to avoid reader
+            # contention (probes during pySim calls cause false
+            # 'card removed' events).
+            if self._card_watcher:
+                self._card_watcher.pause()
+            try:
+                result = self._process_one(i, card_data, iccid, adm1)
+            finally:
+                if self._card_watcher:
+                    self._card_watcher.resume()
             self.results.append(result)
             if self.on_card_result:
                 self.on_card_result(result)

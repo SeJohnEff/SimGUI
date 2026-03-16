@@ -37,10 +37,11 @@ class ProgramSIMPanel(ttk.Frame):
 
     def __init__(self, parent, card_manager: CardManager, *,
                  last_read_data: dict | None = None,
-                 ns_manager=None, **kwargs):
+                 ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._ns_manager = ns_manager
+        self._card_watcher = card_watcher
         self._last_browse_dir: str | None = None
         self._csv = CSVManager()
         self._last_read_data = last_read_data if last_read_data is not None else {}
@@ -518,10 +519,23 @@ class ProgramSIMPanel(ttk.Frame):
             return
         card_data = {k: self._field_vars[k].get().strip()
                      for k, _, _ in _FORM_FIELDS}
-        ok, msg = self._cm.program_card(
-            card_data, original_data=self._original_form_data or None)
+
+        # Pause the card watcher so its probes don't interfere with
+        # the programming + verification pySim calls.
+        if self._card_watcher:
+            self._card_watcher.pause()
+        try:
+            ok, msg = self._cm.program_card(
+                card_data, original_data=self._original_form_data or None)
+        finally:
+            if self._card_watcher:
+                self._card_watcher.resume()
+
         if ok:
-            self._set_action_status(msg, "Success.TLabel")
+            # Distinguish clean success from success-with-warning
+            style = ("Warning.TLabel" if "warning" in msg.lower()
+                     else "Success.TLabel")
+            self._set_action_status(msg, style)
             # Notify main.py so it can save auto-artifact
             if callable(getattr(self, 'on_card_programmed_callback', None)):
                 self.on_card_programmed_callback(card_data)

@@ -225,12 +225,14 @@ class SimGUIApp:
         self._program_panel = ProgramSIMPanel(
             notebook, self._card_manager,
             last_read_data=self.last_read_data,
-            ns_manager=self._ns_manager)
+            ns_manager=self._ns_manager,
+            card_watcher=self._card_watcher)
         notebook.add(self._program_panel, text="Program SIM")
 
         self._batch_panel = BatchProgramPanel(
             notebook, self._card_manager, self._settings,
-            ns_manager=self._ns_manager)
+            ns_manager=self._ns_manager,
+            card_watcher=self._card_watcher)
         self._batch_panel.set_standards_manager(self._standards_mgr)
         notebook.add(self._batch_panel, text="Batch Program")
 
