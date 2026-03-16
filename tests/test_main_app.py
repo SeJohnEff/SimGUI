@@ -210,6 +210,8 @@ def _load_main():
             def on_card_removed(self): pass
             def clear_card_info(self): pass
             def set_programmed_indicator(self, *a): pass
+            def set_blocked_indicator(self, *a): pass
+            def set_adm1_attempts(self, *a): pass
             on_card_programmed_callback = None
         FakePanel.__name__ = name
         return FakePanel

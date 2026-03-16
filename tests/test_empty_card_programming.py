@@ -36,6 +36,8 @@ def _make_hw_manager(tmp_path):
     cm.cli_path = str(cli_dir)
     cm.cli_backend = CLIBackend.PYSIM
     cm._venv_python = None
+    cm.card_blocked = False
+    cm._adm1_remaining_attempts = None
     return cm
 
 
@@ -223,7 +225,8 @@ class TestAuthenticateBlankCard:
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
         cm._original_card_data = {}  # empty card
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,
                                         'pySim-shell not equipped!',
                                         '')):
@@ -238,7 +241,8 @@ class TestAuthenticateBlankCard:
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
         cm._original_card_data = {'ICCID': '123'}  # non-empty
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,
                                         'pySim-shell not equipped!',
                                         '')):
@@ -250,7 +254,8 @@ class TestAuthenticateBlankCard:
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
         cm._original_card_data = {}
-        with patch.object(cm, '_run_pysim_shell',
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,
                                         'SW Mismatch 6982',
                                         '')):

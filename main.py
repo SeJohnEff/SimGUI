@@ -660,7 +660,12 @@ class SimGUIApp:
     def _on_auto_card_detected(self, iccid, card_data, file_path):
         """Card inserted and matched in index (runs on main thread)."""
         hw = self._card_manager.card_info  # live data read from card
-        self._card_panel.set_status("detected", f"Card detected: {iccid}")
+        is_blocked = self._card_manager.card_blocked
+        if is_blocked:
+            self._card_panel.set_status(
+                "blocked", f"\u26d4 BLOCKED: {iccid}")
+        else:
+            self._card_panel.set_status("detected", f"Card detected: {iccid}")
         self._card_panel.set_card_info(
             imsi=hw.get("IMSI") or card_data.get("IMSI"),
             iccid=iccid,
@@ -670,6 +675,9 @@ class SimGUIApp:
             source_file=file_path,
         )
         self._card_panel.set_auth_status(False)
+        self._card_panel.set_blocked_indicator(is_blocked)
+        self._card_panel.set_adm1_attempts(
+            self._card_manager.adm1_remaining_attempts)
         # Check if already programmed — show popup warning with previous IMSI
         already = self._check_already_programmed(iccid)
         self._card_panel.set_programmed_indicator(already)
@@ -677,7 +685,9 @@ class SimGUIApp:
         self._program_panel.on_card_detected(iccid, card_data, file_path)
         # Sync the Read SIM tab (public fields)
         self._read_panel.refresh()
-        self._status_var.set(f"Card detected: {iccid}")
+        status = (f"\u26d4 CARD BLOCKED: {iccid}" if is_blocked
+                  else f"Card detected: {iccid}")
+        self._status_var.set(status)
 
     def _on_auto_card_unknown(self, iccid):
         """Card inserted but not in index (runs on main thread).
@@ -686,11 +696,15 @@ class SimGUIApp:
         so the user can locate the card's data file in one step.
         If *iccid* is empty the card is completely blank.
         """
-        if iccid:
+        is_blocked = self._card_manager.card_blocked
+        if is_blocked:
+            status_msg = f"\u26d4 BLOCKED: {iccid or '(blank)'}" 
+        elif iccid:
             status_msg = f"Card: {iccid} (not in index)"
         else:
             status_msg = "Blank card detected (no ICCID)"
-        self._card_panel.set_status("detected", status_msg)
+        state = "blocked" if is_blocked else "detected"
+        self._card_panel.set_status(state, status_msg)
         hw = self._card_manager.card_info  # live data read from card
         self._card_panel.set_card_info(
             imsi=hw.get("IMSI", "-"),
@@ -701,6 +715,9 @@ class SimGUIApp:
             source_file=None,
         )
         self._card_panel.set_auth_status(False)
+        self._card_panel.set_blocked_indicator(is_blocked)
+        self._card_panel.set_adm1_attempts(
+            self._card_manager.adm1_remaining_attempts)
 
         # Check if already programmed even though not in the ICCID index
         already = self._check_already_programmed(iccid)
@@ -893,8 +910,10 @@ class SimGUIApp:
 
     def _on_detect_card(self):
         ok, msg = self._card_manager.detect_card()
+        is_blocked = self._card_manager.card_blocked
         if ok:
-            self._card_panel.set_status("detected", msg)
+            state = "blocked" if is_blocked else "detected"
+            self._card_panel.set_status(state, msg)
             info = self._card_manager.card_info
             self._card_panel.set_card_info(
                 card_type=self._card_manager.card_type.name,
@@ -906,6 +925,9 @@ class SimGUIApp:
             )
         else:
             self._card_panel.set_status("error", msg)
+        self._card_panel.set_blocked_indicator(is_blocked)
+        self._card_panel.set_adm1_attempts(
+            self._card_manager.adm1_remaining_attempts)
         prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
         self._status_var.set(f"{prefix}{msg}")
         # Update virtual card indicator
@@ -919,6 +941,15 @@ class SimGUIApp:
         self._read_panel.refresh()
 
     def _on_authenticate(self):
+        # Block authentication if card is blocked
+        if self._card_manager.card_blocked:
+            show_error_dialog(
+                self.root, "Card Blocked",
+                "This card is PERMANENTLY LOCKED.\n\n"
+                "ADM1 authentication has been blocked (0 attempts "
+                "remaining).\nRemove this card and insert a different one.")
+            return
+
         remaining = self._card_manager.get_remaining_attempts()
         dlg = ADM1Dialog(self.root, remaining_attempts=remaining or 3)
         adm1, force = dlg.get_adm1()
@@ -935,6 +966,11 @@ class SimGUIApp:
             self._card_panel.set_auth_status(False)
             if "ICCID mismatch" in msg:
                 messagebox.showwarning("ICCID Mismatch", msg)
+        # Update blocked indicator + retry counter after auth attempt
+        self._card_panel.set_blocked_indicator(
+            self._card_manager.card_blocked)
+        self._card_panel.set_adm1_attempts(
+            self._card_manager.adm1_remaining_attempts)
         prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
         self._status_var.set(f"{prefix}{msg}")
 

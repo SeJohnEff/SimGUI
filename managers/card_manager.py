@@ -181,6 +181,10 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
 class CardManager:
     """Manage card detection, authentication, and programming via CLI."""
 
+    # ADM1 key reference byte for VERIFY APDU on SIM/USIM cards.
+    # Standard value for sysmocom cards (ETSI TS 102.221, key ref 0x0A).
+    _ADM1_KEY_REF = 0x0A
+
     def __init__(self):
         self.cli_path: Optional[str]
         self.cli_backend: CLIBackend
@@ -194,6 +198,8 @@ class CardManager:
         self._authenticated_adm1_hex: Optional[str] = None
         self._original_card_data: Dict[str, str] = {}  # snapshot at detect time
         self._simulator = None  # Optional[SimulatorBackend]
+        self.card_blocked: bool = False   # True when ADM1 retry counter = 0
+        self._adm1_remaining_attempts: Optional[int] = None
         logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
                     self.cli_backend.name, self.cli_path, self._venv_python)
 
@@ -337,7 +343,11 @@ class CardManager:
     # ---- card operations -----------------------------------------------
 
     def detect_card(self) -> Tuple[bool, str]:
-        """Detect a card in the reader (or the virtual card if simulator active)."""
+        """Detect a card in the reader (or the virtual card if simulator active).
+
+        After detection, also checks the ADM1 retry counter to detect
+        blocked cards early (before any authentication attempt).
+        """
         if self._simulator:
             ok, msg = self._simulator.detect_card()
             if ok:
@@ -356,6 +366,8 @@ class CardManager:
         self.authenticated = False
         self.card_info = {}
         self.card_type = CardType.UNKNOWN
+        self.card_blocked = False
+        self._adm1_remaining_attempts = None
 
         if self.cli_path is None:
             return False, ("No CLI tool found. Install sysmo-usim-tool or "
@@ -366,13 +378,23 @@ class CardManager:
             if ok:
                 self._parse_pysim_output(stdout)
                 self._original_card_data = dict(self.card_info)  # snapshot
+                # Check ADM1 retry counter (non-destructive)
+                self.check_adm1_retry_counter()
+                if self.card_blocked:
+                    return True, "Card detected \u2014 WARNING: CARD IS BLOCKED"
                 return True, "Card detected via pySim"
             # Also check stdout - pySim sometimes prints data before failing
             if stdout:
                 self._parse_pysim_output(stdout)
                 if self.card_info.get('ICCID'):
                     self._original_card_data = dict(self.card_info)
+                    self.check_adm1_retry_counter()
+                    if self.card_blocked:
+                        return True, "Card detected \u2014 WARNING: CARD IS BLOCKED"
                     return True, "Card detected via pySim"
+            # Even if pySim-read fails (blank card), try the retry counter
+            # in case there's a card present but unreadable
+            self.check_adm1_retry_counter()
             return False, self._clean_pysim_error(stderr) or "No card detected"
 
         # sysmo-usim-tool: try each card type script
@@ -424,12 +446,38 @@ class CardManager:
         'no card',
     )
 
+    def _run_pysim_shell_safe(self, commands: str,
+                              timeout: int = 30) -> Tuple[bool, str, str]:
+        """Run pySim-shell.py WITHOUT -A flag (no auto-authentication).
+
+        Starts pySim-shell in **read-only** mode.  The caller can pipe
+        ``verify_adm`` or other commands through stdin.  This is the
+        SAFE way to interact with the card — no ADM1 attempt is consumed
+        unless the caller explicitly sends a verify_adm command.
+
+        Returns (success, stdout, stderr).
+        """
+        return self._run_pysim_shell_impl(
+            adm1_hex=None, commands=commands, timeout=timeout)
+
     def _run_pysim_shell(self, adm1_hex: str, commands: str,
                          timeout: int = 30) -> Tuple[bool, str, str]:
-        """Run pySim-shell.py with ADM1 auth and piped commands.
+        """Run pySim-shell.py WITH -A (auto-authentication at startup).
 
-        Starts pySim-shell with -p0 (first reader) and -A (hex ADM1),
-        then pipes *commands* via stdin.  Returns (success, stdout, stderr).
+        **WARNING**: Using -A sends a VERIFY APDU at startup, consuming
+        one ADM1 attempt even if the key is wrong.  Only call this
+        method from ``_program_nonempty_card`` after ICCID cross-check
+        has confirmed the card matches the data row.
+
+        Returns (success, stdout, stderr).
+        """
+        return self._run_pysim_shell_impl(
+            adm1_hex=adm1_hex, commands=commands, timeout=timeout)
+
+    def _run_pysim_shell_impl(
+            self, adm1_hex: Optional[str], commands: str,
+            timeout: int = 30) -> Tuple[bool, str, str]:
+        """Internal: run pySim-shell.py, optionally with -A.
 
         Uses ``--noprompt`` so that pySim-shell returns a non-zero exit
         code when card initialisation fails (instead of silently dropping
@@ -443,8 +491,9 @@ class CardManager:
             return False, "", "pySim-shell.py not found"
 
         python_exe = self._venv_python or sys.executable
-        cmd = [python_exe, script_path, '-p0', '--noprompt',
-               '-A', adm1_hex]
+        cmd = [python_exe, script_path, '-p0', '--noprompt']
+        if adm1_hex:
+            cmd += ['-A', adm1_hex]
         # Append 'exit' so the shell terminates cleanly
         full_input = commands.rstrip('\n') + '\nexit\n'
         logger.debug("pySim-shell input:\n%s", full_input)
@@ -551,9 +600,82 @@ class CardManager:
         except Exception as e:
             return False, "", str(e)
 
+    def check_adm1_retry_counter(self) -> Optional[int]:
+        """Check how many ADM1 authentication attempts remain.
+
+        Sends a VERIFY APDU **without data** to the card.  Per ISO 7816
+        / ETSI TS 102.221, the card responds with SW ``63 CX`` where
+        ``X`` is the number of remaining retries, WITHOUT decrementing
+        the counter.  SW ``6983`` means the card is permanently blocked.
+
+        Returns:
+            Number of remaining attempts (0 = blocked), or None if
+            the counter could not be read (e.g. no pyscard, no card).
+        """
+        if self._simulator:
+            sim_card = self._simulator._current_card()
+            if sim_card:
+                return sim_card.remaining_attempts
+            return None
+
+        if not _init_pyscard(self._venv_python):
+            logger.debug("check_adm1_retry_counter: pyscard not available")
+            return None
+
+        try:
+            rlist = _smartcard_readers()
+            if not rlist:
+                return None
+            reader = rlist[0]
+            conn = reader.createConnection()
+            conn.connect()
+
+            # VERIFY APDU without data: CLA=00, INS=20, P1=00,
+            # P2=key_ref (0x0A for ADM1), no Lc/data.
+            apdu = [0x00, 0x20, 0x00, self._ADM1_KEY_REF]
+            data, sw1, sw2 = conn.transmit(apdu)
+            conn.disconnect()
+
+            if sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
+                remaining = sw2 & 0x0F
+                self._adm1_remaining_attempts = remaining
+                self.card_blocked = (remaining == 0)
+                logger.info("ADM1 retry counter: %d remaining", remaining)
+                return remaining
+            elif sw1 == 0x69 and sw2 == 0x83:
+                # 6983 = authentication method blocked
+                self._adm1_remaining_attempts = 0
+                self.card_blocked = True
+                logger.warning("ADM1 retry counter: BLOCKED (6983)")
+                return 0
+            elif sw1 == 0x90 and sw2 == 0x00:
+                # Some cards return 9000 when PIN is already verified
+                # in this session — retry counter not decremented
+                logger.info("ADM1 appears already verified this session")
+                return None  # can't determine count
+            else:
+                logger.debug("Unexpected VERIFY response: %02X %02X",
+                             sw1, sw2)
+                return None
+        except Exception as exc:
+            logger.debug("check_adm1_retry_counter failed: %s", exc)
+            return None
+
+    @property
+    def adm1_remaining_attempts(self) -> Optional[int]:
+        """Last known ADM1 remaining attempts (None if never checked)."""
+        return self._adm1_remaining_attempts
+
     def authenticate(self, adm1: str, force: bool = False,
                      expected_iccid: Optional[str] = None) -> Tuple[bool, str]:
         """Authenticate with ADM1 key.
+
+        **SAFETY**: This method NEVER uses the ``-A`` flag on pySim-shell.
+        Instead it starts pySim-shell in read-only mode and pipes
+        ``verify_adm`` interactively.  This means the VERIFY APDU is
+        only sent when the shell is ready and the card has been
+        successfully initialised — blank cards that fail init will
+        never have an attempt consumed.
 
         Args:
             adm1: The ADM1 key.
@@ -562,6 +684,14 @@ class CardManager:
                 authenticating. Prevents wrong-ADM1 lockout from mismatched
                 card/data rows.
         """
+        # --- Pre-flight: blocked card check ---
+        if self.card_blocked:
+            return False, (
+                "Card is PERMANENTLY LOCKED \u2014 "
+                "ADM1 authentication blocked (0 attempts remaining). "
+                "This card cannot be programmed."
+            )
+
         # ICCID cross-verification safety check
         if expected_iccid is not None:
             card_iccid = self.read_iccid()
@@ -587,15 +717,34 @@ class CardManager:
             logger.warning("authenticate(): non-pySim backend not implemented")
             return False, "Authentication not supported for this CLI backend"
 
-        # Use pySim-shell with verify_adm to authenticate
+        # --- Pre-flight: check retry counter (non-destructive) ---
+        if not force:
+            remaining = self.check_adm1_retry_counter()
+            if remaining is not None and remaining == 0:
+                self.card_blocked = True
+                return False, (
+                    "Card is PERMANENTLY LOCKED \u2014 "
+                    "ADM1 authentication blocked (0 attempts remaining). "
+                    "This card cannot be programmed."
+                )
+            if remaining is not None and remaining <= 1:
+                return False, (
+                    f"DANGER: Only {remaining} ADM1 attempt(s) remaining! "
+                    f"Authentication aborted to protect the card. "
+                    f"Use force=True to override (at your own risk)."
+                )
+
+        # Use pySim-shell WITHOUT -A (safe: no auto-auth at startup)
+        # Pipe verify_adm with the hex key interactively.
         adm1_hex = self._adm1_to_hex(adm1)
-        ok, stdout, stderr = self._run_pysim_shell(
-            adm1_hex, 'verify_adm', timeout=15)
+        verify_cmd = f'verify_adm --pin-is-hex {adm1_hex}'
+        ok, stdout, stderr = self._run_pysim_shell_safe(
+            verify_cmd, timeout=15)
 
         if ok:
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
-            logger.info("ADM1 authentication successful")
+            logger.info("ADM1 authentication successful (safe mode)")
             return True, "Authentication successful"
 
         # Check whether pySim-shell failed because the card is blank
@@ -612,7 +761,7 @@ class CardManager:
             # Blank card: store ADM1, defer real auth to pySim-prog
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
-            logger.info("Blank card — ADM1 stored (will authenticate "
+            logger.info("Blank card \u2014 ADM1 stored (will authenticate "
                         "during programming via pySim-prog)")
             return True, (
                 "Authentication stored \u2014 blank card will be "
@@ -621,14 +770,22 @@ class CardManager:
 
         # Check for specific failure patterns
         if 'sw mismatch' in combined and '6982' in combined:
+            # Re-check retry counter after failure
+            remaining = self.check_adm1_retry_counter()
+            remaining_msg = ""
+            if remaining is not None:
+                remaining_msg = f" ({remaining} attempt(s) remaining)"
+                if remaining == 0:
+                    self.card_blocked = True
             return False, (
-                "Authentication FAILED — wrong ADM1 key. "
-                "Remaining attempts may be reduced. "
-                "3 wrong attempts = permanent card lock!"
+                f"Authentication FAILED \u2014 wrong ADM1 key.{remaining_msg} "
+                f"3 wrong attempts = permanent card lock!"
             )
         if 'sw mismatch' in combined and '6983' in combined:
+            self.card_blocked = True
+            self._adm1_remaining_attempts = 0
             return False, (
-                "Card is PERMANENTLY LOCKED — "
+                "Card is PERMANENTLY LOCKED \u2014 "
                 "ADM1 authentication blocked (0 attempts remaining)"
             )
 
@@ -814,12 +971,17 @@ class CardManager:
         """
         if self._simulator:
             return self._simulator.program_card(card_data)
+        if self.card_blocked:
+            return False, (
+                "Card is PERMANENTLY LOCKED \u2014 cannot program. "
+                "Remove this card and insert a different one."
+            )
         if not self.authenticated:
             return False, "Not authenticated"
         if self.cli_backend != CLIBackend.PYSIM:
             return False, "Programming not supported for this CLI backend"
         if not self._authenticated_adm1_hex:
-            return False, "No ADM1 key stored — re-authenticate first"
+            return False, "No ADM1 key stored \u2014 re-authenticate first"
 
         # Determine what changed
         orig = original_data if original_data is not None else self._original_card_data
@@ -1121,7 +1283,7 @@ class CardManager:
         """Return remaining ADM1 auth attempts, or None if unknown."""
         if self._simulator:
             return self._simulator.get_remaining_attempts()
-        return None
+        return self._adm1_remaining_attempts
 
     def disconnect(self):
         if self._simulator:
@@ -1131,6 +1293,8 @@ class CardManager:
         self._original_card_data = {}
         self.card_type = CardType.UNKNOWN
         self.card_info = {}
+        self.card_blocked = False
+        self._adm1_remaining_attempts = None
 
     # Error patterns from pySim that indicate specific conditions.
     # Each tuple is (keyword_in_stderr, user_friendly_message).
