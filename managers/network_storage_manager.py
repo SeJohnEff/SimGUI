@@ -224,6 +224,23 @@ class NetworkStorageManager:
             return self._test_smb(profile)
         return self._test_nfs(profile)
 
+    def sync_os_mounts(self) -> None:
+        """Populate ``_active_mounts`` for profiles that are mounted at
+        the OS level but were not explicitly mounted by this session.
+
+        This covers the case where a share was left mounted from a
+        previous session or was mounted externally.  Without this,
+        ``get_active_mount_paths`` would return nothing and the UI
+        share indicator would stay grey.
+        """
+        for p in self.load_profiles():
+            if p.label in self._active_mounts:
+                continue  # already tracked
+            if self.is_mounted(p):
+                self._active_mounts[p.label] = p
+                logger.info("sync_os_mounts: adopted existing mount %s",
+                            p.label)
+
     def get_active_mount_paths(self) -> list[tuple[str, str]]:
         """Return [(label, mount_point), ...] for all active mounts."""
         return [(label, p.mount_point)

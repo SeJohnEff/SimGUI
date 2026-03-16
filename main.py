@@ -463,23 +463,15 @@ class SimGUIApp:
     def _background_startup(self):
         """Run ALL slow startup tasks in a background thread.
 
-        Card detection (pySim-read, up to 30 s), network reconnect,
-        ICCID scan, and sudo-check all involve subprocess calls and
-        filesystem I/O.  Running them here keeps the GUI responsive
-        from the very first frame.
+        Network reconnect runs FIRST so the share indicator turns green
+        as soon as possible.  Card detection (pySim-read, 10-30 s) runs
+        LAST because it can block for a long time without affecting
+        network-share functionality.
 
         All UI updates are dispatched to the main thread via
         ``root.after(0, ...)``.
         """
-        # 1. Initial card detection (pySim-read can take 10-30 s)
-        #    This was previously on the main thread via root.after(100,...)
-        #    which blocked the entire UI.  Now it runs here.
-        try:
-            self._startup_detect_card()
-        except Exception as exc:
-            logger.warning("Startup card detection failed: %s", exc)
-
-        # 2. Check sudo mount permissions
+        # 1. Check sudo mount permissions (fast — single subprocess)
         try:
             profiles = self._ns_manager.load_profiles()
             if profiles:
@@ -489,7 +481,7 @@ class SimGUIApp:
         except Exception as exc:
             logger.warning("Sudo mount check failed: %s", exc)
 
-        # 3. Reconnect network shares
+        # 2. Reconnect network shares (fast when already mounted)
         try:
             results = self._ns_manager.reconnect_saved()
         except Exception as exc:
@@ -516,17 +508,31 @@ class SimGUIApp:
                     level="warning", duration=8000))
                 logger.warning("Auto-reconnect failed: %s — %s", label, msg)
 
-        # 4. Scan ICCID index from connected shares
+        # 3. Sync any OS-level mounts that match saved profiles but
+        #    weren't reconnected above (e.g. left over from prev session).
+        try:
+            self._ns_manager.sync_os_mounts()
+        except Exception as exc:
+            logger.warning("OS mount sync failed: %s", exc)
+
+        # 4. Update the share indicator immediately (before slow card IO)
+        self.root.after(0, self._refresh_share_indicator)
+
+        # 5. Scan ICCID index from connected shares
         try:
             self._rescan_iccid_index()
         except Exception as exc:
             logger.warning("ICCID index scan failed: %s", exc)
 
-        # 5. Update the share indicator on the main thread
-        self.root.after(0, self._refresh_share_indicator)
-
-        # 6. Start the periodic refresh (first poll after 30 s)
+        # 6. Start the periodic indicator refresh (first poll after 30 s)
         self.root.after(0, self._start_share_indicator_poll)
+
+        # 7. Initial card detection (pySim-read can take 10-30 s).
+        #    Runs LAST so that network/indicator is already up.
+        try:
+            self._startup_detect_card()
+        except Exception as exc:
+            logger.warning("Startup card detection failed: %s", exc)
 
     # ---- Mount indicator (tab-bar icon) ---------------------------------
 
@@ -576,10 +582,15 @@ class SimGUIApp:
 
     def _share_indicator_poll(self):
         """Periodically refresh the share indicator to catch external
-        mount/unmount events (e.g. network interruption, manual unmount).
+        mount/unmount events (e.g. network interruption, manual unmount,
+        or shares left from a previous session).
 
         Called by ``root.after`` every ``_SHARE_POLL_MS`` milliseconds.
         """
+        try:
+            self._ns_manager.sync_os_mounts()
+        except Exception:
+            pass
         self._refresh_share_indicator()
         self.root.after(self._SHARE_POLL_MS, self._share_indicator_poll)
 
@@ -1016,7 +1027,10 @@ class SimGUIApp:
         """Open the network storage connection dialog."""
         dlg = NetworkStorageDialog(self.root, self._ns_manager)
         self.root.wait_window(dlg)
-        # Rescan after dialog closes — shares may have been mounted/unmounted
+        # Rescan after dialog closes — shares may have been mounted/unmounted.
+        # sync_os_mounts picks up shares that are mounted at OS level but
+        # not yet tracked in _active_mounts (e.g. left from prev session).
+        self._ns_manager.sync_os_mounts()
         self._rescan_iccid_index()
         self._refresh_share_indicator()
 

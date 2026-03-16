@@ -146,3 +146,48 @@ class TestNetworkStorageManager:
         cmd = ns._build_mount_cmd(p)
         opts = cmd[cmd.index("-o") + 1]
         assert "username=admin" in opts
+
+
+class TestSyncOsMounts:
+    """Tests for sync_os_mounts — adopts OS-level mounts into _active_mounts."""
+
+    def test_sync_adopts_mounted_profile(self, monkeypatch):
+        """A profile whose mount point is already mounted gets adopted."""
+        ns = NetworkStorageManager()
+        p = StorageProfile(label="nas-1", server="10.0.0.1", share="data")
+        monkeypatch.setattr(ns, "load_profiles", lambda: [p])
+        monkeypatch.setattr(os.path, "ismount",
+                            lambda mp: mp == p.mount_point)
+        assert ns.get_active_mount_paths() == []  # not tracked yet
+        ns.sync_os_mounts()
+        paths = ns.get_active_mount_paths()
+        assert len(paths) == 1
+        assert paths[0][0] == "nas-1"
+
+    def test_sync_skips_not_mounted(self, monkeypatch):
+        """Profiles that are NOT mounted at OS level are not adopted."""
+        ns = NetworkStorageManager()
+        p = StorageProfile(label="nas-2", server="10.0.0.2", share="data")
+        monkeypatch.setattr(ns, "load_profiles", lambda: [p])
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        ns.sync_os_mounts()
+        assert ns.get_active_mount_paths() == []
+
+    def test_sync_skips_already_tracked(self, monkeypatch):
+        """Profiles already in _active_mounts are not re-loaded."""
+        ns = NetworkStorageManager()
+        p = StorageProfile(label="nas-3", server="10.0.0.3", share="data")
+        ns._active_mounts["nas-3"] = p  # already tracked
+        monkeypatch.setattr(ns, "load_profiles", lambda: [p])
+        monkeypatch.setattr(os.path, "ismount",
+                            lambda mp: mp == p.mount_point)
+        # Should not raise or double-add
+        ns.sync_os_mounts()
+        assert len(ns.get_active_mount_paths()) == 1
+
+    def test_sync_no_profiles(self, monkeypatch):
+        """No crash when no profiles are configured."""
+        ns = NetworkStorageManager()
+        monkeypatch.setattr(ns, "load_profiles", lambda: [])
+        ns.sync_os_mounts()  # should not raise
+        assert ns.get_active_mount_paths() == []
