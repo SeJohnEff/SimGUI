@@ -513,6 +513,23 @@ class ProgramSIMPanel(ttk.Frame):
         try:
             ok, msg = self._cm.authenticate(
                 adm1, expected_iccid=expected_iccid)
+
+            # If auth was refused due to low retry counter, offer a
+            # force-override so the operator can still proceed when
+            # they are confident the key is correct.
+            if not ok and "DANGER" in msg and "attempt" in msg:
+                confirm = messagebox.askyesno(
+                    "Low ADM1 Attempts",
+                    f"{msg}\n\n"
+                    "Are you SURE the ADM1 key is correct?\n"
+                    "A wrong key will permanently lock this card.\n\n"
+                    "Force authentication?",
+                    icon=messagebox.WARNING,
+                )
+                if confirm:
+                    ok, msg = self._cm.authenticate(
+                        adm1, force=True,
+                        expected_iccid=expected_iccid)
         finally:
             if self._card_watcher:
                 self._card_watcher.resume()
