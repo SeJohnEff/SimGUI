@@ -1173,19 +1173,18 @@ class CardManager:
         if not commands:
             return True, "No programmable fields changed"
 
-        # Execute via pySim-shell in SAFE mode (no -A flag).
-        # We prepend verify_adm so the VERIFY APDU is sent *after*
-        # pySim-shell has fully initialised the card transport —
-        # unlike -A which sends VERIFY during init, where it can
-        # be disrupted by reader contention (→ 6f00 errors).
-        verify_cmd = f'verify_adm --pin-is-hex {self._authenticated_adm1_hex}'
-        full_commands = [verify_cmd] + commands
-        cmd_str = '\n'.join(full_commands)
+        # Execute via pySim-shell WITH -A flag (auto-auth at startup).
+        # This consumes only ONE ADM1 attempt for both authentication
+        # and writes, instead of two (one in authenticate(), one here).
+        # The caller MUST pause the CardWatcher before calling this
+        # method — watcher probes during -A init caused 6f00 errors
+        # in v0.5.15, but with paused_context() this is safe.
+        cmd_str = '\n'.join(commands)
         logger.info("Programming card: fields=%s", fields_written)
         logger.debug("pySim-shell commands:\n%s", cmd_str)
 
-        ok, stdout, stderr = self._run_pysim_shell_safe(
-            cmd_str, timeout=30)
+        ok, stdout, stderr = self._run_pysim_shell(
+            self._authenticated_adm1_hex, cmd_str, timeout=30)
 
         if ok:
             summary = ', '.join(fields_written)

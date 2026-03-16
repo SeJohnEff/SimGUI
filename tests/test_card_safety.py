@@ -684,38 +684,53 @@ class TestProgramNonemptyUseSafeShell(unittest.TestCase):
         return cm
 
     @patch('managers.card_manager.CardManager.verify_after_program')
-    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
-    def test_uses_safe_shell_not_unsafe(self, mock_safe, mock_verify):
-        """_program_nonempty_card must call _run_pysim_shell_safe, not _run_pysim_shell."""
+    @patch('managers.card_manager.CardManager._run_pysim_shell')
+    def test_uses_pysim_shell_with_A_flag(self, mock_shell, mock_verify):
+        """_program_nonempty_card must use _run_pysim_shell (with -A).
+
+        Authentication is done via the -A flag (single VERIFY APDU
+        during pySim-shell init), NOT via piped verify_adm command.
+        The caller must pause the CardWatcher before calling.
+        """
         cm = self._make_card_manager()
-        mock_safe.return_value = (True, 'OK', '')
+        mock_shell.return_value = (True, 'OK', '')
         mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
 
         changed = {'IMSI': '001010000000001'}
         ok, msg = cm._program_nonempty_card(
             {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
         self.assertTrue(ok)
-        mock_safe.assert_called_once()
-        # Verify that verify_adm is in the commands
-        call_args = mock_safe.call_args
-        commands_str = call_args[0][0]  # First positional arg
-        self.assertIn('verify_adm', commands_str)
-        self.assertIn('3838383838383838', commands_str)
+        mock_shell.assert_called_once()
+        # First arg is the ADM1 hex key
+        call_args = mock_shell.call_args
+        self.assertEqual(call_args[0][0], '3838383838383838')
+        # Commands should NOT contain verify_adm (auth is via -A flag)
+        commands_str = call_args[0][1]
+        self.assertNotIn('verify_adm', commands_str)
+        # Write commands should be present
+        self.assertIn('IMSI', commands_str)
 
     @patch('managers.card_manager.CardManager.verify_after_program')
-    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
-    def test_verify_adm_is_first_command(self, mock_safe, mock_verify):
-        """verify_adm must be the FIRST command before any writes."""
+    @patch('managers.card_manager.CardManager._run_pysim_shell')
+    def test_no_double_auth(self, mock_shell, mock_verify):
+        """Programming must NOT send a separate verify_adm command.
+
+        Auth is handled by the -A flag. Sending verify_adm as well
+        would consume an extra ADM1 attempt on every programming
+        operation.
+        """
         cm = self._make_card_manager()
-        mock_safe.return_value = (True, 'OK', '')
+        mock_shell.return_value = (True, 'OK', '')
         mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
 
         changed = {'IMSI': '001010000000001'}
         cm._program_nonempty_card(
             {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
-        commands_str = mock_safe.call_args[0][0]
+        commands_str = mock_shell.call_args[0][1]
         lines = commands_str.strip().split('\n')
-        self.assertTrue(lines[0].startswith('verify_adm'))
+        for line in lines:
+            self.assertFalse(line.strip().startswith('verify_adm'),
+                             f"verify_adm found in commands: {line}")
 
 
 class TestAuthenticateDetects6983InOutput(unittest.TestCase):

@@ -227,7 +227,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell_safe',
+             patch.object(cm, '_run_pysim_shell',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "Verification OK",
@@ -244,7 +244,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell_safe',
+             patch.object(cm, '_run_pysim_shell',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(False,
@@ -262,7 +262,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell_safe',
+             patch.object(cm, '_run_pysim_shell',
                           return_value=(False, "", "sw mismatch 6982")), \
              patch.object(cm, 'verify_after_program') as mock_verify:
             ok, msg = cm.program_card(
@@ -279,7 +279,7 @@ class TestProgramCardWithVerify:
         readback = {"ICCID": "899998800000000002", "IMSI": "999880000200001"}
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell_safe',
+             patch.object(cm, '_run_pysim_shell',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", readback)):
