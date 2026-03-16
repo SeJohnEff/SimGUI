@@ -1,7 +1,28 @@
 #!/bin/bash
 set -e
+
+# Install Python dependencies (if any aren't satisfied by .deb deps)
 if [ -f /opt/simgui/requirements.txt ]; then
     python3 -m pip install --break-system-packages -r /opt/simgui/requirements.txt 2>/dev/null || \
     pip3 install -r /opt/simgui/requirements.txt 2>/dev/null || true
 fi
+
+# Install sudoers rule for passwordless mount/umount of network shares.
+# This allows SimGUI to mount CIFS/NFS shares under /tmp/simgui-mounts/
+# without prompting for a password.  The rule is scoped to mount -t cifs,
+# mount -t nfs, and umount /tmp/simgui-mounts/* only.
+SUDOERS_SRC="/opt/simgui/etc/simgui-mount.sudoers"
+SUDOERS_DST="/etc/sudoers.d/simgui-mount"
+if [ -f "$SUDOERS_SRC" ]; then
+    if visudo -c -f "$SUDOERS_SRC" >/dev/null 2>&1; then
+        cp "$SUDOERS_SRC" "$SUDOERS_DST"
+        chmod 0440 "$SUDOERS_DST"
+    fi
+fi
+
+# Ensure cifs-utils is installed (needed for SMB mounts)
+if ! command -v mount.cifs >/dev/null 2>&1; then
+    apt-get install -y -qq cifs-utils 2>/dev/null || true
+fi
+
 #DEBHELPER#

@@ -13,7 +13,12 @@ override_dh_auto_test:
 override_dh_auto_install:
 	# Install application files
 	install -d $(CURDIR)/debian/simgui/opt/simgui
-	cp -r main.py qt_main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ $(CURDIR)/debian/simgui/opt/simgui/
+	cp -r main.py qt_main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ etc/ $(CURDIR)/debian/simgui/opt/simgui/
+	# Mount helper script
+	install -d $(CURDIR)/debian/simgui/opt/simgui/bin
+	install -m 755 bin/simgui-setup-mount $(CURDIR)/debian/simgui/opt/simgui/bin/
+	install -d $(CURDIR)/debian/simgui/usr/bin
+	ln -sf /opt/simgui/bin/simgui-setup-mount $(CURDIR)/debian/simgui/usr/bin/simgui-setup-mount
 	# Include BUILD hash file (created by install.sh before build)
 	-cp BUILD $(CURDIR)/debian/simgui/opt/simgui/
 	# Include standards example

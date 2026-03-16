@@ -129,6 +129,28 @@ if [ -d "$PYSIM_DIR" ] && [ -f "$PYSIM_DIR/pySim-shell.py" ]; then
     info "pySim ready at $PYSIM_DIR"
 fi
 
+# --- Sudoers rule for network mounts ----------------------------
+# Allow SimGUI to mount/unmount network shares without a password prompt.
+# The postinst script does this too, but we run it here as well in case
+# the .deb postinst was skipped or the sudoers file was updated.
+SUDOERS_SRC="/opt/simgui/etc/simgui-mount.sudoers"
+SUDOERS_DST="/etc/sudoers.d/simgui-mount"
+if [ -f "$SUDOERS_SRC" ]; then
+    if visudo -c -f "$SUDOERS_SRC" >/dev/null 2>&1; then
+        cp "$SUDOERS_SRC" "$SUDOERS_DST"
+        chmod 0440 "$SUDOERS_DST"
+        info "Sudoers rule installed for passwordless network mounts."
+    else
+        warn "Sudoers syntax check failed — skipping (mounts may require password)."
+    fi
+fi
+
+# Ensure cifs-utils is available for SMB mounts
+if ! command -v mount.cifs >/dev/null 2>&1; then
+    info "Installing cifs-utils for SMB mount support..."
+    apt-get install -y -qq cifs-utils 2>&1 || warn "cifs-utils install failed"
+fi
+
 # --- Done -------------------------------------------------------
 VERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo "unknown")
 info "SimGUI $VERSION installed successfully."
