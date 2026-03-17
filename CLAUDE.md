@@ -185,6 +185,13 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 - **Widgets never import each other** — they subscribe to StateManager signals. Only MainWindow (controller) writes to StateManager.
 - **Plan before coding** — make a plan before fixing bugs. The workflow must be in the plan.
 
+### Documentation Is Part of the Change
+- **Every code change must include a docs check.** When you edit code, fix a bug, or add a feature, ask: "Which docs describe this behavior?" and update them in the same commit or push. Stale docs are bugs.
+- Docs live in `docs/` (Diátaxis: tutorials, how-to, reference, explanation), `README.md`, `CLAUDE.md`, and `debian/changelog`.
+- If you add a card type, update `docs/reference/card-types.md`. If you change CLI flags, update `docs/reference/cli-integration.md`. If you change auth flow, update `docs/explanation/architecture.md`. If you change install behavior, update `docs/how-to/install.md`. No exceptions.
+- `debian/changelog` and `version.py` must be bumped together for every release.
+- This is not optional cleanup — it is part of "done".
+
 ### Safety Rules
 - **v0.5.8 non-empty SIM flow is frozen** — do not change non-empty card programming
 - **Safety first**: Confirm ICCID matches before ADM1 auth. A mismatch = wrong ADM1 = card bricked after 3 fails.
