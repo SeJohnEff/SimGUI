@@ -201,7 +201,7 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 ### Modularity — File Formats and Parsers
 - The codebase already supports multiple input formats: CSV (`csv_manager.py`), EML/email (`utils/eml_parser.py`), and whitespace-delimited TXT.
 - Each parser is self-contained. Adding a new format (e.g. XLSX, XML) should be a matter of writing one new parser module that returns the same `list[dict]` structure. If it isn't that easy, the abstraction is leaking and needs fixing.
-- The **SIM standard** (IMSI ranges, ICCID ranges, SPN, LI, FPLMN defaults per site) is currently defined as `standards.json` on the network share. Future direction: migrate this to a **Markdown document** that is human-readable and version-controlled, parsed at runtime. This would enable richer validation — e.g. dropdown menus in batch programming for IMSI ranges, ICCID ranges, site codes, and FPLMN per country.
+- The **SIM standard** (IMSI ranges, ICCID ranges, SPN, LI, FPLMN defaults per site) is currently defined as `standards.json` on the network share. Future direction: migrate to a **Markdown document** (`sim-standard.md`) — human-readable prose and tables at the top, a fenced JSON block at the bottom for SimGUI to parse. One file that serves as both documentation and configuration. This would enable richer validation — e.g. dropdown menus in batch programming for IMSI ranges, ICCID ranges, site codes, and FPLMN per country.
 - Think modular: card types, file formats, validators, and standard definitions should all be pluggable.
 
 ### What We Welcome
