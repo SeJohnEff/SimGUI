@@ -102,9 +102,13 @@ docs/                      # Diátaxis documentation
 - `_hex_to_adm1_ascii()` converts hex to ASCII for the `-a` pySim-prog flag
 
 ### ICCID Lengths
-- Non-SUCI cards: 23-digit ICCIDs
-- SUCI cards: 19-digit ICCIDs
-- Both are factory-assigned by sysmocom
+- All card types: **19-digit ICCIDs** (conforms to ITU-T E.118 max 19 visible characters)
+- Format: `89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1) = 19`
+- IIN (7 digits): `89` + E.164 country code + issuer identifier (= MNC)
+- Sequence: 6 digits (max 999,999 cards per site/type combination)
+- Luhn check digit appended
+- See `sim-standard.example.json` numbering section for full field definitions
+- Factory-assigned by sysmocom; written from CSV for blank/gialersim cards
 
 ## Authentication Logic
 

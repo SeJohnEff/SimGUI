@@ -3,8 +3,8 @@
   "version": 1,
   "document": {
     "title": "Teleaura SIM & PLMN Numbering Standard",
-    "revision": "2.1",
-    "date": "2026-03-14",
+    "revision": "2.2",
+    "date": "2026-03-17",
     "scope": "Teleaura UK and all sub-networks",
     "classification": "Confidential"
   },
@@ -15,7 +15,8 @@
       "mnc": "88",
       "mnc_length": 2,
       "purpose": "Teleaura Production Networks",
-      "issuer_id": "988",
+      "issuer_id": "88",
+      "iin": "8999988",
       "status": "active"
     },
     "99989": {
@@ -23,7 +24,8 @@
       "mnc": "89",
       "mnc_length": 2,
       "purpose": "Teleaura Lab / Test Networks",
-      "issuer_id": "989",
+      "issuer_id": "89",
+      "iin": "8999989",
       "status": "active"
     }
   },
@@ -86,16 +88,37 @@
   },
 
   "numbering": {
-    "imsi_format": "MCC + MNC + SSSS + T + NNNNN",
-    "imsi_length": 15,
-    "iccid_format": "89 + CC + III + SSSS + T + NNNNN + Luhn",
-    "iccid_length": 20,
-    "msin_length_2digit_mnc": 10,
-    "msin_length_3digit_mnc": 9,
-    "sequence_digits_2digit_mnc": 5,
-    "sequence_digits_3digit_mnc": 4,
-    "max_sequence_2digit_mnc": 99999,
-    "max_sequence_3digit_mnc": 9999
+    "imsi": {
+      "format": "MCC(3) + MNC(2) + SSSS(4) + T(1) + NNNNN(5)",
+      "length": 15,
+      "fields": {
+        "mcc": {"digits": 3, "description": "Mobile Country Code"},
+        "mnc": {"digits": 2, "description": "Mobile Network Code"},
+        "site": {"digits": 4, "description": "Site ID (SSSS)"},
+        "sim_type": {"digits": 1, "description": "SIM type (T)"},
+        "sequence": {"digits": 5, "description": "Sequence number (NNNNN)"}
+      },
+      "msin_length_2digit_mnc": 10,
+      "msin_length_3digit_mnc": 9,
+      "max_sequence_2digit_mnc": 99999,
+      "max_sequence_3digit_mnc": 9999
+    },
+    "iccid": {
+      "format": "89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1)",
+      "length": 19,
+      "conforms_to": "ITU-T E.118 (max 19 visible characters)",
+      "fields": {
+        "mii": {"digits": 2, "value": "89", "description": "Major Industry Identifier (telecom)"},
+        "country_code": {"digits": 3, "value": "999", "description": "E.164 country code (test/private)"},
+        "issuer": {"digits": 2, "description": "Issuer identifier (= MNC)"},
+        "site": {"digits": 4, "description": "Site ID (SSSS), same as IMSI"},
+        "sim_type": {"digits": 1, "description": "SIM type (T), same as IMSI"},
+        "sequence": {"digits": 6, "description": "Sequence number (NNNNNN)"},
+        "luhn": {"digits": 1, "description": "Luhn check digit"}
+      },
+      "max_sequence": 999999,
+      "note": "All card types use 19-digit ICCID. IIN (7 digits) = 89 + CCC + II. Site, type, and sequence mirror IMSI structure but ICCID sequence is 6 digits (vs 5 in IMSI) due to Luhn overhead."
+    }
   },
 
   "key_generation": {
