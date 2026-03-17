@@ -138,16 +138,34 @@ class CSVManager:
 
     @staticmethod
     def _parse_whitespace(lines: List[str]) -> Tuple[List[str], List[Dict[str, str]]]:
-        """Parse whitespace-delimited SIM data lines into columns and card dicts."""
+        """Parse whitespace-delimited SIM data lines into columns and card dicts.
+
+        Handles files with empty columns (e.g. empty MSISDN) where
+        consecutive spaces represent a blank field.  First tries
+        ``str.split()`` (collapses all whitespace).  When the field
+        count is too low, retries with ``str.split(' ')`` which
+        preserves empty strings between consecutive spaces.
+        """
         non_blank = [ln for ln in lines if ln.strip()]
         if not non_blank:
             return [], []
         headers = non_blank[0].split()
+        n_headers = len(headers)
         cards: List[Dict[str, str]] = []
         for line in non_blank[1:]:
             fields = line.split()
-            if len(fields) == len(headers):
+            if len(fields) == n_headers:
                 cards.append(dict(zip(headers, fields)))
+            elif len(fields) < n_headers:
+                # Retry: split on single space to preserve empty fields
+                fields_single = line.split(' ')
+                # Strip leading/trailing empties (from leading/trailing spaces)
+                while fields_single and fields_single[0] == '':
+                    fields_single.pop(0)
+                while fields_single and fields_single[-1] == '':
+                    fields_single.pop()
+                if len(fields_single) == n_headers:
+                    cards.append(dict(zip(headers, fields_single)))
         return headers, cards
 
     def save_csv(self, filepath: str) -> bool:

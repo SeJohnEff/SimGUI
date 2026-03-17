@@ -308,3 +308,65 @@ class TestEdgeCases:
             assert mgr.load_csv(path) is False
         finally:
             os.unlink(path)
+
+
+class TestEmptyColumnWhitespace:
+    """Whitespace-delimited files with empty columns (e.g. empty MSISDN)."""
+
+    HEADER = "PIN1 PUK1 PIN2 PUK2 ADM ICCID IMSI ACC MSISDN KI OPC"
+    # Note: double space between ACC value and KI value = empty MSISDN
+    ROWS = [
+        "1234 88888888 1234 88888888 3838383838383838 8999988000100000019 999880001000001 0001  7091ce09d8693f582e65986b9fbc6ccb e753ebb305506e1493d62d453823380e",
+        "1234 88888888 1234 88888888 3838383838383838 8999988000100000028 999880001000002 0002  f0b5a4e8617192766314fbffd479c97a e7d82077c651a52453810e0ba1d957a3",
+        "1234 88888888 1234 88888888 3838383838383838 8999988000100000037 999880001000003 0003  d6c0af1ea9e9957b3ba683d53e61791c f26eeeb54ac17ac0017832c36f1163af",
+    ]
+
+    def test_loads_all_rows(self):
+        content = self.HEADER + "\n" + "\n".join(self.ROWS)
+        path = _write_tmp(content, suffix=".txt")
+        try:
+            mgr = CSVManager()
+            assert mgr.load_csv(path) is True
+            assert mgr.get_card_count() == 3
+        finally:
+            os.unlink(path)
+
+    def test_msisdn_is_empty_string(self):
+        content = self.HEADER + "\n" + self.ROWS[0]
+        path = _write_tmp(content, suffix=".txt")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            card = mgr.get_card(0)
+            assert card["MSISDN"] == ""
+        finally:
+            os.unlink(path)
+
+    def test_column_normalization_with_empty_col(self):
+        content = self.HEADER + "\n" + self.ROWS[0]
+        path = _write_tmp(content, suffix=".txt")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            card = mgr.get_card(0)
+            # ADM -> ADM1, KI -> Ki, OPC -> OPc
+            assert "ADM1" in card
+            assert "Ki" in card
+            assert "OPc" in card
+            assert card["ADM1"] == "3838383838383838"
+            assert card["Ki"] == "7091ce09d8693f582e65986b9fbc6ccb"
+        finally:
+            os.unlink(path)
+
+    def test_actual_uk1_file(self):
+        """Integration test with the actual uk1_100_sims.txt file if present."""
+        fpath = "/home/user/workspace/uk1_100_sims.txt"
+        if not os.path.exists(fpath):
+            pytest.skip("uk1_100_sims.txt not in workspace")
+        mgr = CSVManager()
+        assert mgr.load_file(fpath) is True
+        assert mgr.get_card_count() == 100
+        assert mgr.cards[0]["MSISDN"] == ""
+        assert "ADM1" in mgr.columns
+        assert "Ki" in mgr.columns
+        assert "OPc" in mgr.columns
