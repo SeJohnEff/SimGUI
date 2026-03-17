@@ -7,7 +7,7 @@
 
 ## Prerequisites
 
-- Ubuntu 22.04 or later, x86-64
+- Ubuntu 22.04 or later (x86-64 or ARM/aarch64)
 - `sudo` access
 - Internet connection (to fetch the install script)
 - A USB PCSC reader (for hardware card operations)
@@ -24,14 +24,16 @@ curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/insta
 
 This script:
 
-1. Installs build dependencies (`python3`, `python3-pip`, `python3-tk`, `dpkg-dev`, etc.)
-2. Builds the `.deb` package from source
-3. Installs the `.deb` including all runtime dependencies:
+1. Installs build dependencies (`python3`, `python3-pip`, `python3-venv`, `dpkg-dev`, etc.)
+2. Clones and sets up **pySim** at `/opt/pysim` with its own virtual environment and dependencies
+3. Builds the `.deb` package from source
+4. Installs the `.deb` including all runtime dependencies:
    - `smbclient` — SMB share access
    - `avahi-utils` — mDNS network discovery
    - `cifs-utils` — CIFS/SMB mount support
    - `nfs-common` — NFS mount support
    - `pcscd`, `pcsc-tools` — PCSC daemon for card readers
+5. Configures a sudoers rule for password-free network mount/unmount
 
 After installation, SimGUI is available as:
 
@@ -41,13 +43,15 @@ simgui
 
 And in the application launcher under the Utilities category.
 
+pySim is installed automatically — no manual CLI tool setup needed. SimGUI auto-detects `/opt/pysim` on startup. Re-running the install script updates both SimGUI and pySim.
+
 ---
 
-## Install the CLI card tools
+## Alternative CLI tools (optional)
 
-SimGUI requires at least one of the following CLI tools to communicate with physical cards. Without them, CSV editing and the built-in simulator still work, but hardware card operations are unavailable.
+pySim is installed by the script and is used for all card operations (read, authenticate, program). You only need this section if you also want sysmo-usim-tool as an alternative backend.
 
-### Option A — sysmo-usim-tool (recommended for sysmocom cards)
+### sysmo-usim-tool (optional, for legacy workflows)
 
 ```bash
 git clone https://github.com/SeJohnEff/sysmo-usim-tool ~/sysmo-usim-tool
@@ -58,21 +62,6 @@ SimGUI auto-detects `~/sysmo-usim-tool` on startup. To use a different location,
 
 ```bash
 export SYSMO_USIM_TOOL_PATH=/path/to/sysmo-usim-tool
-```
-
-Add the export to `~/.bashrc` or `~/.profile` for persistence.
-
-### Option B — pySim
-
-```bash
-git clone https://github.com/osmocom/pysim ~/pysim
-pip3 install -r ~/pysim/requirements.txt
-```
-
-SimGUI auto-detects `~/pysim`. To use a different location:
-
-```bash
-export PYSIM_PATH=/path/to/pysim
 ```
 
 See [CLI integration reference](../reference/cli-integration.md) for full auto-detection logic and how SimGUI selects between the two tools.
@@ -141,9 +130,9 @@ rm -rf ~/.config/simgui/
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `simgui: command not found` | `.deb` did not install cleanly | Re-run install script; check for errors in output |
-| `No CLI tool found` on launch | sysmo-usim-tool/pySim not detected | Set `SYSMO_USIM_TOOL_PATH` or `PYSIM_PATH`; see [Configuration](../reference/configuration.md) |
+| `No CLI tool found` on launch | pySim install failed or was removed | Re-run install script; check `/opt/pysim` exists |
 | `Failed to connect to pcscd` | PCSC daemon not running | `sudo systemctl start pcscd` |
 | `Permission denied` on reader | User not in `pcscd` group | `sudo usermod -aG pcscd $USER` then re-login |
-| GUI won't start on Wayland | Tkinter/Wayland incompatibility | Set `GDK_BACKEND=x11 simgui` or use an Xorg session |
+| GUI won't start on Wayland | Qt/Wayland incompatibility | Set `QT_QPA_PLATFORM=xcb simgui` or use an Xorg session |
 
 For more issues, see [Troubleshooting](troubleshooting.md).
