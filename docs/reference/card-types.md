@@ -10,11 +10,11 @@ SimGUI supports four card types (plus one legacy type), detected automatically b
 
 | Card type | Enum value | Detection | SUCI support | ICCID length |
 |---|---|---|---|---|
-| sysmoISIM-SJA2 | `CardType.SJA2` | pySim-read auto-detection | No | 23 digits |
-| sysmoISIM-SJA5 | `CardType.SJA5` | pySim-read auto-detection | Yes (firmware option) | 19 digits (SUCI) / 23 digits (non-SUCI) |
+| sysmoISIM-SJA2 | `CardType.SJA2` | pySim-read auto-detection | No | 19 digits |
+| sysmoISIM-SJA5 | `CardType.SJA5` | pySim-read auto-detection | Yes (firmware option) | 19 digits |
 | GIALERSIM | `CardType.GIALERSIM` | pySim-read auto-detection (`gialersim`) | No | N/A (blank — written from CSV) |
-| magicSIM | `CardType.MAGIC` | pySim-read auto-detection | No | 23 digits |
-| sysmoISIM-SJS1 | *(legacy)* | sysmo-usim-tool only | No | 23 digits |
+| magicSIM | `CardType.MAGIC` | pySim-read auto-detection | No | 19 digits |
+| sysmoISIM-SJS1 | *(legacy)* | sysmo-usim-tool only | No | 19 digits |
 
 ---
 
@@ -24,7 +24,7 @@ The SJA2 is a standard ISIM card without SUCI support. It is programmed via `sys
 
 **Use when:** You need a straightforward ISIM/USIM without 5G SUCI privacy features.
 
-**ICCID:** 23 digits (factory-assigned). Format: `89{MCC_MNC}00{MSIN}{Luhn}` per Teleaura numbering standard.
+**ICCID:** 19 digits (factory-assigned). Format: `89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1)` per Teleaura numbering standard (ITU-T E.118 compliant).
 
 **Supported fields:**
 - IMSI, Ki, OPc, ADM1
@@ -41,10 +41,7 @@ The SJA5 is the most capable card in the sysmocom range. With appropriate firmwa
 
 **ICCID lengths:**
 
-- **Non-SUCI SJA5 cards:** 23-digit ICCID (same structure as SJA2/SJS1)
-- **SUCI-capable SJA5 cards:** 19-digit ICCID
-
-The ICCID length difference is not a software setting — it is a hardware/firmware distinction. A 19-digit ICCID is a definitive indicator that the card was manufactured with SUCI firmware.
+All SJA5 cards — both SUCI and non-SUCI — use **19-digit ICCIDs** per the Teleaura numbering standard (ITU-T E.118 compliant). SUCI vs non-SUCI is distinguished by the T digit in the ICCID/IMSI (`T=0` standard, `T=1` SUCI), not by ICCID length.
 
 See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md) for a full explanation of what SUCI changes.
 
@@ -80,7 +77,7 @@ The SJS1 is a Java Card-based ISIM. It is **not** in the current `CardType` enum
 
 **Use when:** Your deployment specifically requires a Java Card ISIM or your existing infrastructure was built around SJS1.
 
-**ICCID:** 23 digits.
+**ICCID:** 19 digits.
 
 **Supported fields:** Similar to SJA2. Check the sysmo-usim-tool documentation for SJS1-specific constraints.
 
@@ -98,7 +95,7 @@ For the legacy sysmo-usim-tool backend, detection tries each script in order: `s
 
 ## Teleaura IMSI/ICCID numbering standard
 
-SimGUI's `generate_imsi()` and `generate_iccid()` functions implement the Teleaura SIM PLMN Numbering Standard v2.0.
+SimGUI's `generate_imsi()` and `generate_iccid()` functions implement the Teleaura SIM PLMN Numbering Standard v2.2.
 
 ### IMSI structure (15 digits)
 
@@ -131,13 +128,23 @@ MCC + MNC(5) + SSSS(4) + T(1) + NNNNN(5)
 | `0003` | `se2` | Sweden (DR) | Active |
 | `0004` | `au1` | Australia | Reserved |
 
-### ICCID structure (20 digits)
+### ICCID structure (19 digits)
 
 ```
-89 + MCC_MNC(5) + 00 + MSIN(10) + Luhn(1)
+89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1) = 19
 ```
 
-The final digit is a Luhn check digit computed over the preceding 19 digits.
+| Segment | Length | Description |
+|---|---|---|
+| 89 | 2 digits | MII (Major Industry Identifier, telecom) |
+| CCC | 3 digits | E.164 country code (999 = test/private) |
+| II | 2 digits | Issuer identifier (= MNC) |
+| SSSS | 4 digits | Site ID from the Site Register |
+| T | 1 digit | SIM type digit (same as IMSI) |
+| NNNNNN | 6 digits | Sequential card number (max 999,999 per site/type) |
+| L | 1 digit | Luhn check digit |
+
+Conforms to ITU-T E.118 (max 19 visible characters). IIN = `89` + `CCC` + `II` = 7 digits.
 
 > **Note:** Factory-assigned ICCIDs may follow this numbering or a vendor-specific scheme. The `generate_iccid()` function is provided for **preview and sequence planning only** — it is not used during actual card programming. The physical ICCID is always read from the card itself.
 

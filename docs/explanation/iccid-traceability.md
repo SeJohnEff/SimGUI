@@ -6,7 +6,7 @@ The ICCID field in SimGUI is always read-only. You cannot type into it, paste a 
 
 ## What is an ICCID?
 
-ICCID stands for Integrated Circuit Card Identifier. It is a globally unique identifier, up to 22 characters, printed on the physical SIM card and stored in a dedicated elementary file (EF.ICCID) on the card's chip. It is defined by ITU-T E.118 and 3GPP TS 31.102.
+ICCID stands for Integrated Circuit Card Identifier. It is a globally unique identifier, up to 19 characters (per ITU-T E.118), printed on the physical SIM card and stored in a dedicated elementary file (EF.ICCID) on the card's chip. It is defined by ITU-T E.118 and 3GPP TS 31.102.
 
 The ICCID is assigned during SIM card manufacturing — it is part of the card's identity before any programming takes place. Unlike IMSI, Ki, OPc, and most other SIM fields, the ICCID is **not intended to be reprogrammed in the field**. Some card types technically allow it, but doing so breaks the traceability chain described below.
 
@@ -72,12 +72,13 @@ In all cases, the resolution is to match the correct physical card to the correc
 
 ## SUCI cards and ICCID length
 
-SUCI-capable SJA5 cards have **19-digit ICCIDs** rather than the usual 23 digits. This is a factory-assigned characteristic of SUCI cards. The digit count difference is meaningful:
+All Teleaura cards use **19-digit ICCIDs**, conforming to ITU-T E.118 (max 19 visible characters). This applies to both SUCI and non-SUCI cards. The ICCID format is:
 
-- A 19-digit ICCID identifies the card as SUCI-capable.
-- A 23-digit ICCID indicates a standard card.
+```
+89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1) = 19 digits
+```
 
-SimGUI accepts both lengths from the card reader. The length is not a setting — it is reported by the hardware and treated as an immutable property of that card.
+The ICCID length is factory-assigned by sysmocom. SimGUI reads the ICCID from the card reader and treats it as an immutable property of that card.
 
 See [SUCI vs non-SUCI cards](suci-vs-non-suci.md) for the full comparison.
 

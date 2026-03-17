@@ -236,7 +236,7 @@ every 1.5s:
 | **Card removed mid-program** | program_card() returns error. Watcher resets to waiting. |
 | **SMB disconnected** | Index stays valid. Status shows "stale". Re-scan on reconnect. |
 | **New files on SMB** | Periodic rescan (30s) or manual refresh. "+24 cards indexed" notification. |
-| **Mixed ICCID lengths** | 19-digit (SUCI) and 23-digit (non-SUCI) handled as separate entries with different prefix/suffix splits. |
+| **ICCID length** | All card types use 19-digit ICCIDs per ITU-T E.118. Legacy 23-digit ICCIDs are no longer generated. |
 | **Non-sequential ICCIDs** | Multiple index entries per file. Falls back gracefully. |
 | **Simulator mode** | CardWatcher pauses. Index still usable for CSV-loaded simulator data. |
 

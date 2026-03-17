@@ -16,18 +16,22 @@ SUCI is implemented on the SIM card itself. The private key computation and the 
 
 ---
 
-## ICCID length as a SUCI indicator
+## ICCID length
 
-The most immediately visible difference between SUCI and non-SUCI cards is the ICCID length:
+All Teleaura cards — both SUCI and non-SUCI — use **19-digit ICCIDs**, conforming to ITU-T E.118 (max 19 visible characters).
 
 | Card category | ICCID length | Example |
 |---|---|---|
-| Non-SUCI (SJA2, SJS1, SJA5 standard) | **23 digits** | `89882118123456789012345` |
-| SUCI-capable (SJA5 SUCI variant) | **19 digits** | `8988211812345678901` |
+| Non-SUCI (SJA2, SJS1, SJA5 standard) | **19 digits** | `8999988000100000018` |
+| SUCI-capable (SJA5 SUCI variant) | **19 digits** | `8999988000110000017` |
 
-This is a **factory assignment**, not a configuration. The length is baked in at manufacturing. There is no way to change a non-SUCI card to have a 19-digit ICCID, or vice versa.
+The ICCID format follows the Teleaura SIM PLMN Numbering Standard:
 
-The shorter ICCID of SUCI cards is a deliberate design choice by sysmocom to make SUCI cards identifiable at a glance — from the physical label and in data files — without needing to read any metadata.
+```
+89(2) + CCC(3) + II(2) + SSSS(4) + T(1) + NNNNNN(6) + L(1) = 19 digits
+```
+
+SUCI and non-SUCI cards are distinguished by the **T digit** (SIM type) in the ICCID/IMSI, not by ICCID length. `T=0` is standard USIM, `T=1` is SUCI-capable.
 
 ---
 
@@ -89,7 +93,7 @@ The programming workflow in SimGUI is identical for both card types:
 
 ## Mixed batches
 
-A CSV batch can contain a mix of SUCI and non-SUCI cards. SimGUI identifies the card type from the card reader's response when each card is inserted. The ICCID length in the data row (19 vs 23 digits) provides a cross-check.
+A CSV batch can contain a mix of SUCI and non-SUCI cards. SimGUI identifies the card type from the card reader's response when each card is inserted. The T digit in the ICCID/IMSI distinguishes SUCI from non-SUCI cards.
 
 **Important:** Do not mix SUCI and non-SUCI rows in a batch if the programming tools for each type differ. sysmo-usim-tool's `sysmo_isim_sja5.py` handles both SJA5 variants; `sysmo_isim_sja2.py` handles SJA2 only. CardManager auto-detects the type per card, so mixed batches work correctly in software — but verify that the data file's columns are correct for each card's type.
 
@@ -97,7 +101,7 @@ A CSV batch can contain a mix of SUCI and non-SUCI cards. SimGUI identifies the 
 
 ## In the simulator
 
-The built-in simulator uses sysmoISIM-SJA5 profiles. These are non-SUCI SJA5 cards (23-digit ICCIDs). The simulator does not currently simulate SUCI-specific EFs. For SUCI field testing, use physical hardware.
+The built-in simulator uses sysmoISIM-SJA5 profiles (19-digit ICCIDs). The simulator does not currently simulate SUCI-specific EFs. For SUCI field testing, use physical hardware.
 
 ---
 
@@ -105,7 +109,7 @@ The built-in simulator uses sysmoISIM-SJA5 profiles. These are non-SUCI SJA5 car
 
 | Property | Non-SUCI | SUCI (SJA5) |
 |---|---|---|
-| ICCID length | 23 digits | 19 digits |
+| ICCID length | 19 digits | 19 digits |
 | Card type | SJA2, SJS1, SJA5 (standard) | SJA5 (SUCI firmware) |
 | CLI script | `sysmo_isim_sja2.py` / `sysmo_isim_sja5.py` / `sysmo_isim_sjs1.py` | `sysmo_isim_sja5.py` |
 | Extra CSV fields | None | `HNPUBKEY`, `HNKEY_ID`, `SUCI_SCHEME` |

@@ -117,4 +117,4 @@ See [Import a sysmocom order email](../how-to/import-order-email.md) for EML imp
 
 ## SUCI card ICCIDs
 
-Non-SUCI cards have **23-digit ICCIDs**. SUCI-capable cards (sysmoISIM-SJA5 with SUCI firmware) have **19-digit ICCIDs**. Both are valid and accepted by SimGUI. The digit count difference is meaningful — see [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md).
+All Teleaura cards use **19-digit ICCIDs**, conforming to ITU-T E.118. SUCI and non-SUCI cards are distinguished by the T digit in the ICCID/IMSI, not by ICCID length. See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md).

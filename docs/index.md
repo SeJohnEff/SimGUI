@@ -54,7 +54,7 @@ Context, design decisions, and the reasoning behind how SimGUI works.
 | [Why ICCID is read-only](explanation/iccid-traceability.md) | Factory traceability and the role of the ICCID |
 | [ADM1 security and cross-verification](explanation/adm1-security.md) | Why ICCID cross-check prevents card lockout |
 | [Architecture overview](explanation/architecture.md) | Managers, widgets, simulator, and CLI decoupling |
-| [SUCI vs non-SUCI cards](explanation/suci-vs-non-suci.md) | 19 vs 23-digit ICCIDs, capability differences |
+| [SUCI vs non-SUCI cards](explanation/suci-vs-non-suci.md) | 19-digit ICCIDs (all types), capability differences |
 
 ---
 

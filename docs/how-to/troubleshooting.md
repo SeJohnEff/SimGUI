@@ -57,7 +57,7 @@ Common problems, their causes, and how to resolve them.
 
 **Symptom:** SimGUI reports an ICCID that does not match the physical label on the card.
 
-- Verify the physical label. SUCI cards have 19-digit ICCIDs; non-SUCI have 23-digit ICCIDs. See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md).
+- Verify the physical label. All card types use 19-digit ICCIDs per ITU-T E.118. See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md).
 - The ICCID is always read-only and sourced directly from the card — SimGUI does not modify or override it.
 
 ---

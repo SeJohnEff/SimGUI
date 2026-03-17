@@ -80,7 +80,7 @@ SimGUI passes the file to `eml_parser.parse_eml_file()`, which:
 After import, check:
 
 - **Row count** matches the number of cards in your order.
-- **ICCID** column is fully populated (all non-SUCI cards: 23 digits; SUCI cards: 19 digits).
+- **ICCID** column is fully populated (all card types: 19 digits per ITU-T E.118).
 - **ADM1** is present (8 decimal digits or 16 hex characters). ADM1 is critical — without it authentication cannot proceed.
 - **Ki** and **OPc** are 32 hex characters each.
 
@@ -119,7 +119,7 @@ This metadata is available to SimGUI for logging but is not programmed onto the 
 | Row count is wrong | Parser picked up a secondary table | Open the `.eml` in a text editor and check for multiple tables; report as a bug |
 | ADM1 column missing | sysmocom email did not include ADM1 (separate delivery) | Load the ADM1-containing file separately, then merge via CSV Editor |
 | Ki/OPc shows garbled characters | Email encoding issue | Try re-exporting with UTF-8 encoding; avoid forwarding the email before export (can corrupt encoding) |
-| ICCID is 20 digits but should be 19 | Mixed SUCI and non-SUCI batch | Both lengths are valid; check [card types reference](../reference/card-types.md) |
+| ICCID is not 19 digits | Legacy or non-standard batch | All ICCIDs must be 19 digits per ITU-T E.118; check [card types reference](../reference/card-types.md) |
 
 ---
 
