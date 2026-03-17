@@ -3,8 +3,8 @@
   "version": 1,
   "document": {
     "title": "Teleaura SIM & PLMN Numbering Standard",
-    "revision": "2.2",
-    "date": "2026-03-17",
+    "revision": "2.3",
+    "date": "2026-03-18",
     "scope": "Teleaura UK and all sub-networks",
     "classification": "Confidential"
   },
@@ -51,7 +51,7 @@
       "code": "se2",
       "country": "Sweden",
       "country_code_e164": "46",
-      "description": "Sweden DR site",
+      "description": "Secondary Sweden site",
       "status": "active"
     },
     "0004": {
@@ -60,13 +60,20 @@
       "country_code_e164": "61",
       "description": "Primary Australia site",
       "status": "reserved"
+    },
+    "0005": {
+      "code": "uk2",
+      "country": "United Kingdom",
+      "country_code_e164": "44",
+      "description": "Teleaura UK secondary site",
+      "status": "active"
     }
   },
 
   "sim_types": {
     "0": {"name": "USIM",      "description": "Standard physical SIM (2FF/3FF/4FF)"},
     "1": {"name": "USIM+SUCI", "description": "5G SUCI privacy SIM (SYSMOCOM-sourced)"},
-    "2": {"name": "eSIM",      "description": "eUICC remote provisioning (MFF2)"},
+    "2": {"name": "eSIM",      "description": "eUICC remote provisioning via SM-DP+ (MFF2 or 2FF/3FF/4FF)"},
     "9": {"name": "Test/Dev",  "description": "Lab and development cards"}
   },
 
@@ -133,8 +140,6 @@
 
   "allocations": {
     "uk1": [
-      {"site_id": "0001", "sim_type": "0", "customer": "Boliden (USIM)",      "range_start": 1,   "range_end": 19,  "notes": "Enterprise, Aitik Mine"},
-      {"site_id": "0001", "sim_type": "1", "customer": "Boliden (SUCI)",      "range_start": 1,   "range_end": 9,   "notes": "SUCI-enabled SIMs"},
       {"site_id": "0001", "sim_type": "0", "customer": "Teleaura Internal",   "range_start": 100, "range_end": 109, "notes": "Infrastructure SIMs"},
       {"site_id": "0001", "sim_type": "9", "customer": "Demo Pool",           "range_start": 1,   "range_end": 9,   "notes": "Trade shows, PoCs"}
     ],
