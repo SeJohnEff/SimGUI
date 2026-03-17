@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from managers.card_manager import CardManager, CLIBackend
+from managers.card_manager import CardManager, CardType, CLIBackend
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +281,117 @@ class TestAuthenticateBlankCard:
             ok, msg = cm.authenticate('12345678')
         assert ok is False
         assert 'wrong adm1' in msg.lower() or 'failed' in msg.lower()
+
+    def test_blank_card_with_acc_but_no_iccid_imsi(self, tmp_path):
+        """Blank gialersim card: has ACC from pySim-read but no ICCID/IMSI."""
+        cm = _make_hw_manager(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._original_card_data = {'ACC': 'ffff'}  # partial read, no ICCID/IMSI
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            ok, msg = cm.authenticate('88888888')
+        assert ok is True
+        assert cm.authenticated is True
+        assert 'stored' in msg.lower() or 'blank' in msg.lower()
+        mock_shell.assert_not_called()
+
+    def test_gialersim_card_skips_verify(self, tmp_path):
+        """Gialersim card type always skips VERIFY (uses CHV 0x0C internally)."""
+        cm = _make_hw_manager(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.GIALERSIM
+        cm._original_card_data = {'ACC': 'ffff'}  # has some data
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            ok, msg = cm.authenticate('88888888')
+        assert ok is True
+        assert cm.authenticated is True
+        assert 'gialersim' in msg.lower()
+        mock_shell.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Card type detection from pySim-read output
+# ---------------------------------------------------------------------------
+
+class TestCardTypeDetection:
+
+    def test_gialersim_detected(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        output = (
+            "Reading ...\n"
+            "Autodetected card type: gialersim\n"
+            "ICCID: \n"
+            "IMSI: None\n"
+            "ACC: ffff\n"
+        )
+        cm._parse_pysim_output(output)
+        assert cm.card_type == CardType.GIALERSIM
+        assert cm.card_info.get('ICCID') is None  # empty = not stored
+
+    def test_sja5_detected(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        output = (
+            "Autodetected card type: sysmoISIM-SJA5\n"
+            "ICCID: 8988211000000001234\n"
+            "IMSI: 999700000001234\n"
+        )
+        cm._parse_pysim_output(output)
+        assert cm.card_type == CardType.SJA5
+        assert cm.card_info.get('ICCID') == '8988211000000001234'
+
+    def test_unknown_type_stays_unknown(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        output = "Autodetected card type: somethingNew\n"
+        cm._parse_pysim_output(output)
+        assert cm.card_type == CardType.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# _is_empty_card routing (gialersim-aware)
+# ---------------------------------------------------------------------------
+
+class TestIsEmptyCardGialersim:
+
+    def test_no_original_data(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        cm._original_card_data = {}
+        assert cm._is_empty_card(None) is True
+
+    def test_original_with_iccid_is_not_empty(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        cm._original_card_data = {'ICCID': '123', 'IMSI': '456'}
+        assert cm._is_empty_card(None) is False
+
+    def test_acc_only_no_iccid_imsi_is_empty(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        cm._original_card_data = {'ACC': 'ffff'}
+        assert cm._is_empty_card(None) is True
+
+    def test_gialersim_always_empty(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        cm.card_type = CardType.GIALERSIM
+        cm._original_card_data = {'ICCID': '123', 'IMSI': '456'}
+        assert cm._is_empty_card(None) is True
+
+
+# ---------------------------------------------------------------------------
+# Hex-to-ASCII conversion
+# ---------------------------------------------------------------------------
+
+class TestHexToAdm1Ascii:
+
+    def test_standard_conversion(self):
+        from managers.card_manager import CardManager
+        assert CardManager._hex_to_adm1_ascii('3838383838383838') == '88888888'
+
+    def test_non_printable_returns_hex(self):
+        from managers.card_manager import CardManager
+        assert CardManager._hex_to_adm1_ascii('0001020304050607') == '0001020304050607'
+
+    def test_arbitrary_ascii(self):
+        from managers.card_manager import CardManager
+        assert CardManager._hex_to_adm1_ascii('3332363237323431') == '32627241'
 
 
 # ---------------------------------------------------------------------------

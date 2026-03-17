@@ -106,6 +106,7 @@ class CardType(Enum):
     SJS1 = auto()
     SJA2 = auto()
     SJA5 = auto()
+    GIALERSIM = auto()
 
 
 class CLIBackend(Enum):
@@ -446,6 +447,23 @@ class CardManager:
         # Unexpected format — pass through, let pySim error
         return adm1
 
+    @staticmethod
+    def _hex_to_adm1_ascii(adm1_hex: str) -> str:
+        """Convert 16-char hex ADM1 back to ASCII (for pySim ``-a`` flag).
+
+        E.g. ``3838383838383838`` → ``88888888``.
+        If the hex cannot be decoded to printable ASCII, returns the
+        original hex string (pySim will receive it as-is).
+        """
+        try:
+            raw = bytes.fromhex(adm1_hex)
+            ascii_str = raw.decode('ascii')
+            if ascii_str.isprintable():
+                return ascii_str
+        except (ValueError, UnicodeDecodeError):
+            pass
+        return adm1_hex
+
     # Patterns in pySim-shell stdout/stderr that indicate the shell
     # failed to initialise properly (card not equipped).  When these
     # appear the process may still exit 0 but no commands ran.
@@ -599,8 +617,32 @@ class CardManager:
             return False, "", "pySim-prog.py not found"
 
         python_exe = self._venv_python or sys.executable
-        cmd = [python_exe, script_path, '-p0',
-               '-A', adm1_hex, '-t', 'auto']
+
+        # Pick pySim-prog card type flag based on detected type.
+        # Gialersim cards use a different VERIFY path internally
+        # (CHV 0x0C vs 0x0A) and must be explicitly selected.
+        pysim_type = 'auto'
+        if self.card_type == CardType.GIALERSIM:
+            pysim_type = 'gialersim'
+        elif self.card_type == CardType.SJA5:
+            pysim_type = 'sysmoISIM-SJA5'
+        elif self.card_type == CardType.SJA2:
+            pysim_type = 'sysmoISIM-SJA2'
+        elif self.card_type == CardType.SJS1:
+            pysim_type = 'sysmoUSIM-SJS1'
+
+        cmd = [python_exe, script_path, '-p0', '-t', pysim_type]
+
+        # Gialersim cards: pass ADM1 as ASCII (-a) because the
+        # gialersim driver handles its own internal auth and uses
+        # the -a value for file writes.  Other cards: pass raw hex
+        # via -A for direct VERIFY ADM1 APDU.
+        if self.card_type == CardType.GIALERSIM:
+            # Convert hex back to ASCII for -a flag
+            adm1_ascii = self._hex_to_adm1_ascii(adm1_hex)
+            cmd += ['-a', adm1_ascii]
+        else:
+            cmd += ['-A', adm1_hex]
 
         # Map card_data fields to pySim-prog flags
         if card_data.get('ICCID'):
@@ -621,8 +663,12 @@ class CardManager:
         if len(imsi) >= 5:
             cmd += ['-x', imsi[:3], '-y', imsi[3:5]]
 
+        # Mask both hex and ASCII ADM1 values in log output
+        secrets = {adm1_hex}
+        if self.card_type == CardType.GIALERSIM:
+            secrets.add(self._hex_to_adm1_ascii(adm1_hex))
         logger.info("pySim-prog command: %s",
-                    ' '.join(c if c != adm1_hex else '***' for c in cmd))
+                    ' '.join('***' if c in secrets else c for c in cmd))
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
@@ -782,22 +828,39 @@ class CardManager:
         # Pipe verify_adm with the hex key interactively.
         adm1_hex = self._adm1_to_hex(adm1)
 
-        # --- Blank-card safety check ---
-        # Blank / unpersonalised cards (no ICCID, no IMSI from detect)
-        # cannot process a standard VERIFY ADM1 APDU.  On sysmoISIM
-        # cards this causes a 6f00 (internal card error) that STILL
-        # consumes a retry-counter attempt, bricking the card after 3
-        # tries.  Skip VERIFY entirely and store the ADM1 for deferred
-        # authentication via pySim-prog during programming.
-        if not self._original_card_data:
+        # --- Blank / gialersim card safety check ---
+        # Skip VERIFY ADM1 and store the key for deferred auth via
+        # pySim-prog in two cases:
+        #
+        # 1. Blank cards (no original data at all, or present but
+        #    missing both ICCID and IMSI).  These cannot process a
+        #    standard VERIFY ADM1 APDU — on sysmoISIM cards this
+        #    causes 6f00 (internal card error) which STILL consumes
+        #    a retry-counter attempt, bricking the card after 3 tries.
+        #
+        # 2. Gialersim-type cards.  These use CHV 0x0C (not 0x0A)
+        #    with their own internal auth sequence.  The standard
+        #    verify_adm (CHV 0x0A) will always fail.  pySim-prog
+        #    with -t gialersim handles auth correctly.
+        orig = self._original_card_data or {}
+        is_blank = (not orig
+                    or (not orig.get('ICCID') and not orig.get('IMSI')))
+        is_gialersim = self.card_type == CardType.GIALERSIM
+
+        if is_blank or is_gialersim:
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
+            if is_gialersim:
+                reason = "gialersim card (uses different auth method)"
+            else:
+                reason = "blank card detected"
             logger.info(
-                "Blank card detected (no original data) \u2014 ADM1 stored "
-                "(will authenticate during programming via pySim-prog)")
+                "%s \u2014 ADM1 stored "
+                "(will authenticate during programming via pySim-prog)",
+                reason.capitalize())
             return True, (
-                "Authentication stored \u2014 blank card detected. "
-                "ADM1 will be used during programming via pySim-prog."
+                f"Authentication stored \u2014 {reason}. "
+                f"ADM1 will be used during programming via pySim-prog."
             )
 
         verify_cmd = f'verify_adm --pin-is-hex {adm1_hex}'
@@ -1028,13 +1091,24 @@ class CardManager:
             self, original_data: Optional[Dict[str, str]]) -> bool:
         """Return True when programming a blank / empty card.
 
-        An empty card has no original baseline data — either because
-        ``detect_card`` returned nothing or the UI explicitly set the
-        baseline to ``{}`` / ``None``.
+        A card is considered empty when:
+        - No original baseline data at all (``detect_card`` returned
+          nothing or the UI set the baseline to ``{}`` / ``None``), OR
+        - Original data exists but has no ICCID and no IMSI (blank
+          card that pySim-read could partially read, e.g. gialersim
+          type detected but no subscriber data), OR
+        - Card type is GIALERSIM (these always use pySim-prog with
+          ``-t gialersim`` for initial programming).
         """
         orig = (original_data if original_data is not None
                 else self._original_card_data)
-        return not orig
+        if not orig:
+            return True
+        if not orig.get('ICCID') and not orig.get('IMSI'):
+            return True
+        if self.card_type == CardType.GIALERSIM:
+            return True
+        return False
 
     def program_card(self, card_data: Dict[str, str],
                      original_data: Optional[Dict[str, str]] = None
@@ -1094,11 +1168,11 @@ class CardManager:
 
         # Determine what changed
         orig = original_data if original_data is not None else self._original_card_data
-        empty_card = not orig
-        if orig:
+        empty_card = self._is_empty_card(original_data)
+        if not empty_card and orig:
             changed = self._compute_changed_fields(card_data, orig)
         else:
-            # No original (empty card) — write everything non-empty
+            # Empty / blank / gialersim card — write everything non-empty
             changed = {k: v.strip() for k, v in card_data.items() if v.strip()}
 
         if not changed:
@@ -1457,11 +1531,20 @@ class CardManager:
             return last
         return "Card read failed"
 
+    # Map pySim auto-detected card type names to CardType enum values.
+    _PYSIM_CARD_TYPE_MAP: Dict[str, CardType] = {
+        'sysmoisim-sja5': CardType.SJA5,
+        'sysmoisim-sja2': CardType.SJA2,
+        'sysmousim-sjs1': CardType.SJS1,
+        'gialersim': CardType.GIALERSIM,
+    }
+
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info.
 
-        Extracts ICCID, IMSI, ACC, SPN, and FPLMN from pySim-read.py
-        output.  These are public fields that don't require ADM1 auth.
+        Extracts ICCID, IMSI, ACC, SPN, FPLMN, and auto-detected card
+        type from pySim-read.py output.  These are public fields that
+        don't require ADM1 auth.
         """
         fplmn_values: list[str] = []
         for line in output.splitlines():
@@ -1488,5 +1571,11 @@ class CardManager:
                 # pySim may output multiple FPLMN lines or a single one
                 if val and val.lower() not in ('none', 'empty', 'ffffff'):
                     fplmn_values.append(val)
+            elif 'AUTODETECTED CARD TYPE' in key:
+                ct = self._PYSIM_CARD_TYPE_MAP.get(val.lower())
+                if ct is not None:
+                    self.card_type = ct
+                    logger.info("pySim auto-detected card type: %s -> %s",
+                                val, ct.name)
         if fplmn_values:
             self.card_info['FPLMN'] = ';'.join(fplmn_values)
