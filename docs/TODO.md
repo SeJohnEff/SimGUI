@@ -23,6 +23,12 @@
 - [x] Gialersim card type auto-detection and programming support
 - [x] `-t gialersim -a` flag routing in `_run_pysim_prog()`
 
+## Future Improvements
+
+- [ ] **SIM standard as Markdown** — Replace `standards.json` with a version-controlled Markdown document defining the Teleaura SIM PLMN Numbering Standard. This would be human-readable, diffable in git, and parseable at runtime. Should include: IMSI range allocations per site, ICCID range allocations, SPN canonical values, LI values, FPLMN defaults per country, and site register. Enables richer UI: dropdowns in batch programming for IMSI ranges, ICCID ranges, site codes, and country-based FPLMN defaults.
+
+- [ ] **Remove standalone ADM1 Authenticate button** — The separate "Authenticate" step in the Program SIM panel is unnecessary and confusing for operators. ADM1 authentication happens automatically when programming, so the button adds an extra step with no value. **Exception:** keep an authenticate action if there are protected fields that require ADM1 to *read* (e.g. Ki, OPc read-back). If read-back is the only use case, rename to "Read Protected Fields" or similar. The goal: operators should go from card-detected → program in one click, not card-detected → authenticate → program.
+
 ## Known Issues (Acceptable / Deferred)
 
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
