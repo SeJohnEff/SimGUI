@@ -13,7 +13,7 @@ SimGUI accepts two CSV dialects:
 | Dialect | Description |
 |---|---|
 | Comma-separated (`.csv`) | Standard RFC 4180 CSV with header row |
-| Whitespace-delimited (`.txt`) | Space- or tab-delimited with header row; auto-detected if comma parsing yields only one column |
+| Whitespace-delimited (`.txt`) | Space- or tab-delimited with header row; auto-detected if comma parsing yields only one column. Empty columns (e.g. no MSISDN) are supported — consecutive spaces are treated as a blank field. |
 
 Encoding: **UTF-8** (with optional BOM). Files from Excel may have a UTF-8 BOM (`\xef\xbb\xbf`) — SimGUI strips it automatically (`encoding='utf-8-sig'`).
 
