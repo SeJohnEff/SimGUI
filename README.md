@@ -11,8 +11,9 @@ to run card operations from a desktop GUI.
 - **EML import** — parse sysmocom order confirmation emails (.eml) directly, field-order independent
 - **Batch programming** — program multiple SIM cards in sequence with progress tracking
 - **Card detection** — detect inserted cards via sysmo-usim-tool or pySim
+- **Blank card programming** — program unpersonalised SIM cards (gialersim type) using pySim-prog with auto-detected card type
 - **Read SIM** — read card data (ICCID, IMSI, Ki, OPc, etc.) from physical cards
-- **ADM1 authentication** — secure key entry with attempt tracking and input validation
+- **ADM1 authentication** — secure key entry with attempt tracking and input validation; blank/gialersim cards skip VERIFY to avoid consuming retry attempts
 - **ICCID cross-verification** — prevents card lockout by verifying card identity before ADM1 auth
 - **Network storage** — mount NFS and SMB/CIFS shares for reading SIM data files and saving artifacts
 - **Network discovery** — auto-discover SMB servers on the local network via mDNS and NetBIOS
@@ -57,7 +58,7 @@ Or follow the [first-card tutorial](docs/tutorials/first-card.md).
 
 ## Requirements
 
-- Ubuntu 22.04+ (x86-64)
+- Ubuntu 22.04+ (x86-64 or ARM/aarch64)
 - Python 3.10+
 - PyQt6
 - At least one of:

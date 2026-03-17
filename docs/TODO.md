@@ -14,6 +14,15 @@
     and asserts it back, rather than testing observable behavior or contract.
   - Priority: medium — these tests give false confidence and mask real bugs.
 
+## Completed (v0.5.18–0.5.20)
+
+- [x] Detect pySim-shell APDU errors (SwMatchError/6f00) even on exit code 0
+- [x] Eliminate double ADM1 authentication during programming
+- [x] ADM1 format detection by length (16=hex, ≤8=ASCII)
+- [x] Blank card safety — skip VERIFY ADM1 on unpersonalised cards
+- [x] Gialersim card type auto-detection and programming support
+- [x] `-t gialersim -a` flag routing in `_run_pysim_prog()`
+
 ## Known Issues (Acceptable / Deferred)
 
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
