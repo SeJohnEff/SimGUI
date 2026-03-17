@@ -173,12 +173,59 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 
 ## Design Principles
 
+### Core Philosophy
+- **Elegant, robust, and flexible** — these have highest priority
+- **Identify blockers early** — surface problems before they cascade
+- **Think simplicity** — break down complexity into small, clear pieces
+- **Think globally** — a fix in one place (e.g. auth) must apply everywhere auth is done, not just one tab
+
+### Architecture Mindset
+- **Signals & subscriptions for globals** — use `StateManager` signals for cross-component communication, not direct coupling between widgets
+- **Managers are framework-free** — `card_manager`, `csv_manager`, etc. have zero Qt imports. StateManager bridges them to the UI via signals.
+- **Widgets never import each other** — they subscribe to StateManager signals. Only MainWindow (controller) writes to StateManager.
+- **Plan before coding** — make a plan before fixing bugs. The workflow must be in the plan.
+
+### Safety Rules
 - **v0.5.8 non-empty SIM flow is frozen** — do not change non-empty card programming
-- **Elegant, robust, and flexible** — identify blockers early
 - **Safety first**: Confirm ICCID matches before ADM1 auth. A mismatch = wrong ADM1 = card bricked after 3 fails.
 - **ICCID is read-only for non-empty cards** (factory traceability). Only written on blank cards.
-- **Make a plan before fixing bugs** — the workflow must be in the plan
-- **Think globally** — auth changes apply everywhere auth is done, not just one tab
+- **Good checks everywhere**: e.g. confirm ICCID read from card matches data in file before any ADM1 operation
+
+### What We Welcome
+- Improvement ideas and robustness hardening
+- Architecture considerations and refactoring proposals
+- Testing strategies — how to test edge cases, what to mock, what to integration-test
+- Future ideas and extensions (document them in `docs/TODO.md`)
+
+### Lessons Learned (the hard way)
+- `--noprompt` in pySim-shell silently breaks stdin piping — commands are ignored
+- pySim-shell returns exit code 0 on APDU failures — you MUST scan stdout for errors
+- `exit` doesn't work in pySim-shell — must use `quit`
+- Blank gialersim cards use CHV 0x0C, not 0x0A — standard VERIFY burns retry attempts
+- Reader contention (CardWatcher polling during operations) causes random 6f00 errors
+- Double authentication (verify_adm in piped commands + -A flag) silently fails
+- ADM1 format varies by file source — always detect by length (16=hex, ≤8=ASCII)
+- Tests that mock implementation details and assert them back are tautological — test observable behavior instead
+
+## StateManager Signal Architecture
+
+```
+StateManager (QObject)
+├── card_state_changed(CardState)     # NO_CARD → DETECTED → AUTHENTICATED
+├── card_info_changed(CardInfo)       # ICCID, IMSI, card_type, etc.
+├── mode_changed(AppMode)             # HARDWARE ↔ SIMULATOR
+├── status_changed(str)               # Status bar text
+├── share_status_changed(ShareStatus) # Network mount state
+├── csv_path_changed(str)             # Active CSV file
+├── batch_running_changed(bool)       # Batch lock
+├── card_programmed(dict)             # Triggers auto-artifact
+├── iccid_index_updated()             # After rescan
+├── toast_requested(str, str, int)    # UI notifications
+└── error_occurred(str)               # Non-fatal errors
+```
+
+Pattern: Manager does work → MainWindow updates StateManager → Signal fires → Widgets react.
+Widgets NEVER call managers directly. They read StateManager properties and react to signals.
 
 ## Git & Deployment
 
@@ -193,3 +240,10 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 - USB Reader: HID Global OMNIKEY 3x21 (USB passthrough to VM)
 - pySim installed at `/opt/pysim` with `.venv`
 - pcscd service required for PCSC reader access
+
+## Project Stats
+
+- Started: 2026-02-28
+- ~48 hours of development across 13 sessions over 18 calendar days
+- 12,600+ lines of application code, 2044+ tests
+- 96 commits, versions v0.1.0 through v0.5.20
