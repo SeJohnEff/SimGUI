@@ -14,15 +14,17 @@ These variables are read at startup when SimGUI instantiates `CardManager`. They
 
 | Variable | Type | Description |
 |---|---|---|
-| `SYSMO_USIM_TOOL_PATH` | Directory path | Path to the `sysmo-usim-tool` repository root. Takes precedence over all other auto-detection. |
-| `PYSIM_PATH` | Directory path | Path to the `pySim` repository root. Checked after `SYSMO_USIM_TOOL_PATH`. |
+| `PYSIM_PATH` | Directory path | Override path to the `pySim` install. Rarely needed — pySim is auto-installed at `/opt/pysim` by `install.sh`. |
+| `SYSMO_USIM_TOOL_PATH` | Directory path | Path to the `sysmo-usim-tool` repository root. Only needed for legacy SJS1 card support. |
 
 ### Setting environment variables
+
+In most cases, you do not need to set these variables. pySim is auto-installed at `/opt/pysim` by `install.sh` and is found automatically. These variables are only needed to override the default location.
 
 **For a single session:**
 
 ```bash
-export SYSMO_USIM_TOOL_PATH=/home/user/sysmo-usim-tool
+export PYSIM_PATH=/custom/path/to/pysim
 simgui
 ```
 
@@ -31,35 +33,26 @@ simgui
 Add to `~/.bashrc` or `~/.profile`:
 
 ```bash
-export SYSMO_USIM_TOOL_PATH=/opt/sysmo-usim-tool
+export PYSIM_PATH=/custom/path/to/pysim
 ```
 
 Reload: `source ~/.bashrc`
-
-**For a desktop launcher:**
-
-Edit the `.desktop` file (typically at `/usr/share/applications/simgui.desktop` or `~/.local/share/applications/simgui.desktop`):
-
-```ini
-[Desktop Entry]
-Exec=env SYSMO_USIM_TOOL_PATH=/opt/sysmo-usim-tool simgui
-```
 
 ### Auto-detection fallback paths
 
 If neither environment variable is set, SimGUI checks these locations in order:
 
-**sysmo-usim-tool:**
+**pySim (primary):**
+1. `/opt/pysim` (default install location — installed by `install.sh`)
+2. `../../pysim` (relative to SimGUI install)
+3. `~/pysim`
+
+**sysmo-usim-tool (optional/legacy):**
 1. `../../sysmo-usim-tool` (relative to SimGUI install)
 2. `~/sysmo-usim-tool`
 3. `/opt/sysmo-usim-tool`
 
-**pySim:**
-1. `../../pysim` (relative to SimGUI install)
-2. `~/pysim`
-3. `/opt/pysim`
-
-sysmo-usim-tool is always tried before pySim.
+pySim is checked first. On a fresh install, `/opt/pysim` is found automatically.
 
 ---
 
@@ -91,7 +84,7 @@ The file is created automatically on first run. If the file is missing or corrup
 | `last_fplmn` | String | `""` | Last FPLMN string used |
 | `last_csv_path` | String | `""` | Last CSV file path opened |
 | `last_batch_size` | Integer | `20` | Last batch size in Generate Sequence mode |
-| `window_geometry` | String | `""` | Saved window position/size (Tk geometry string) |
+| `window_geometry` | String | `""` | Saved window position/size |
 | `simulator_mode` | Boolean | `false` | Whether Simulator Mode was active on last close |
 
 ### Editing the settings file

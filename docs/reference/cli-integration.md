@@ -10,8 +10,8 @@ SimGUI communicates with physical SIM cards by shelling out to external CLI tool
 
 | Backend | Enum | When active | CLI scripts used |
 |---|---|---|---|
-| sysmo-usim-tool | `CLIBackend.SYSMO` | Preferred when available; supports all three sysmocom card types | `sysmo_isim_sja2.py`, `sysmo_isim_sja5.py`, `sysmo_isim_sjs1.py` |
-| pySim | `CLIBackend.PYSIM` | Fallback when sysmo-usim-tool is not found | `pySim-read.py`, `pySim-prog.py` |
+| pySim | `CLIBackend.PYSIM` | Primary — auto-installed at `/opt/pysim` by `install.sh` | `pySim-read.py`, `pySim-shell.py`, `pySim-prog.py` |
+| sysmo-usim-tool | `CLIBackend.SYSMO` | Optional fallback for legacy SJS1 card support | `sysmo_isim_sja2.py`, `sysmo_isim_sja5.py`, `sysmo_isim_sjs1.py` |
 | Simulator | `CLIBackend.SIMULATOR` | Active when Simulator Mode is enabled; no CLI calls made | (internal) |
 | None | `CLIBackend.NONE` | Neither tool found; CSV editing still works | — |
 
@@ -21,14 +21,14 @@ SimGUI communicates with physical SIM cards by shelling out to external CLI tool
 
 On startup (and when `CardManager` is instantiated), SimGUI runs `_find_cli_tool()` which checks in this order:
 
-1. **`SYSMO_USIM_TOOL_PATH` environment variable** — if set and is a valid directory, use sysmo-usim-tool from that path.
-2. **`PYSIM_PATH` environment variable** — if set and valid, use pySim from that path.
-3. **Relative to SimGUI install directory** (`../../sysmo-usim-tool`)
-4. **User home directory** (`~/sysmo-usim-tool`)
-5. **System install** (`/opt/sysmo-usim-tool`)
-6. Same three locations checked for `~/pysim` and `/opt/pysim`
+1. **`PYSIM_PATH` environment variable** — if set and valid, use pySim from that path.
+2. **`SYSMO_USIM_TOOL_PATH` environment variable** — if set and is a valid directory, use sysmo-usim-tool from that path.
+3. **`/opt/pysim`** — the default install location (installed automatically by `install.sh`).
+4. **Relative to SimGUI install directory** (`../../sysmo-usim-tool`, `../../pysim`)
+5. **User home directory** (`~/pysim`, `~/sysmo-usim-tool`)
+6. **System install** (`/opt/sysmo-usim-tool`)
 
-The first match wins. If no tool is found, `cli_backend` is `CLIBackend.NONE`.
+The first match wins. In practice, `/opt/pysim` is found automatically on fresh installs since `install.sh` installs pySim there. If no tool is found, `cli_backend` is `CLIBackend.NONE`.
 
 ---
 
@@ -71,7 +71,74 @@ Key properties:
 
 ---
 
-## sysmo-usim-tool operations
+## pySim operations (primary backend)
+
+pySim is the primary backend, auto-installed at `/opt/pysim` by `install.sh`. All card detection, reading, authentication, and programming operations use pySim.
+
+### pySim-read — Card detection and reading
+
+```bash
+python pySim-read.py -p0
+```
+
+`-p0` selects the first PCSC reader. SimGUI parses the output for:
+- `Autodetected card type:` — determines `CardType` (e.g. `gialersim`, `sysmoISIM-SJA5`)
+- `ICCID:`, `IMSI:`, `ACC:`, `SPN:`, `FPLMN:` — card data fields
+
+Blank gialersim cards return empty ICCID/IMSI but may return `ACC: ffff`.
+
+### pySim-shell — Non-empty card programming
+
+For non-empty (pre-programmed) cards, pySim-shell is used for delta writes:
+
+```bash
+python pySim-shell.py -p 0 -A <hex_ADM1>
+```
+
+Commands are piped via stdin, terminated with `quit`:
+
+```bash
+echo "select MF/ADF.USIM/EF.IMSI
+update_binary_dec {\"imsi\": \"$IMSI\"}
+quit" | python pySim-shell.py -p 0 -A <hex_ADM1>
+```
+
+**Critical pySim-shell caveats:**
+- **Do NOT use `--noprompt`** — it breaks stdin piping (commands are silently ignored).
+- **Do NOT use `exit`** — must use `quit`.
+- **Exit code is always 0**, even on APDU failures — must scan stdout for error patterns.
+
+### pySim-prog — Blank card programming (gialersim)
+
+For blank/gialersim cards, pySim-prog writes all fields in one operation:
+
+```bash
+python pySim-prog.py -t gialersim -p 0 -a 88888888 \
+    -s <ICCID> -i <IMSI> -k <Ki> --opc <OPc> \
+    -n <SPN> --acc <ACC> -x <MCC> -y <MNC>
+```
+
+- `-t gialersim` — card type. **NEVER** use `-t auto` for gialersim (causes CHV 0x0A VERIFY which fails with `6f00`).
+- `-a` — ASCII ADM1 key (NOT `-A` which is hex).
+- `-t auto -A <hex_ADM1>` — for non-empty cards (works for SJA5).
+
+### pySim error patterns
+
+pySim-shell returns exit code 0 even on failures. SimGUI scans stdout/stderr for these error patterns:
+
+| Pattern | Meaning |
+|---|---|
+| `SwMatchError` | APDU status word mismatch |
+| `6f00` | Technical failure (often wrong CHV on blank cards) |
+| `not equipped` | File or feature not present on card |
+| `Card error` | General card communication error |
+| `Autodetection failed` | pySim could not identify the card type |
+
+---
+
+## sysmo-usim-tool operations (legacy/optional)
+
+sysmo-usim-tool is an optional fallback, primarily for legacy SJS1 card support.
 
 ### Card detection
 
@@ -83,52 +150,7 @@ python sysmo_isim_sja5.py --help
 python sysmo_isim_sjs1.py --help
 ```
 
-The first successful response sets `card_type`. This is a reader-availability check, not a card-presence check.
-
-### Reading card data
-
-ICCID is read without authentication. IMSI and protected fields (Ki, OPc) require ADM1 authentication first.
-
-> **Status:** Full CLI read/write calls are implemented via `detect_card()` and `read_public_data()`. The `authenticate()`, `program_card()`, and `read_protected_data()` methods include stubs pending completion of CLI argument mapping for each card type. In the meantime, all operations are fully functional in Simulator Mode.
-
-### Programming
-
-When implemented, the call structure will be:
-
-```bash
-python sysmo_isim_sja5.py \
-    --adm1 {ADM1} \
-    --imsi {IMSI} \
-    --ki {Ki} \
-    --opc {OPc} \
-    --spn {SPN} \
-    --language {LI} \
-    ...
-```
-
-Exact argument names vary by card type and sysmo-usim-tool version. Consult the sysmo-usim-tool README for current flags.
-
----
-
-## pySim operations
-
-### Card detection
-
-```bash
-python pySim-read.py -p0
-```
-
-`-p0` selects the first PCSC reader. SimGUI parses the output for `ICCID:` and `IMSI:` lines using a key-value parser.
-
-### Programming
-
-```bash
-python pySim-prog.py -p0 \
-    --imsi {IMSI} \
-    --ki {Ki} \
-    --opc {OPc} \
-    ...
-```
+The first successful response sets `card_type`.
 
 ---
 

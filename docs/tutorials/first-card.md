@@ -1,7 +1,7 @@
 # Tutorial: Program your first SIM card
 
 **Time required:** 10–15 minutes  
-**Prerequisites:** SimGUI installed ([Installation guide](../how-to/install.md)), a USB PCSC reader connected, one sysmocom SIM card (SJA2, SJA5, or SJS1), and a card data CSV or `.eml` file from sysmocom.
+**Prerequisites:** SimGUI installed ([Installation guide](../how-to/install.md)), a USB PCSC reader connected, a sysmocom SIM card (pre-programmed or blank), and a card data CSV or `.eml` file. pySim is installed automatically by the install script.
 
 This tutorial walks through a complete single-card programming workflow from loading data to verifying the result. By the end you will have programmed a physical SIM card and understand the key steps SimGUI performs on your behalf.
 
@@ -25,7 +25,7 @@ The main window opens with several tabs across the top: **Batch Program**, **Rea
 
 ## Step 2: Connect a card reader
 
-Plug in your USB PCSC reader before inserting any card. SimGUI uses the underlying `sysmo-usim-tool` or `pySim` CLI to communicate with the reader — no SimGUI action is needed to register the reader. If the CLI tools are not found, a warning appears in the status bar. Resolve this first by following the [CLI integration guide](../reference/cli-integration.md).
+Plug in your USB PCSC reader before inserting any card. SimGUI uses pySim to communicate with the reader — no SimGUI action is needed to register the reader. pySim is installed automatically at `/opt/pysim` by the install script. If a CLI tool warning appears in the status bar, see the [CLI integration guide](../reference/cli-integration.md).
 
 ---
 
@@ -49,7 +49,9 @@ You have two options for supplying card data:
 
 See [Import a sysmocom order email](../how-to/import-order-email.md) for export instructions.
 
-**Expected outcome:** The preview table shows your card data. Confirm the ICCID column is populated — this is required for ICCID cross-verification in the next steps.
+**Expected outcome:** The preview table shows your card data. For pre-programmed cards, confirm the ICCID column is populated — this is required for ICCID cross-verification in the next steps.
+
+> **Blank cards:** If you have a blank (unpersonalised/gialersim) card, load your CSV data first — blank cards have no ICCID from factory, so all fields including ICCID are written from the CSV. Blank cards are matched sequentially, not by ICCID.
 
 ---
 

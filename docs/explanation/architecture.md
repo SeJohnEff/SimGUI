@@ -13,7 +13,7 @@ SimGUI is structured as a thin GUI layer over a set of independent manager compo
 │  ┌─────────────────────┐  ┌─────────────────────────┐  │
 │  │   Widgets (UI)      │  │   Managers (logic)      │  │
 │  │                     │  │                         │  │
-│  │  BatchProgramPanel  │◄─┤  CardManager            │  │
+│  │  BatchProgramPanel  │  │  CardManager            │  │
 │  │  ReadSimPanel       │  │  BatchManager           │  │
 │  │  CSVEditorPanel     │  │  CSVManager             │  │
 │  │  CardStatusPanel    │  │  StandardsManager       │  │
@@ -23,10 +23,16 @@ SimGUI is structured as a thin GUI layer over a set of independent manager compo
 │  │  ADM1Dialog         │  │  IccidIndex             │  │
 │  │  ArtifactExport     │  │  SettingsManager        │  │
 │  │  NetworkStorage     │  │  BackupManager          │  │
-│  │  SimulatorSettings  │  │  BatchManager           │  │
-│  └─────────────────────┘  └────────────┬────────────┘  │
-│                                        │               │
-│                           ┌────────────▼────────────┐  │
+│  │  SimulatorSettings  │  │  StateManager           │  │
+│  └──────────▲──────────┘  └────────────┬────────────┘  │
+│             │ signals                  │               │
+│  ┌──────────┴──────────────────────────┴────────────┐  │
+│  │  StateManager (QObject) — signal hub             │  │
+│  │  Widgets subscribe to signals, never import      │  │
+│  │  each other. Only MainWindow writes state.       │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│                           ┌─────────────────────────┐  │
 │                           │  SimulatorBackend (opt) │  │
 │                           │  virtual_card.py        │  │
 │                           │  card_deck.py           │  │
@@ -36,14 +42,15 @@ SimGUI is structured as a thin GUI layer over a set of independent manager compo
                ┌──────────────────▼──────────────────┐
                │  External CLI (separate process)    │
                │                                     │
-               │  sysmo-usim-tool:                   │
+               │  pySim (primary):                   │
+               │    pySim-read.py                    │
+               │    pySim-shell.py                   │
+               │    pySim-prog.py                    │
+               │                                     │
+               │  sysmo-usim-tool (optional):        │
                │    sysmo_isim_sja2.py               │
                │    sysmo_isim_sja5.py               │
                │    sysmo_isim_sjs1.py               │
-               │                                     │
-               │  pySim:                             │
-               │    pySim-read.py                    │
-               │    pySim-prog.py                    │
                └─────────────────────────────────────┘
 ```
 
@@ -68,8 +75,10 @@ See [CLI integration](../reference/cli-integration.md) for the full subprocess c
 ### CardManager
 
 The central card interface. Manages:
-- CLI backend auto-detection (`SYSMO_USIM_TOOL_PATH`, `PYSIM_PATH`, fallback paths)
-- Card detection, ICCID reading, ADM1 authentication
+- CLI backend auto-detection (pySim at `/opt/pysim` is primary; sysmo-usim-tool is optional fallback)
+- Card detection and type identification (SJA2, SJA5, GIALERSIM, MAGIC via pySim-read)
+- ADM1 authentication (skipped for blank/gialersim cards to avoid CHV 0x0C failures)
+- Programming: pySim-shell for non-empty cards, pySim-prog for blank/gialersim cards
 - ICCID cross-verification before every authentication
 - Simulator delegation (when `_simulator` is set, all operations route there)
 
@@ -120,7 +129,7 @@ poll loop:
 
 CardWatcher eliminates the "Detect Card" button. The UI reacts to events rather than polling. During programming, the watcher is paused to avoid interfering with ongoing card operations.
 
-**Thread safety:** All callbacks are invoked on the watcher thread. The UI must dispatch to the main thread via `root.after(0, ...)` (Tkinter's thread-safe scheduling mechanism).
+**Thread safety:** All callbacks are invoked on the watcher thread. Qt signals auto-marshal to the UI thread, so widgets react safely without manual dispatching.
 
 ### IccidIndex
 
@@ -138,6 +147,24 @@ Orchestrates multi-card programming sessions:
 ### SettingsManager
 
 Persists user preferences to `~/.config/simgui/settings.json`. Simple JSON read/write with defaults. Used to restore the last-used MCC/MNC, SPN, CSV path, window geometry, etc.
+
+---
+
+## Signal-based architecture (StateManager)
+
+SimGUI uses a signal-based architecture for cross-component communication. `StateManager` (a `QObject`) owns all mutable UI state and emits Qt signals when state changes.
+
+**Key signals:**
+- `card_state_changed(CardState)` — NO_CARD → DETECTED → AUTHENTICATED
+- `card_info_changed(CardInfo)` — ICCID, IMSI, card_type, etc.
+- `mode_changed(AppMode)` — HARDWARE ↔ SIMULATOR
+- `csv_path_changed(str)` — active CSV file
+- `batch_running_changed(bool)` — batch lock
+- `card_programmed(dict)` — triggers auto-artifact
+
+**Pattern:** Manager does work → MainWindow updates StateManager → Signal fires → Widgets react. Widgets NEVER call managers directly. They read StateManager properties and react to signals. Widgets never import each other — they subscribe to StateManager signals.
+
+Only `MainWindow` (the controller) writes to StateManager. This ensures a single point of state mutation and prevents tangled dependencies between UI components.
 
 ---
 
@@ -174,9 +201,10 @@ Each successful programming event writes one file. This design choice — one fi
 
 `main.py` is the application entry point. It:
 1. Creates all managers (CardManager, CSVManager, StandardsManager, etc.)
-2. Instantiates the main window and all tab panels
-3. Passes manager instances to panels that need them
-4. Starts CardWatcher
-5. Runs the Tkinter event loop
+2. Creates the `StateManager` and wires it to `MainWindow`
+3. Instantiates the main window and all tab panels
+4. Passes manager instances to panels that need them
+5. Starts CardWatcher
+6. Runs the PyQt6 event loop
 
 There is no dependency injection framework — wiring is explicit in `main.py`. This keeps the code easy to follow for a desktop application of this size.

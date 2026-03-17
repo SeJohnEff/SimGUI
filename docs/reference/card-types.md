@@ -1,6 +1,6 @@
 # Reference: Card types
 
-SimGUI supports three sysmocom SIM card types, each handled by a dedicated CLI script in sysmo-usim-tool. Understanding the differences matters for choosing the right data format and knowing which capabilities are available.
+SimGUI supports four card types (plus one legacy type), detected automatically by pySim-read. Understanding the differences matters for choosing the right data format and knowing which capabilities are available.
 
 **Source of truth:** `managers/card_manager.py` — `CardType` enum; `managers/csv_manager.py` — `STANDARD_COLUMNS`; `utils/iccid_utils.py` — ICCID generation constants.
 
@@ -8,11 +8,13 @@ SimGUI supports three sysmocom SIM card types, each handled by a dedicated CLI s
 
 ## Supported card types
 
-| Card type | Enum value | sysmo-usim-tool script | SUCI support | ICCID length |
+| Card type | Enum value | Detection | SUCI support | ICCID length |
 |---|---|---|---|---|
-| sysmoISIM-SJA2 | `CardType.SJA2` | `sysmo_isim_sja2.py` | No | 23 digits |
-| sysmoISIM-SJA5 | `CardType.SJA5` | `sysmo_isim_sja5.py` | Yes (firmware option) | 19 digits (SUCI) / 23 digits (non-SUCI) |
-| sysmoISIM-SJS1 | `CardType.SJS1` | `sysmo_isim_sjs1.py` | No | 23 digits |
+| sysmoISIM-SJA2 | `CardType.SJA2` | pySim-read auto-detection | No | 23 digits |
+| sysmoISIM-SJA5 | `CardType.SJA5` | pySim-read auto-detection | Yes (firmware option) | 19 digits (SUCI) / 23 digits (non-SUCI) |
+| GIALERSIM | `CardType.GIALERSIM` | pySim-read auto-detection (`gialersim`) | No | N/A (blank — written from CSV) |
+| magicSIM | `CardType.MAGIC` | pySim-read auto-detection | No | 23 digits |
+| sysmoISIM-SJS1 | *(legacy)* | sysmo-usim-tool only | No | 23 digits |
 
 ---
 
@@ -53,9 +55,28 @@ See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md) for a full explanatio
 
 ---
 
-## SJS1 — sysmoISIM-SJS1
+## GIALERSIM — Blank/Unpersonalised Cards
 
-The SJS1 is a Java Card-based ISIM, primarily used for legacy or specific integration scenarios. It is programmed via `sysmo_isim_sjs1.py`.
+GIALERSIM cards are blank (unpersonalised) Fiskarheden SIM cards that have not been programmed at the factory. They differ significantly from pre-programmed cards.
+
+**Use when:** You are programming brand-new blank cards from scratch using data from a CSV file.
+
+**Detection:** pySim-read auto-detects these cards and reports `Autodetected card type: gialersim`.
+
+**Key differences from SJA5:**
+- Uses CHV `0x0C` (not `0x0A`) — standard `VERIFY ADM1` fails with `6f00` and **consumes retry attempts**. After 3 failures the card is permanently blocked.
+- Has no ICCID or IMSI from factory — these must be written from CSV.
+- Default ADM1 is `88888888` (ASCII) / `3838383838383838` (hex).
+
+**Programming:** Blank cards are programmed via `pySim-prog.py -t gialersim -a <ASCII_ADM1>`. Do NOT use `-t auto` for gialersim cards.
+
+**Supported fields:** ICCID, IMSI, Ki, OPc, ADM1, ACC, SPN, FPLMN, MCC, MNC — all written from CSV.
+
+---
+
+## SJS1 — sysmoISIM-SJS1 (legacy)
+
+The SJS1 is a Java Card-based ISIM. It is **not** in the current `CardType` enum — it is supported only via the legacy sysmo-usim-tool backend (`sysmo_isim_sjs1.py`).
 
 **Use when:** Your deployment specifically requires a Java Card ISIM or your existing infrastructure was built around SJS1.
 
@@ -67,15 +88,11 @@ The SJS1 is a Java Card-based ISIM, primarily used for legacy or specific integr
 
 ## Card type auto-detection
 
-SimGUI does not require you to specify the card type manually. When using sysmo-usim-tool, it tries each card type script in order:
+SimGUI does not require you to specify the card type manually. pySim-read (`pySim-read.py -p0`) is the primary detection method. SimGUI parses the `Autodetected card type:` line from pySim-read output to determine the card type.
 
-```
-sysmo_isim_sja2.py → sysmo_isim_sja5.py → sysmo_isim_sjs1.py
-```
+Detected types include: `sysmoISIM-SJA2`, `sysmoISIM-SJA5`, `gialersim`, and others. The detected type is displayed in the card status panel.
 
-The first script that succeeds determines `CardType` for the session. The detected type is displayed in the card status panel.
-
-When using pySim, `pySim-read.py -p0` is used for detection. Card type is determined from the ATR (Answer To Reset) in pySim's output.
+For the legacy sysmo-usim-tool backend, detection tries each script in order: `sysmo_isim_sja2.py` → `sysmo_isim_sja5.py` → `sysmo_isim_sjs1.py`.
 
 ---
 

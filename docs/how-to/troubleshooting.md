@@ -24,16 +24,21 @@ Common problems, their causes, and how to resolve them.
    ```
    If the reader does not appear, try a different USB port or cable. Check `lsusb` to confirm the reader is enumerated.
 
-3. **CLI tool found?**  
-   The status bar should show which backend is active (sysmo-usim-tool or pySim). If it shows "No CLI tool found", see [CLI integration](../reference/cli-integration.md) and [Configuration](../reference/configuration.md).
+3. **pcscd enabled?**
+   ```bash
+   sudo systemctl enable --now pcscd
+   ```
 
-4. **User permissions?**
+4. **CLI tool found?**
+   The status bar should show which backend is active (pySim or sysmo-usim-tool). If it shows "No CLI tool found", see [CLI integration](../reference/cli-integration.md) and [Configuration](../reference/configuration.md). pySim should be at `/opt/pysim` — if missing, re-run the install script.
+
+5. **User permissions?**
    ```bash
    groups $USER
    ```
    If `pcscd` is not in the list: `sudo usermod -aG pcscd $USER` then log out and back in.
 
-5. **Card orientation?**  
+6. **Card orientation?**  
    Ensure the gold contacts face down (toward the reader contacts) and the card is fully seated.
 
 ---
@@ -42,8 +47,9 @@ Common problems, their causes, and how to resolve them.
 
 **Symptom:** Card watcher fires, but the ICCID field is empty or shows an error.
 
-- Some card types require a specific CLI script. SimGUI tries `sysmo_isim_sja2.py`, `sysmo_isim_sja5.py`, and `sysmo_isim_sjs1.py` in sequence for sysmo-usim-tool. If none work, the ICCID cannot be read.
-- For pySim backend, verify `pySim-read.py -p0` works from the command line independently.
+- Verify `pySim-read.py -p0` works from the command line independently (run from `/opt/pysim`).
+- **Blank gialersim cards legitimately have no ICCID** — they report empty ICCID/IMSI but may show `ACC: ffff`. This is expected, not an error.
+- For the legacy sysmo-usim-tool backend, SimGUI tries each script in sequence. If none work, the ICCID cannot be read.
 
 ---
 
@@ -96,6 +102,16 @@ This is a format check performed before any card communication. Fix the ADM1 val
 
 - Valid formats: `12345678` (8 decimal digits) or `4142434445464748` (16 hex characters)
 - Common mistakes: 7 or 9 digits, non-hex letters in a hex key, extra spaces
+
+---
+
+### 6f00 error on blank/gialersim card
+
+**Symptom:** Authentication attempt on a blank card returns `6f00`.
+
+This is **expected behaviour**. Blank gialersim cards use CHV `0x0C`, not the standard CHV `0x0A`. A standard `VERIFY ADM1` command fails with `6f00` and **consumes a retry attempt**. After 3 failures the card is permanently blocked.
+
+SimGUI handles this automatically — it detects blank/gialersim cards and skips the VERIFY step, storing the ADM1 for use with `pySim-prog` instead. If you see this error, ensure you are using a current version of SimGUI.
 
 ---
 
@@ -166,8 +182,8 @@ simgui
 ```
 
 Common causes:
-- Missing Python dependencies: `pip3 install -r /usr/share/simgui/requirements.txt`
-- Display server issue on Wayland: `GDK_BACKEND=x11 simgui`
+- Missing Python dependencies: re-run the install script (`curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash`)
+- Display server issue on Wayland: `QT_QPA_PLATFORM=xcb simgui`
 - Corrupted settings file: `rm ~/.config/simgui/settings.json` (settings will reset to defaults)
 
 ### Settings not persisted

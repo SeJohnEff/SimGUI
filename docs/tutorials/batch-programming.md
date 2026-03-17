@@ -142,6 +142,18 @@ See [Architecture overview](../explanation/architecture.md) for how the simulato
 
 ---
 
+## Batch programming blank cards
+
+If your batch includes blank (unpersonalised/gialersim) cards, the workflow differs slightly:
+
+- **No ICCID matching:** Blank cards have no factory ICCID. Instead of matching by ICCID, blank cards are matched sequentially to the next unprocessed CSV row.
+- **All fields written:** ICCID, IMSI, Ki, OPc, and all other fields are written from the CSV row — the card starts empty.
+- **pySim-prog used:** Blank cards are programmed via `pySim-prog.py -t gialersim` rather than pySim-shell.
+
+Insert blank cards in the order matching your CSV rows. The batch manager assigns each blank card to the next available row automatically.
+
+---
+
 ## What's next?
 
 - Review the [CSV format reference](../reference/csv-format.md) for every supported column.

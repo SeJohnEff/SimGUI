@@ -94,7 +94,7 @@ Card removal at any point → back to STEP 0 + clear all fields.
 
 ---
 
-## Bug Analysis (v0.5.2)
+## Bug Analysis (v0.5.2) — FIXED
 
 ### Bug 1: Blank card overwrites CSV data
 

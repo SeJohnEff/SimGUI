@@ -1,6 +1,6 @@
 # SimGUI Documentation
 
-SimGUI is a PyQt6 desktop application for programming sysmocom SIM cards (SJA2, SJA5, SJS1 types) on Ubuntu. It wraps the [sysmo-usim-tool](https://github.com/SeJohnEff/sysmo-usim-tool) and [pySim](https://github.com/osmocom/pysim) CLI tools behind a graphical interface, adding batch workflows, automatic card detection, ICCID cross-verification, network share integration, and a built-in simulator for testing without hardware.
+SimGUI is a PyQt6 desktop application for programming sysmocom SIM cards (SJA2, SJA5, GIALERSIM types) on Ubuntu. It wraps [pySim](https://github.com/osmocom/pysim) CLI tools (pySim-read, pySim-shell, pySim-prog) behind a graphical interface, adding batch workflows, automatic card detection, ICCID cross-verification, network share integration, and a built-in simulator for testing without hardware. pySim is auto-installed by the install script.
 
 ---
 
@@ -39,8 +39,8 @@ Precise definitions for formats, schemas, and external interfaces.
 |---|---|
 | [CSV format](reference/csv-format.md) | Column names, data types, validation rules |
 | [standards.json schema](reference/standards-json.md) | File format, fields, versioning |
-| [Card types](reference/card-types.md) | SJA2, SJA5, SJS1 — capabilities and SUCI support |
-| [CLI integration](reference/cli-integration.md) | How SimGUI calls sysmo-usim-tool and pySim |
+| [Card types](reference/card-types.md) | SJA2, SJA5, GIALERSIM, MAGIC — capabilities and detection |
+| [CLI integration](reference/cli-integration.md) | How SimGUI calls pySim (primary) and sysmo-usim-tool (legacy) |
 | [Configuration](reference/configuration.md) | Environment variables, settings file |
 
 ---
