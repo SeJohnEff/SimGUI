@@ -106,6 +106,65 @@ class AutoArtifactManager:
 
         return saved_paths
 
+    def save_batch_summary(self, records: list[dict[str, str]],
+                           batch_results: list,
+                           ) -> list[str]:
+        """Write a batch summary CSV to all connected shares.
+
+        Parameters
+        ----------
+        records :
+            Card data dicts for successfully programmed cards (from
+            ``get_programmed_records()``).
+        batch_results :
+            All ``CardResult`` objects from the batch (success and failure).
+
+        Returns
+        -------
+        list[str]
+            Paths where summaries were successfully saved.
+        """
+        if not self._ns:
+            return []
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"batch_summary_{timestamp}.csv"
+
+        # Build rows: one per batch result (both success and failure)
+        fields = ["#", "ICCID", "IMSI", "Status", "Message", "Timestamp"]
+        rows = []
+        # Index successful records by their ICCID for easy lookup
+        ok_by_iccid = {r.get("ICCID", ""): r for r in records}
+        for r in batch_results:
+            card = ok_by_iccid.get(r.iccid, {})
+            rows.append({
+                "#": r.index + 1,
+                "ICCID": r.iccid,
+                "IMSI": card.get("IMSI", ""),
+                "Status": "OK" if r.success else "FAIL",
+                "Message": r.message,
+                "Timestamp": datetime.now().isoformat(),
+            })
+
+        saved_paths = []
+        for label, mount_path in self._ns.get_active_mount_paths():
+            artifact_dir = os.path.join(mount_path, AUTO_ARTIFACT_DIR)
+            try:
+                os.makedirs(artifact_dir, exist_ok=True)
+                path = os.path.join(artifact_dir, filename)
+                with open(path, "w", newline="", encoding="utf-8") as fh:
+                    writer = csv.DictWriter(fh, fieldnames=fields,
+                                            extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(rows)
+                saved_paths.append(path)
+                logger.info("Batch summary saved: %s (%d rows)", path, len(rows))
+            except OSError as exc:
+                logger.warning("Failed to save batch summary to %s: %s",
+                             artifact_dir, exc)
+
+        return saved_paths
+
     def find_existing_artifacts(self, iccid: str) -> list[str]:
         """Find existing auto-artifact files for a given ICCID.
 

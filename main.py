@@ -233,7 +233,9 @@ class SimGUIApp:
         self._batch_panel = BatchProgramPanel(
             notebook, self._card_manager, self._settings,
             ns_manager=self._ns_manager,
-            card_watcher=self._card_watcher)
+            card_watcher=self._card_watcher,
+            iccid_index=self._iccid_index,
+            auto_artifact_manager=self._auto_artifact)
         self._batch_panel.set_standards_manager(self._standards_mgr)
         notebook.add(self._batch_panel, text="Batch Program")
 

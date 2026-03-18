@@ -6,6 +6,8 @@ Data comes from a CSV or from an auto-generated IMSI/ICCID sequence.
 """
 
 import csv
+import logging
+import os
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
@@ -26,6 +28,8 @@ from utils.iccid_utils import (
     get_fplmn_for_site,
 )
 from widgets.tooltip import add_tooltip
+
+logger = logging.getLogger(__name__)
 
 
 def apply_imsi_override(cards: list[dict[str, str]], imsi_base: str,
@@ -69,11 +73,14 @@ class BatchProgramPanel(ttk.Frame):
 
     def __init__(self, parent, card_manager: CardManager,
                  settings: SettingsManager, *,
-                 ns_manager=None, card_watcher=None, **kwargs):
+                 ns_manager=None, card_watcher=None,
+                 iccid_index=None, auto_artifact_manager=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._settings = settings
         self._ns_manager = ns_manager
+        self._iccid_index = iccid_index
+        self._auto_artifact = auto_artifact_manager
         self._last_browse_dir: str | None = None
         self._batch_mgr = BatchManager(card_manager, card_watcher=card_watcher)
         self._csv = CSVManager()
@@ -697,6 +704,9 @@ class BatchProgramPanel(ttk.Frame):
         if not self._check_duplicate_artifacts():
             return  # user cancelled
 
+        # Check ICCID index for already-programmed cards (warn, don't block)
+        self._check_iccid_index_duplicates()
+
         self._log_clear()
         self._start_btn.configure(state=tk.DISABLED)
         self._pause_btn.configure(state=tk.NORMAL)
@@ -751,6 +761,22 @@ class BatchProgramPanel(ttk.Frame):
 
         return messagebox.askyesno("Duplicate Artifacts Found", msg)
 
+    def _check_iccid_index_duplicates(self) -> None:
+        """Warn in the batch log about ICCIDs already in the index.
+
+        Non-blocking — logs warnings but does not prevent the batch.
+        """
+        if not self._iccid_index:
+            return
+        for card in self._preview_data:
+            iccid = card.get("ICCID", "")
+            if not iccid:
+                continue
+            entry = self._iccid_index.lookup(iccid)
+            if entry is not None:
+                self._log(f"\u26a0 ICCID {iccid} was already programmed "
+                          f"(source: {entry.file_path})")
+
     def _on_pause(self):
         if self._batch_mgr.state == BatchState.PAUSED:
             self._batch_mgr.resume()
@@ -782,12 +808,32 @@ class BatchProgramPanel(ttk.Frame):
         self.after(0, _do)
 
     def _on_card_result(self, result: CardResult):
+        # Save per-card artifact on success (runs on worker thread)
+        if result.success and result.index < len(self._preview_data):
+            card_data = self._preview_data[result.index]
+            self._save_per_card_artifact(card_data)
+
         def _do():
             if not self.winfo_exists():
                 return
             icon = "OK" if result.success else "FAIL"
             self._log(f"Card {result.index + 1} [{icon}]: {result.message}")
         self.after(0, _do)
+
+    def _save_per_card_artifact(self, card_data: dict[str, str]) -> None:
+        """Save an auto-artifact for a single successful card and update index."""
+        iccid = card_data.get("ICCID", "")
+        # Save artifact via auto_artifact_manager
+        if self._auto_artifact:
+            try:
+                paths = self._auto_artifact.save_card_artifact(card_data)
+                if paths:
+                    logger.info("Batch auto-artifact saved: %s", paths)
+                    # Update ICCID index so the card is found on re-insert
+                    if iccid and self._iccid_index:
+                        self._iccid_index.add_iccid(iccid, paths[0])
+            except Exception as exc:
+                logger.warning("Batch auto-artifact save failed: %s", exc)
 
     def _on_waiting_for_card(self, index: int, iccid: str):
         def _do():
@@ -799,6 +845,9 @@ class BatchProgramPanel(ttk.Frame):
         self.after(0, _do)
 
     def _on_batch_completed(self):
+        # Save batch summary artifact (runs on worker thread)
+        self._save_batch_summary()
+
         def _do():
             if not self.winfo_exists():
                 return
@@ -818,6 +867,22 @@ class BatchProgramPanel(ttk.Frame):
             pad = ModernTheme.get_padding("medium")
             self._summary_frame.pack(fill=tk.X, padx=pad, pady=(0, pad))
         self.after(0, _do)
+
+    def _save_batch_summary(self) -> None:
+        """Auto-save a batch summary CSV via auto_artifact_manager."""
+        if not self._auto_artifact:
+            return
+        records = self.get_programmed_records()
+        results = self._batch_mgr.results
+        if not results:
+            return
+        try:
+            paths = self._auto_artifact.save_batch_summary(records, results)
+            if paths:
+                names = [os.path.basename(p) for p in paths]
+                logger.info("Batch summary saved: %s", names)
+        except Exception as exc:
+            logger.warning("Batch summary save failed: %s", exc)
 
     # ---- log helpers ---------------------------------------------------
 
