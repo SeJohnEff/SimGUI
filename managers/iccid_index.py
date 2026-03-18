@@ -260,12 +260,17 @@ class IccidIndex:
     def lookup(self, iccid: str) -> Optional[IndexEntry]:
         """Find the index entry containing *iccid*.
 
-        Returns the first matching ``IndexEntry`` or ``None``.
+        When multiple entries match (e.g. a range entry from the
+        original batch file plus a single-card entry from a later
+        re-programming), the **last** match is returned.  Single-card
+        override entries are always appended, so this naturally
+        returns the most recent artifact.
         """
+        match: Optional[IndexEntry] = None
         for entry in self._entries:
             if entry.contains(iccid):
-                return entry
-        return None
+                match = entry
+        return match
 
     def load_card(self, iccid: str) -> Optional[dict[str, str]]:
         """Lookup + parse source file + return full card profile.
@@ -340,11 +345,46 @@ class IccidIndex:
         card is immediately recognised without a full directory rescan.
         Also evicts the ICCID from the card cache so the next lookup
         re-parses the (now updated) source file.
+
+        If the ICCID is already indexed (re-programmed card), the
+        existing single-card entry's ``file_path`` is updated to point
+        to the latest artifact.  Range entries from batch files are
+        left untouched — a new single-card entry is appended so that
+        ``lookup()`` finds the latest artifact first.
         """
         if not iccid:
             return
-        # Already indexed?
-        if self.lookup(iccid) is not None:
+
+        existing = self.lookup(iccid)
+        if existing is not None:
+            # If the existing entry is a single-card entry (card_count == 1)
+            # we can update its file_path in place.
+            if existing.card_count == 1:
+                logger.info(
+                    "ICCID index: updating %s -> %s (was %s)",
+                    iccid, file_path, existing.file_path)
+                existing.file_path = file_path
+            else:
+                # Range entry from a batch file — don't mutate it.
+                # Append a new single-card entry; lookup() returns the
+                # last match, which will be this newer one.
+                stripped = _luhn_strip(iccid)
+                prefix = stripped[:-1]
+                suffix = int(stripped[-1])
+                new_entry = IndexEntry(
+                    file_path=file_path,
+                    prefix=prefix,
+                    range_start=suffix,
+                    range_end=suffix,
+                    suffix_len=1,
+                    card_count=1,
+                    iccid_length=len(iccid),
+                )
+                self._entries.append(new_entry)
+                logger.info(
+                    "ICCID index: added override entry %s -> %s "
+                    "(range entry in %s kept)",
+                    iccid, file_path, existing.file_path)
             # Evict stale cache entry so next load_card() re-reads file
             self._card_cache.pop(iccid, None)
             return
