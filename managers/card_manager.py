@@ -533,15 +533,14 @@ class CardManager:
         python_exe = self._venv_python or sys.executable
         cmd = [python_exe, script_path, '-p0']
         if adm1_hex:
-            # Gialersim cards use a different auth mechanism (CHV 0x0C).
-            # pySim-shell's -A <hex> sends standard VERIFY (CHV 0x0A)
-            # which fails with SW 6f00 on gialersim.  Pass the card type
-            # explicitly so pySim-shell uses the correct auth path, and
-            # supply ADM1 as ASCII via -a (like pySim-prog does).
-            if self.card_type == CardType.GIALERSIM:
-                cmd += ['-t', 'gialersim',
-                        '-a', self._hex_to_adm1_ascii(adm1_hex)]
-            else:
+            # johneff 260318 remember legacy/cards.py patch in pysim
+            # Gialersim cards: pySim-shell does not support -t, and
+            # standard VERIFY ADM1 (CHV 0x0A) fails with 6f00 on these
+            # cards. Auth is handled by pySim-prog during initial
+            # programming. For extra-field writes after pySim-prog,
+            # pySim-shell runs without -A since the card session is
+            # already authenticated.
+            if self.card_type != CardType.GIALERSIM:
                 cmd += ['-A', adm1_hex]
         # Append 'quit' so the shell terminates cleanly.
         # NOTE: pySim-shell uses 'quit', NOT 'exit'.
@@ -659,6 +658,11 @@ class CardManager:
             cmd += ['-n', card_data['SPN']]
         if card_data.get('ACC'):
             cmd += ['--acc', card_data['ACC']]
+        if card_data.get('FPLMN'):
+            for plmn in card_data['FPLMN'].replace(';', ',').split(','):
+                plmn = plmn.strip()
+                if plmn:
+                    cmd += ['-f', plmn]
 
         # Derive MCC/MNC from IMSI so pySim-prog can configure HPLMN
         imsi = card_data.get('IMSI', '')
@@ -1201,7 +1205,7 @@ class CardManager:
         return self._program_nonempty_card(card_data, changed)
 
     # Fields supported by pySim-prog.py command-line flags
-    _PYSIM_PROG_FIELDS = {'ICCID', 'IMSI', 'Ki', 'OPc', 'SPN', 'ACC'}
+    _PYSIM_PROG_FIELDS = {'ICCID', 'IMSI', 'Ki', 'OPc', 'SPN', 'ACC', 'FPLMN'}
 
     def _program_empty_card(self, card_data: Dict[str, str],
                             changed: Dict[str, str]) -> Tuple[bool, str]:
