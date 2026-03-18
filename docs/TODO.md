@@ -71,6 +71,16 @@
 
 - [ ] **PIN1/PUK1/PIN2/PUK2 write handlers missing** — Log shows `program_card: field 'PIN1' has no write handler, skipped` (same for PUK1, PIN2, PUK2). These fields are present in the CSV but silently dropped. Either implement write handlers (pySim-shell can set PINs/PUKs) or warn the operator in the batch log that these fields were not programmed.
 
+- [ ] **CRITICAL: Batch programming does not warn when ICCID was already programmed** — In batch mode (Start Row 3, Count 2), the first card was programmed successfully without any warning, even though that ICCID (`8999988000100000037`) had already been programmed before (artifact file existed on the network share, and the ICCID index had 5412 cards scanned). The batch flow should check the ICCID index before programming each card and warn the operator: "This ICCID has been programmed before (artifact: <path>). Overwrite?" This is a traceability/safety issue — re-programming an already-programmed card without warning could cause duplicates in the field. The check should use `iccid_index.lookup()` before calling `program_card()`.
+  - Evidence: log shows `ICCID index scan: 5412 cards in 656 files` at 15:05, but batch at 15:07 programmed `8999988000100000037` with no warning.
+  - Single-card flow has this check ("this sim has been programmed before" pop-up). Batch flow is missing it.
+
+- [ ] **Batch programming: no per-card artifact for first card** — In the batch run at 15:07, the first card (`8999988000100000037`) shows `Auto-artifact saved: .../8999988000100000037_20260318_150712.csv` — this appears correct. BUT the second card at 15:12 has NO artifact save log at all. After `Post-program verification OK`, the log jumps straight to `CardWatcher: card removed` with no artifact. Root cause: the batch flow's `_on_card_programmed()` callback may not be invoked for the second card, or the auto-artifact manager is failing silently.
+  - Check: is the single-card `_on_card_programmed()` callback properly wired for batch flow?
+  - Check: does the batch panel have its own artifact save that bypasses `_on_card_programmed()`?
+
+- [ ] **Batch programming: no batch-level artifact file** — After a batch run completes (multiple cards), there should be a single batch summary artifact file listing ALL cards programmed in that batch (both successes and failures). Currently each card gets an individual artifact (when it works), but there's no consolidated batch file. Format: a CSV with columns like `ICCID, IMSI, Status, Timestamp, Error` — one row per card in the batch. File name: `batch_<start-row>-<count>_<timestamp>.csv`. This is essential for production traceability — the operator needs one file to hand to QA showing what was done in that batch session.
+
 - [ ] **Batch artifact file — verify it is saved** — After batch programming (1 success, 1 fail), confirm the auto-artifact CSV is written to the network share. Need to check: does the artifact include only the successful card, or is the failed card also recorded (with failure status)? The artifact should log both outcomes for traceability.
 
 ## Process Retrospective — CLAUDE.md Enhancement Plan
@@ -149,4 +159,4 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
 - [ ] App unresponsive after closing Network Storage dialog (user: "Acceptable")
 - [ ] Right pane says "Insert SIM" even after blank card detected
 - [ ] Card data blanks out when removing/inserting SIM
-- [ ] **"Card not in index" after just programming** — After programming a SIM (ICCID `8999988000100000019`), removing and re-inserting shows the correct "this sim has been programmed before" pop-up, but then immediately shows the "Load Card Data File" dialog saying "Card not in index". The ICCID index is either not updated after programming completes, or the auto-read flow triggers a second lookup that doesn't find the card in the index. Expected: after programming, the card's ICCID should be in the index and re-insert should go straight to showing card data without prompting for a file.
+- [x] **PARTIALLY FIXED v0.5.21: "Card not in index" after just programming** — Fix 1.4 added `add_iccid()` to update the index after programming. The "add single card" part works (log confirms `ICCID index: added single card`). However, the full "card not in index" dialog may still appear if the auto-read flow triggers a second lookup before the index update propagates. Needs further testing to confirm fully resolved.
