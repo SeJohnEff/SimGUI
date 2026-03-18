@@ -68,6 +68,76 @@
 
 - [ ] **Batch artifact file — verify it is saved** — After batch programming (1 success, 1 fail), confirm the auto-artifact CSV is written to the network share. Need to check: does the artifact include only the successful card, or is the failed card also recorded (with failure status)? The artifact should log both outcomes for traceability.
 
+## Process Retrospective — CLAUDE.md Enhancement Plan
+
+Estimate: +50% of bugs could have been avoided with a better CLAUDE.md and an early architecture/planning session. The following categories capture what was missing and what should be encoded as permanent project knowledge to prevent repeat mistakes.
+
+### 1. Early Architecture & Planning Decisions
+
+These questions should have been asked and answered ONCE in an upfront session, not discovered through trial and error across many sessions:
+
+- [ ] **Packaging & distribution** — How should the app be packaged? What should be included (dependency installation, pySim bundling, pcscd setup)? Linux only or cross-platform? x86-64 only or also aarch64? This was resolved late and painfully.
+- [ ] **PyQt6 should have been proposed early** — The migration from Tk to PyQt6 came mid-project. A Q&A at the start ("What UI framework? What platforms? What form factors?") would have avoided weeks of rework. CLAUDE.md should include a **Technology Choices** section documenting the rationale for PyQt6, Ubuntu, .deb, etc. — and the Q&A process for evaluating alternatives.
+- [ ] **SIM card type research** — Gialersim cards, their CHV 0x0C auth method, and the difference from SJA5 should have been researched upfront. Instead it was discovered through failed attempts that burned ADM1 retries. CLAUDE.md now documents this, but only after the damage.
+- [ ] **ADM1 hex vs ASCII** — Was treated as guesswork for too long. The rule is simple (16 chars = hex, ≤8 = ASCII) but it took multiple sessions to nail down. Should have been a Day 1 research task.
+
+### 2. Event-Driven Architecture (Not Polling)
+
+- [ ] **Card detection should be signal/interrupt-based, not polling** — CardWatcher polls the reader. This causes reader contention during programming (random 6f00 errors) and makes the ATR caching bug possible. Should use PC/SC event notifications or at minimum subscribe to system signals. This is an app-global concern.
+- [ ] **Share mount status should use signals globally** — Share indicator was grey on startup, left pane updated but right pane didn't — because mount status wasn't propagated via signals everywhere. Pattern: if something is a global state, it must go through StateManager signals, not ad-hoc checks.
+- [ ] **File scanning should be state-driven** — When a card is just programmed, removed, and re-inserted, it's obvious an artifact file exists. Don't re-scan the network share; use a signal/state (`card_programmed → artifact_exists`). Avoid continuous polling when state is already known.
+
+### 3. Global Consistency (Not Per-Tab Fixes)
+
+- [ ] **"Only in Program SIM tab?" problem** — Auth, card status, SPN, FPLMN — features were implemented in one tab but not others. CLAUDE.md says "think globally" but this was violated repeatedly. Every feature must be evaluated: "Does this apply to other tabs/panels?" If yes, implement via StateManager signal, not widget-local code.
+- [ ] **Inconsistency between tabs** — No way to input SPN in batch programming. Should SPN come from CSV, manual input, or the standard? This inconsistency comes from not designing the data flow holistically. CLAUDE.md should document the canonical data source priority: CSV file → sim-standard.json → manual input.
+
+### 4. Verify-After-Write (Always)
+
+- [ ] **Every write must be verified with a read** — This is a fundamental principle for hardware programming. SPN was "written" but read-back showed "Not available". FPLMN was "written" but auth failed. These should have been caught immediately. CLAUDE.md should encode: **After every pySim write operation, read back and compare. If mismatch, flag as error. No silent successes.**
+
+### 5. Workflow States & Data Integrity
+
+- [ ] **Selecting a CSV row then inserting a card clears file data** — The card-insert event triggers a state reset that wipes the CSV selection. Workflows and states were not mapped out. CLAUDE.md should include a **State Machine** diagram showing: what triggers what, what gets cleared, what persists across card insert/remove cycles.
+- [ ] **Aligned workflows with card-type variations** — The main workflow for SUCI, non-SUCI, and empty cards is the same (load data → authenticate → program → verify). Only card type detection and ADM1 handling differ. This should be one modular flow with pluggable card-type strategies, not separate code paths that diverge and get out of sync. CLAUDE.md should document this pattern.
+- [ ] **Simplify by removing unnecessary steps** — The extra ADM1 verify before programming is redundant since ADM1 is provided again at point of programming. The Authenticate button adds a step with no value for gialersim cards. Simplify the operator workflow: insert card → load data → program. Fewer steps = fewer bugs.
+
+### 6. Elegance & Silent Failures
+
+- [ ] **No silent failures** — The whitespace CSV parser returned 0 SIMs with no warning when headers had one more field than data rows. PIN1/PUK1/PIN2/PUK2 were silently skipped. FPLMN auth failed but the overall status showed success for core fields. Every failure must be visible to the operator. CLAUDE.md should encode: **If something fails or is skipped, log it AND surface it in the UI. Never swallow errors.**
+- [ ] **Elegant error handling** — The 0-SIMs case could have been handled more gracefully: "Parsed 0 rows out of 100. Possible cause: MSISDN column is empty (double-space between fields)." Give the operator actionable information.
+
+### 7. Version & Build Visibility
+
+- [ ] **Show version and build in the app** — For debugging and iteration tracking, the version (and ideally build/commit hash) should be visible in the app window title bar or About dialog. Currently `version.py` exists but it's not clear if it's displayed in the UI. This would have saved time in many debugging sessions ("which version are you running?").
+
+### 8. GitHub Sync Issues
+
+- [ ] **Minimize git sync bugs** — There have been many sync issues with GitHub (local vs remote divergence, API push conflicts). Root causes: (a) editing locally AND pushing via API creates divergence, (b) no pre-push check for remote HEAD, (c) no local `git fetch && git reset --hard origin/main` after API pushes. CLAUDE.md should encode a strict workflow: always push via API → always fetch after push → never edit local git directly. Consider adding a `scripts/push.sh` helper that handles the API push + local sync in one step.
+
+### 9. Testing Strategy Overhaul
+
+- [ ] **Tests were built without understanding the code** — Many tests mock implementation details and assert them back (tautological). They pass when the code is broken and break when the code is fixed. This is worse than no tests.
+- [ ] **Unit tests are necessary but not sufficient** — Unit tests with mocks are good for isolated logic. But the real bugs (6f00 from reader contention, FPLMN auth failing after pySim-prog, ATR caching returning wrong ICCID) are integration/E2E bugs that no unit test catches.
+- [ ] **E2E tests are a must** — Need end-to-end tests that exercise the actual pySim tools against the simulator or real cards. The built-in simulator is too high-level to catch real pySim integration issues. If the simulator wraps pySim, tests should go through pySim, not around it.
+- [ ] **Test coverage must be 100%+** — Not just line coverage, but path coverage. Every card type × every operation × every error path.
+- [ ] **Innovative testing** — A card programmer simulator that doesn't integrate with pySim is theater. Real integration tests should: start pySim-prog/shell → feed it commands → verify card state. Consider: a pySim test harness that uses sysmocom's PCSC emulator or a virtual smartcard.
+- [ ] **CLAUDE.md should encode testing requirements** — "Every new feature must include: (1) unit tests for pure logic, (2) integration tests that exercise the real pySim CLI, (3) E2E tests that verify the full workflow from UI action to card state. Mocking is allowed for Qt/UI, NOT for pySim interaction."
+
+### 10. CLAUDE.md as the Prevention Layer
+
+The CLAUDE.md is already substantial (267 lines) but needs restructuring to serve as an effective prevention layer:
+
+- [ ] **Add a "Decision Log" section** — Document every architectural decision with rationale (ADR-lite). When a decision was made the hard way, record why, so it's never revisited.
+- [ ] **Add a "Pre-Implementation Checklist"** — Before writing any code:
+  1. Is this a global or local concern? If global, use StateManager signals.
+  2. Does this touch card auth? If yes, test with ALL card types (SJA5, gialersim, blank).
+  3. Does this write to a card? If yes, add verify-after-write.
+  4. Does this affect multiple tabs? If yes, implement in one place, signal to all.
+  5. Can this fail silently? If yes, add explicit error surfacing.
+- [ ] **Add a "Common Mistakes" section** — Expand the current "Lessons Learned" with the full list from this retrospective.
+- [ ] **Add a "Q&A Gate" for new features** — Before implementing, answer: What card types? What file formats? Which tabs? What error modes? What's the verify step? This prevents the "implement first, discover edge cases later" pattern.
+
 ## Known Issues (Acceptable / Deferred)
 
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
