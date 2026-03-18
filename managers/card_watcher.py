@@ -226,6 +226,7 @@ class CardWatcher:
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
+                self._atr_iccid_cache.clear()
                 logger.info("CardWatcher: card removed")
                 if self.on_card_removed:
                     try:
@@ -298,6 +299,7 @@ class CardWatcher:
                 # Card was removed or became unreachable
                 self._last_iccid = None
                 self._card_present = False
+                self._atr_iccid_cache.clear()
                 if self.on_card_removed:
                     try:
                         self.on_card_removed()

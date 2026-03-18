@@ -804,7 +804,8 @@ class SimGUIApp:
         """Called after successful card programming — save auto-artifact.
 
         Also registers the ICCID with the card watcher so that
-        re-inserting the same card is recognised immediately.
+        re-inserting the same card is recognised immediately, and
+        updates the ICCID index so the card is found on next lookup.
         """
         # Register the ICCID in the watcher's ATR→ICCID cache so
         # re-insertion won't show "Blank card".
@@ -819,6 +820,9 @@ class SimGUIApp:
                 names = [os.path.basename(p) for p in paths]
                 self._status_var.set(f"Artifact saved: {', '.join(names)}")
                 logger.info("Auto-artifact saved: %s", paths)
+                # Update ICCID index so the card is found on re-insert
+                if iccid and paths:
+                    self._iccid_index.add_iccid(iccid, paths[0])
         except Exception as exc:
             logger.warning("Auto-artifact save failed: %s", exc)
 

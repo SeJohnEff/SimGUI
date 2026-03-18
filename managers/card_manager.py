@@ -202,6 +202,7 @@ class CardManager:
         self._simulator = None  # Optional[SimulatorBackend]
         self.card_blocked: bool = False   # True when ADM1 retry counter = 0
         self._adm1_remaining_attempts: Optional[int] = None
+        self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
         logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
                     self.cli_backend.name, self.cli_path, self._venv_python)
 
@@ -347,8 +348,10 @@ class CardManager:
     def detect_card(self) -> Tuple[bool, str]:
         """Detect a card in the reader (or the virtual card if simulator active).
 
-        After detection, also checks the ADM1 retry counter to detect
-        blocked cards early (before any authentication attempt).
+        Reads public card data only (ICCID, IMSI, etc.) via pySim-read.
+        Does NOT check the ADM1 retry counter — that is deferred to
+        ``authenticate()`` to avoid burning attempts on gialersim/blank
+        cards where VERIFY CHV 0x0A is unsupported.
         """
         if self._simulator:
             ok, msg = self._simulator.detect_card()
@@ -380,23 +383,13 @@ class CardManager:
             if ok:
                 self._parse_pysim_output(stdout)
                 self._original_card_data = dict(self.card_info)  # snapshot
-                # Check ADM1 retry counter (non-destructive)
-                self.check_adm1_retry_counter()
-                if self.card_blocked:
-                    return True, "Card detected \u2014 WARNING: CARD IS BLOCKED"
                 return True, "Card detected via pySim"
             # Also check stdout - pySim sometimes prints data before failing
             if stdout:
                 self._parse_pysim_output(stdout)
                 if self.card_info.get('ICCID'):
                     self._original_card_data = dict(self.card_info)
-                    self.check_adm1_retry_counter()
-                    if self.card_blocked:
-                        return True, "Card detected \u2014 WARNING: CARD IS BLOCKED"
                     return True, "Card detected via pySim"
-            # Even if pySim-read fails (blank card), try the retry counter
-            # in case there's a card present but unreadable
-            self.check_adm1_retry_counter()
             return False, self._clean_pysim_error(stderr) or "No card detected"
 
         # sysmo-usim-tool: try each card type script
@@ -796,6 +789,8 @@ class CardManager:
             ok, msg = self._simulator.authenticate(adm1, force=force)
             if ok:
                 self.authenticated = True
+                if force:
+                    self._safety_override_acknowledged = True
             return ok, msg
 
         err = validate_adm1(adm1)
@@ -850,6 +845,8 @@ class CardManager:
         if is_blank or is_gialersim:
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
+            if force:
+                self._safety_override_acknowledged = True
             if is_gialersim:
                 reason = "gialersim card (uses different auth method)"
             else:
@@ -878,6 +875,8 @@ class CardManager:
         if ok:
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
+            if force:
+                self._safety_override_acknowledged = True
             logger.info("ADM1 authentication successful (safe mode)")
             return True, "Authentication successful"
 
@@ -895,6 +894,8 @@ class CardManager:
             # Blank card: store ADM1, defer real auth to pySim-prog
             self.authenticated = True
             self._authenticated_adm1_hex = adm1_hex
+            if force:
+                self._safety_override_acknowledged = True
             logger.info("Blank card \u2014 ADM1 stored (will authenticate "
                         "during programming via pySim-prog)")
             return True, (
@@ -1151,20 +1152,23 @@ class CardManager:
         # Programming sends a VERIFY APDU.  If the counter is already
         # dangerously low (e.g. from a previous 6f00 failure that was
         # counted), refuse to proceed to protect the card.
-        remaining = self.check_adm1_retry_counter()
-        if remaining is not None:
-            if remaining == 0:
-                self.card_blocked = True
-                return False, (
-                    "Card is PERMANENTLY LOCKED \u2014 "
-                    "ADM1 retry counter is 0. Cannot program."
-                )
-            if remaining < 2:
-                return False, (
-                    f"DANGER: Only {remaining} ADM1 attempt(s) remaining. "
-                    f"Programming aborted to protect the card. "
-                    f"Re-authenticate first to confirm the key is correct."
-                )
+        # Skip this check if the user already forced past the safety
+        # warning during authenticate() — asking twice is redundant.
+        if not self._safety_override_acknowledged:
+            remaining = self.check_adm1_retry_counter()
+            if remaining is not None:
+                if remaining == 0:
+                    self.card_blocked = True
+                    return False, (
+                        "Card is PERMANENTLY LOCKED \u2014 "
+                        "ADM1 retry counter is 0. Cannot program."
+                    )
+                if remaining < 2:
+                    return False, (
+                        f"DANGER: Only {remaining} ADM1 attempt(s) remaining. "
+                        f"Programming aborted to protect the card. "
+                        f"Re-authenticate first to confirm the key is correct."
+                    )
 
         # Determine what changed
         orig = original_data if original_data is not None else self._original_card_data
@@ -1485,6 +1489,7 @@ class CardManager:
         self.card_info = {}
         self.card_blocked = False
         self._adm1_remaining_attempts = None
+        self._safety_override_acknowledged = False
 
     # Error patterns from pySim that indicate specific conditions.
     # Each tuple is (keyword_in_stderr, user_friendly_message).

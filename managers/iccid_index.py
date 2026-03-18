@@ -333,6 +333,43 @@ class IccidIndex:
 
         return self.scan_directory(directory)
 
+    def add_iccid(self, iccid: str, file_path: str) -> None:
+        """Register a single ICCID after programming.
+
+        Creates a single-card ``IndexEntry`` so that re-inserting the
+        card is immediately recognised without a full directory rescan.
+        Also evicts the ICCID from the card cache so the next lookup
+        re-parses the (now updated) source file.
+        """
+        if not iccid:
+            return
+        # Already indexed?
+        if self.lookup(iccid) is not None:
+            # Evict stale cache entry so next load_card() re-reads file
+            self._card_cache.pop(iccid, None)
+            return
+
+        stripped = _luhn_strip(iccid)
+        iccid_length = len(iccid)
+        # Create a single-card entry: prefix = all-but-last-digit,
+        # suffix = last digit.
+        prefix = stripped[:-1]
+        suffix = int(stripped[-1])
+        entry = IndexEntry(
+            file_path=file_path,
+            prefix=prefix,
+            range_start=suffix,
+            range_end=suffix,
+            suffix_len=1,
+            card_count=1,
+            iccid_length=iccid_length,
+        )
+        self._entries.append(entry)
+        # Evict stale cache
+        self._card_cache.pop(iccid, None)
+        logger.info("ICCID index: added single card %s from %s",
+                    iccid, file_path)
+
     def clear(self):
         """Reset the index completely."""
         self._entries.clear()

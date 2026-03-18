@@ -262,5 +262,5 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 
 - Started: 2026-02-28
 - ~48 hours of development across 13 sessions over 18 calendar days
-- 12,600+ lines of application code, 2044+ tests
-- 96 commits, versions v0.1.0 through v0.5.20
+- 12,600+ lines of application code, 2067+ tests
+- 97+ commits, versions v0.1.0 through v0.5.21

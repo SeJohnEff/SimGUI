@@ -39,6 +39,7 @@ class TestAuthenticateNeverUsesAFlag(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
@@ -103,6 +104,7 @@ class TestBlockedCardDetection(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
         return cm
 
     def test_authenticate_blocked_card_refuses(self):
@@ -180,6 +182,7 @@ class TestRetryCounterParsing(unittest.TestCase):
         cm._venv_python = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager._init_pyscard')
@@ -288,6 +291,7 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager._validate_script_path')
@@ -357,6 +361,7 @@ class TestBlankCardSafeAuth(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
@@ -378,7 +383,7 @@ class TestBlankCardSafeAuth(unittest.TestCase):
 
 
 class TestDetectCardBlockedCheck(unittest.TestCase):
-    """detect_card() should check ADM1 retry counter after reading card data."""
+    """detect_card() must NOT check ADM1 retry counter (deferred to authenticate)."""
 
     def _make_card_manager(self):
         from managers.card_manager import CardManager, CLIBackend
@@ -394,26 +399,25 @@ class TestDetectCardBlockedCheck(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
         return cm
 
-    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
     @patch('managers.card_manager.CardManager._run_cli')
-    def test_detect_card_sets_blocked_when_counter_zero(
-            self, mock_cli, mock_retry):
-        """detect_card() should set card_blocked if retry counter is 0."""
+    def test_detect_card_does_not_call_check_adm1(
+            self, mock_cli):
+        """detect_card() must NOT call check_adm1_retry_counter().
+
+        ADM1 retry counter check is deferred to authenticate() to
+        avoid burning attempts on gialersim/blank cards.
+        """
         cm = self._make_card_manager()
         mock_cli.return_value = (True, 'ICCID: 8946000000\nIMSI: 001010000', '')
 
-        def set_blocked():
-            cm.card_blocked = True
-            cm._adm1_remaining_attempts = 0
-            return 0
-        mock_retry.side_effect = lambda: set_blocked()
-
-        ok, msg = cm.detect_card()
+        with patch.object(cm, 'check_adm1_retry_counter') as mock_retry:
+            ok, msg = cm.detect_card()
+            mock_retry.assert_not_called()
         self.assertTrue(ok)
-        self.assertIn('BLOCKED', msg)
-        self.assertTrue(cm.card_blocked)
+        self.assertNotIn('BLOCKED', msg)
 
 
 class TestDisconnectResetsBlockedState(unittest.TestCase):
@@ -430,11 +434,13 @@ class TestDisconnectResetsBlockedState(unittest.TestCase):
         cm.card_info = {'a': 'b'}
         cm.card_blocked = True
         cm._adm1_remaining_attempts = 0
+        cm._safety_override_acknowledged = True
 
         cm.disconnect()
         self.assertFalse(cm.card_blocked)
         self.assertIsNone(cm._adm1_remaining_attempts)
         self.assertFalse(cm.authenticated)
+        self.assertFalse(cm._safety_override_acknowledged)
 
 
 class TestCardStatusPanelBlockedIndicator(unittest.TestCase):
@@ -499,6 +505,7 @@ class TestAuthenticateWrongKeyUpdatesRetryCounter(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -572,6 +579,7 @@ class TestProgramCardBlockedGuard(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = True
         cm._adm1_remaining_attempts = 0
+        cm._safety_override_acknowledged = False
         return cm
 
     def test_program_card_refuses_blocked(self):
@@ -612,6 +620,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = remaining
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -682,6 +691,7 @@ class TestProgramNonemptyUseSafeShell(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager.verify_after_program')
@@ -751,6 +761,7 @@ class TestAuthenticateDetects6983InOutput(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -785,6 +796,7 @@ class TestPySimShellImplDetectsCommandErrors(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager._validate_script_path')
@@ -889,6 +901,7 @@ class TestAuthenticateDetects6f00(unittest.TestCase):
         cm._simulator = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
         return cm
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
