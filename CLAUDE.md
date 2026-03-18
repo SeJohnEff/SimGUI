@@ -164,6 +164,29 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 2. `_original_card_data` has no ICCID AND no IMSI (partial read, like ACC-only)
 3. `card_type == CardType.GIALERSIM`
 
+## pySim Patch — GialerSim SPN Support
+
+**File:** `/opt/pysim/pySim/legacy/cards.py`
+
+**Problem:** The `GialerSim` class in pySim does not implement SPN writing.
+pySim-prog's `-n` flag is silently ignored for gialersim cards because
+`_program_handlers` has no `'name'` key.
+
+**Fix:** Add a `'name'` handler to `GialerSim._program_handlers` in `__init__`:
+```python
+'name': lambda name: self.update_spn(name=name, show_in_hplmn=True, hide_in_oplmn=False),
+```
+
+**This patch must be applied manually after every pySim install/update.**
+The install script (`scripts/install.sh`) should ideally apply this automatically.
+
+**Why CHV 0x0A VERIFY fails on gialersim:**
+- Standard ADM1 auth uses CHV 0x0A — gialersim cards reject this with SW 6f00
+- pySim-shell does not support `-t` flag (unrecognized argument)
+- pySim-prog with `-t gialersim` uses the correct internal auth sequence
+- All gialersim field writes (ICCID, IMSI, Ki, OPc, ACC, SPN, FPLMN) must
+  go through pySim-prog, not pySim-shell
+
 ## Testing
 
 - Framework: pytest
