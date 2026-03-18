@@ -34,12 +34,7 @@
   2. **Manual entry in batch panel** — Add input fields or dropdowns in the batch panel header (alongside Start Row / Count) for Site Code and SPN that apply to all rows in the batch.
   Approach 1 is preferred (less manual work, uses the standard as source of truth). Ties into the "SIM standard as Markdown" item above — richer standard data enables richer auto-population. Also consider: LI (language) and FPLMN defaults per site/country from the standard.
 
-- [ ] **Support SPN and FPLMN columns in CSV/TXT import files** — Currently `STANDARD_COLUMNS` in `csv_manager.py` does not include SPN or FPLMN, so these fields are ignored even if present in the source file. The CSV format docs list them as optional columns, but they have no write handlers in `card_manager.py`. To support:
-  1. Add `SPN` and `FPLMN` to `STANDARD_COLUMNS` in `csv_manager.py`
-  2. Add `spn` and `fplmn` to `_COLUMN_NORMALIZE` if needed (for case-insensitive matching)
-  3. Implement write handlers in `card_manager.py` — pySim-shell can write both (`update_spn`, `update_fplmn`)
-  4. Show SPN and FPLMN in the Batch Preview table when present in the file
-  This is complementary to the auto-populate approach above — if the file contains SPN/FPLMN, use them; if not, fall back to auto-populate from `sim-standard.json`. File values should take precedence over standard defaults.
+- [x] **FIXED v0.5.23: Support SPN and FPLMN columns in CSV/TXT import files** — Added `SPN` and `FPLMN` to `STANDARD_COLUMNS` in `csv_manager.py` with normalization entries (`spn`, `fplmn`, `service_provider_name`, `forbidden_plmn`). Write handlers already exist in `card_manager.py`. Added FPLMN column to Batch Preview Treeview. Added SPN and FPLMN manual override input fields in the CSV-mode batch panel header — operator input overrides CSV values. Settings persistence for both fields.
 
 - [ ] **Reader-agnostic: auto-detect and select USB smartcard reader** — The app should work with any PCSC-compatible smartcard reader, not just OMNIKEY 3x21. Two phases:
   1. **Auto-detect first available reader** — On startup and when no reader is connected, scan for available PCSC readers and automatically connect to the first one found. Show the reader name in Card Status or status bar. If no reader is found, show a clear message ("No smartcard reader detected — connect a USB reader").
@@ -61,15 +56,11 @@
 
 - [x] **FIXED v0.5.21: ICCID index not updated after programming** — After programming, re-inserting the card showed "not in index" because the index had no API to add a single ICCID. **Fix**: added `IccidIndex.add_iccid(iccid, file_path)` method, called from `main.py:_on_card_programmed()` after artifact save.
 
-- [ ] **FPLMN not programmed on gialersim — pySim-shell ADM1 auth fails after pySim-prog** — FPLMN is handled as an "extra field" via pySim-shell after pySim-prog completes the core programming. But pySim-shell's VERIFY ADM1 fails with `SW 6f00` on the just-programmed gialersim card (`ADM verification (3838383838383838) failed`). Despite the auth failure, pySim-shell partially writes FPLMN data (`"42f010"` = PLMN 24001, only 3 bytes into a 60-byte EF_FPLMN), then the overall operation is flagged as failed. The success message only lists `ICCID, IMSI, Ki, OPc, ACC` — FPLMN is missing. Root cause: gialersim cards use a different auth method than standard VERIFY ADM1. pySim-prog handles this with `-t gialersim -a`, but pySim-shell uses standard VERIFY which doesn't work. Fix options:
-  1. Use pySim-shell's gialersim-aware auth method (if it exists)
-  2. Write FPLMN within the pySim-prog session before it exits (if pySim-prog supports it)
-  3. Use pySim-shell with `-t gialersim` flag or equivalent to use the correct auth path
-  - Also: the partial write (`WARNING: Data length (3) less than file size (60)`) means only one PLMN was encoded. If multiple FPLMNs are needed (e.g. `24001;24002`), the encoding logic must pad/fill correctly.
+- [x] **FIXED v0.5.23: FPLMN not programmed on gialersim — pySim-shell ADM1 auth fails after pySim-prog** — Root cause: `_run_pysim_shell_impl()` used `-A <hex>` (standard VERIFY) for all card types, but gialersim cards need `-t gialersim -a <ascii>` (like pySim-prog). Fix: `_run_pysim_shell_impl()` now detects `card_type == GIALERSIM` and passes `-t gialersim -a <ascii_adm1>` instead of `-A <hex>`. This applies globally to all pySim-shell uses (programming, read-back, detect_card).
 
-- [ ] **SPN shows "Not available" after programming even though it was written** — pySim-prog successfully writes SPN (log: `> Name : Teleaura UK`, `Programming successful`, `pySim-prog succeeded: ICCID, IMSI, Ki, OPc, ACC, SPN`). But the immediate post-program verify read-back already reports `'SPN': 'Not available'`. On re-insert, Card Status also shows `SPN: Not available`. The SPN is on the card (pySim-prog confirmed it), but the pySim-shell read-back in `card_manager` can't read it. Likely cause: the SPN read function doesn't know how to read the EF_SPN file on gialersim cards, or the pySim-shell command used for read-back doesn't extract SPN. Investigate: what pySim-shell command is used to read SPN, and does it work on gialersim cards?
+- [x] **FIXED v0.5.23: SPN shows "Not available" after programming** — Root cause: `verify_after_program()` called `pySim-read.py -p0` without card type, so pySim-read couldn't locate EF_SPN on gialersim cards. Fix: passes `-t gialersim` to pySim-read when `card_type == GIALERSIM`, enabling SPN read-back.
 
-- [ ] **PIN1/PUK1/PIN2/PUK2 write handlers missing** — Log shows `program_card: field 'PIN1' has no write handler, skipped` (same for PUK1, PIN2, PUK2). These fields are present in the CSV but silently dropped. Either implement write handlers (pySim-shell can set PINs/PUKs) or warn the operator in the batch log that these fields were not programmed.
+- [x] **FIXED v0.5.23: PIN1/PUK1/PIN2/PUK2 skipped silently** — Fields without write handlers were logged but not visible to the operator. Fix: `_program_nonempty_card()` now collects skipped field names and appends them to the return message as a visible warning (e.g. "Warning: skipped fields (no write handler): PIN1, PUK1").
 
 - [x] **FIXED v0.5.22: Batch programming does not warn when ICCID was already programmed** — Injected `iccid_index` into `BatchProgramPanel` and added `_check_iccid_index_duplicates()` pre-batch check. Logs a warning for each ICCID already in the index (non-blocking, warns but doesn't prevent).
 

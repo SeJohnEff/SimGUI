@@ -1,3 +1,22 @@
+simgui (0.5.23-1) unstable; urgency=medium
+
+  * Phase 3: Fix 3 gialersim bugs + batch SPN/FPLMN feature.
+  * Bug 3.1: pySim-shell gialersim auth — _run_pysim_shell_impl now uses
+    -t gialersim -a <ascii_adm1> instead of -A <hex> for gialersim cards.
+    Fixes FPLMN not programmed after pySim-prog.
+  * Bug 3.2: SPN read-back — verify_after_program passes -t gialersim to
+    pySim-read, enabling SPN read-back on gialersim cards.
+  * Bug 3.3: Skipped field warnings — _program_nonempty_card now surfaces
+    unhandled fields (PIN1, PUK1 etc.) in the return message visible to
+    the operator, not just in the log.
+  * Feature 3.4: SPN & FPLMN in batch programming — added to CSV standard
+    columns with normalization, FPLMN column in batch preview Treeview,
+    SPN/FPLMN manual override input fields in CSV-mode batch panel.
+  * 29 new tests in test_phase3_bugfixes.py.
+  * 2113 tests pass, 0 failures.
+
+ -- SimGUI Maintainer <john@virtugrp.com>  Wed, 18 Mar 2026 19:00:00 +0100
+
 simgui (0.5.21-1) unstable; urgency=high
 
   * Phase 1: Fix 4 critical batch programming bugs.

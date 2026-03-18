@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 STANDARD_COLUMNS = [
     'ICCID', 'IMSI', 'Ki', 'OPc', 'ADM1',
     'MNC_LENGTH', 'ALGO_2G', 'ALGO_3G', 'ALGO_4G5G',
-    'USE_OPC', 'HPLMN',
+    'USE_OPC', 'HPLMN', 'SPN', 'FPLMN',
 ]
 
 # Column name normalization: lowercase key -> internal name
@@ -27,6 +27,10 @@ _COLUMN_NORMALIZE = {
     'adm': 'ADM1',
     'ki': 'Ki',
     'opc': 'OPc',
+    'spn': 'SPN',
+    'fplmn': 'FPLMN',
+    'service_provider_name': 'SPN',
+    'forbidden_plmn': 'FPLMN',
 }
 
 # File dialog filter for SIM data files

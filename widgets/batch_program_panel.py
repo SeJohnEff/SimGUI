@@ -194,6 +194,36 @@ class BatchProgramPanel(ttk.Frame):
         ttk.Button(imsi_row, text="Apply",
                    command=self._on_range_change).pack(side=tk.LEFT)
 
+        # -- SPN / FPLMN manual override row (CSV mode) --
+        override_row = ttk.Frame(self._csv_section)
+        override_row.pack(fill=tk.X, padx=pad, pady=(pad // 2, pad))
+        lbl = ttk.Label(override_row, text="SPN:")
+        lbl.pack(side=tk.LEFT)
+        self._csv_spn_var = tk.StringVar()
+        spn_entry = ttk.Entry(override_row, textvariable=self._csv_spn_var,
+                              width=16)
+        spn_entry.pack(side=tk.LEFT, padx=(4, pad))
+        spn_entry.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(lbl, "Service Provider Name override.\n"
+                         "If set, overrides CSV SPN for ALL cards.")
+        add_tooltip(spn_entry, "Service Provider Name override.\n"
+                               "If set, overrides CSV SPN for ALL cards.")
+
+        lbl = ttk.Label(override_row, text="FPLMN:")
+        lbl.pack(side=tk.LEFT)
+        self._csv_fplmn_var = tk.StringVar()
+        fplmn_entry = ttk.Entry(override_row,
+                                textvariable=self._csv_fplmn_var, width=30)
+        fplmn_entry.pack(side=tk.LEFT, padx=(4, pad))
+        fplmn_entry.bind("<Return>", lambda e: self._on_range_change())
+        add_tooltip(lbl, "Forbidden PLMNs override (semicolon-separated).\n"
+                         "If set, overrides CSV FPLMN for ALL cards.\n"
+                         "Example: 24007;24024;24001")
+        add_tooltip(fplmn_entry,
+                    "Forbidden PLMNs override (semicolon-separated).\n"
+                    "If set, overrides CSV FPLMN for ALL cards.\n"
+                    "Example: 24007;24024;24001")
+
         # ---------- Generate Sequence section ----------
         self._gen_section = ttk.LabelFrame(self, text="Batch Template")
 
@@ -351,17 +381,19 @@ class BatchProgramPanel(ttk.Frame):
         self._preview_frame = ttk.LabelFrame(self, text="Batch Preview")
         self._preview_tree = ttk.Treeview(
             self._preview_frame,
-            columns=("imsi", "iccid", "site_code", "spn", "adm1"),
+            columns=("imsi", "iccid", "site_code", "spn", "fplmn", "adm1"),
             show="headings", height=8)
         self._preview_tree.heading("imsi", text="IMSI")
         self._preview_tree.heading("iccid", text="ICCID")
         self._preview_tree.heading("site_code", text="Site Code")
         self._preview_tree.heading("spn", text="SPN")
+        self._preview_tree.heading("fplmn", text="FPLMN")
         self._preview_tree.heading("adm1", text="ADM1")
         self._preview_tree.column("imsi", width=140)
         self._preview_tree.column("iccid", width=180)
         self._preview_tree.column("site_code", width=70)
         self._preview_tree.column("spn", width=80)
+        self._preview_tree.column("fplmn", width=140)
         self._preview_tree.column("adm1", width=90)
         sb = ttk.Scrollbar(self._preview_frame, orient=tk.VERTICAL,
                            command=self._preview_tree.yview)
@@ -602,12 +634,24 @@ class BatchProgramPanel(ttk.Frame):
             if len(base) == 10 and base.isdigit():
                 filtered = apply_imsi_override(filtered, base, start_seq=start)
 
+        # Apply SPN / FPLMN manual overrides (operator input takes
+        # precedence over CSV values for batch-wide settings).
+        csv_spn = self._csv_spn_var.get().strip()
+        csv_fplmn = self._csv_fplmn_var.get().strip()
+        if csv_spn or csv_fplmn:
+            for card in filtered:
+                if csv_spn:
+                    card["SPN"] = csv_spn
+                if csv_fplmn:
+                    card["FPLMN"] = csv_fplmn
+
         self._preview_data = filtered
         actual = len(filtered)
         end_row = start + actual - 1 if actual else start
         self._range_info_lbl.configure(
             text=f"Rows {start}–{end_row} of {total} ({actual} cards)")
         self._refresh_preview()
+        self._save_settings()
 
     # ---- preview -------------------------------------------------------
 
@@ -683,6 +727,7 @@ class BatchProgramPanel(ttk.Frame):
                 row.get("ICCID", ""),
                 row.get("SITE_CODE", ""),
                 row.get("SPN", ""),
+                row.get("FPLMN", ""),
                 row.get("ADM1", ""),
             ))
 
@@ -977,6 +1022,14 @@ class BatchProgramPanel(ttk.Frame):
         if batch_size:
             self._gen_vars["count"].set(str(batch_size))
 
+        # CSV-mode SPN / FPLMN overrides
+        csv_spn = self._settings.get("last_csv_spn", "")
+        if csv_spn:
+            self._csv_spn_var.set(str(csv_spn))
+        csv_fplmn = self._settings.get("last_csv_fplmn", "")
+        if csv_fplmn:
+            self._csv_fplmn_var.set(str(csv_fplmn))
+
     def _save_settings(self):
         self._settings.set("last_mcc_mnc", self._gen_vars["mcc_mnc"].get().strip())
 
@@ -1001,3 +1054,8 @@ class BatchProgramPanel(ttk.Frame):
                 "last_batch_size", int(self._gen_vars["count"].get().strip()))
         except ValueError:
             pass
+
+        # CSV-mode SPN / FPLMN overrides
+        self._settings.set("last_csv_spn", self._csv_spn_var.get().strip())
+        self._settings.set("last_csv_fplmn",
+                           self._csv_fplmn_var.get().strip())

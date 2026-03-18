@@ -283,12 +283,13 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
     """Tests that _run_pysim_shell_safe and _run_pysim_shell differ in -A usage."""
 
     def _make_card_manager(self):
-        from managers.card_manager import CardManager, CLIBackend
+        from managers.card_manager import CardManager, CardType, CLIBackend
         cm = CardManager.__new__(CardManager)
         cm.cli_path = '/opt/pysim'
         cm.cli_backend = CLIBackend.PYSIM
         cm._venv_python = '/opt/pysim/.venv/bin/python'
         cm._simulator = None
+        cm.card_type = CardType.UNKNOWN
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False

@@ -533,7 +533,16 @@ class CardManager:
         python_exe = self._venv_python or sys.executable
         cmd = [python_exe, script_path, '-p0']
         if adm1_hex:
-            cmd += ['-A', adm1_hex]
+            # Gialersim cards use a different auth mechanism (CHV 0x0C).
+            # pySim-shell's -A <hex> sends standard VERIFY (CHV 0x0A)
+            # which fails with SW 6f00 on gialersim.  Pass the card type
+            # explicitly so pySim-shell uses the correct auth path, and
+            # supply ADM1 as ASCII via -a (like pySim-prog does).
+            if self.card_type == CardType.GIALERSIM:
+                cmd += ['-t', 'gialersim',
+                        '-a', self._hex_to_adm1_ascii(adm1_hex)]
+            else:
+                cmd += ['-A', adm1_hex]
         # Append 'quit' so the shell terminates cleanly.
         # NOTE: pySim-shell uses 'quit', NOT 'exit'.
         full_input = commands.rstrip('\n') + '\nquit\n'
@@ -1330,12 +1339,20 @@ class CardManager:
         # ADM1 is never written to the card (it's the auth key, not data)
         changed.pop('ADM1', None)
 
-        # Warn about any remaining unhandled fields
+        # Warn about any remaining unhandled fields and collect them
+        # so the warning is surfaced to the operator in the UI.
+        skipped_fields: List[str] = []
         for key in changed:
             logger.warning("program_card: field '%s' has no write handler, "
                            "skipped", key)
+            skipped_fields.append(key)
 
         if not commands:
+            if skipped_fields:
+                return True, (
+                    "No programmable fields changed\n"
+                    f"Warning: skipped fields (no write handler): "
+                    f"{', '.join(skipped_fields)}")
             return True, "No programmable fields changed"
 
         # Execute via pySim-shell WITH -A flag (auto-auth at startup).
@@ -1351,6 +1368,13 @@ class CardManager:
         ok, stdout, stderr = self._run_pysim_shell(
             self._authenticated_adm1_hex, cmd_str, timeout=30)
 
+        # Build a suffix for any skipped fields so the operator sees it.
+        skip_suffix = ""
+        if skipped_fields:
+            skip_suffix = (
+                f"\nWarning: skipped fields (no write handler): "
+                f"{', '.join(skipped_fields)}")
+
         if ok:
             summary = ', '.join(fields_written)
             logger.info("Card programmed (pre-verify): %s", summary)
@@ -1363,7 +1387,9 @@ class CardManager:
                     for k, v in v_data.items():
                         self.card_info[k] = v
                 logger.info("Card programmed and verified: %s", summary)
-                return True, f"Card programmed and verified: {summary}"
+                return True, (
+                    f"Card programmed and verified: {summary}"
+                    f"{skip_suffix}")
             else:
                 logger.warning(
                     "Card programmed but verification failed: %s", v_msg)
@@ -1420,7 +1446,14 @@ class CardManager:
                 time.sleep(self._VERIFY_DELAY_S)
                 logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
-            ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            # Pass card type to pySim-read for gialersim cards so it
+            # can locate EFs (e.g. EF_SPN) that require type-specific
+            # knowledge.  Without -t, pySim-read may fail to read SPN.
+            if self.card_type == CardType.GIALERSIM:
+                ok, stdout, stderr = self._run_cli(
+                    'pySim-read.py', '-p0', '-t', 'gialersim')
+            else:
+                ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
             logger.info("Verify read-back (attempt %d): ok=%s, "
                         "stdout_lines=%d, stderr_lines=%d",
                         attempt, ok,
