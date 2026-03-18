@@ -111,13 +111,17 @@ class AutoArtifactManager:
                            ) -> list[str]:
         """Write a batch summary CSV to all connected shares.
 
+        The summary includes one row per successfully programmed card
+        with fields: ICCID, ADM1, IMSI, Ki, OPc.
+
         Parameters
         ----------
         records :
             Card data dicts for successfully programmed cards (from
             ``get_programmed_records()``).
         batch_results :
-            All ``CardResult`` objects from the batch (success and failure).
+            All ``CardResult`` objects from the batch (kept for
+            future extensions, e.g. failure reporting).
 
         Returns
         -------
@@ -130,21 +134,11 @@ class AutoArtifactManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"batch_summary_{timestamp}.csv"
 
-        # Build rows: one per batch result (both success and failure)
-        fields = ["#", "ICCID", "IMSI", "Status", "Message", "Timestamp"]
+        # Build rows from successfully programmed records
+        fields = ["ICCID", "ADM1", "IMSI", "Ki", "OPc"]
         rows = []
-        # Index successful records by their ICCID for easy lookup
-        ok_by_iccid = {r.get("ICCID", ""): r for r in records}
-        for r in batch_results:
-            card = ok_by_iccid.get(r.iccid, {})
-            rows.append({
-                "#": r.index + 1,
-                "ICCID": r.iccid,
-                "IMSI": card.get("IMSI", ""),
-                "Status": "OK" if r.success else "FAIL",
-                "Message": r.message,
-                "Timestamp": datetime.now().isoformat(),
-            })
+        for rec in records:
+            rows.append({f: rec.get(f, "") for f in fields})
 
         saved_paths = []
         for label, mount_path in self._ns.get_active_mount_paths():

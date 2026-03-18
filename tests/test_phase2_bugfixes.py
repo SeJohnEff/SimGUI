@@ -242,30 +242,44 @@ class TestBatchSummaryArtifact:
     """Bug 3: Auto-save batch summary CSV after batch completes."""
 
     def test_save_batch_summary_creates_file(self, auto_artifact, tmp_share):
-        """save_batch_summary writes a summary CSV with all results."""
+        """save_batch_summary writes a summary CSV with key card fields."""
         records = [
-            {"ICCID": "8999988000100000037", "IMSI": "001"},
+            {
+                "ICCID": "8999988000100000037",
+                "ADM1": "3838383838383838",
+                "IMSI": "001010000000001",
+                "Ki": "AABBCCDD" * 4,
+                "OPc": "11223344" * 4,
+            },
+            {
+                "ICCID": "8999988000100000038",
+                "ADM1": "3838383838383838",
+                "IMSI": "001010000000002",
+                "Ki": "EEFF0011" * 4,
+                "OPc": "55667788" * 4,
+            },
         ]
         results = [
             CardResult(0, "8999988000100000037", True, "Programmed successfully"),
-            CardResult(1, "8999988000100000038", False, "Auth failed"),
+            CardResult(1, "8999988000100000038", True, "Programmed successfully"),
         ]
         paths = auto_artifact.save_batch_summary(records, results)
         assert len(paths) == 1
         assert os.path.exists(paths[0])
         assert "batch_summary_" in os.path.basename(paths[0])
 
-        # Check content
+        # Check content — fields: ICCID, ADM1, IMSI, Ki, OPc
         with open(paths[0], newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
             rows = list(reader)
         assert len(rows) == 2
+        assert list(rows[0].keys()) == ["ICCID", "ADM1", "IMSI", "Ki", "OPc"]
         assert rows[0]["ICCID"] == "8999988000100000037"
-        assert rows[0]["Status"] == "OK"
-        assert rows[0]["IMSI"] == "001"
+        assert rows[0]["ADM1"] == "3838383838383838"
+        assert rows[0]["IMSI"] == "001010000000001"
+        assert rows[0]["Ki"] == "AABBCCDD" * 4
+        assert rows[0]["OPc"] == "11223344" * 4
         assert rows[1]["ICCID"] == "8999988000100000038"
-        assert rows[1]["Status"] == "FAIL"
-        assert rows[1]["Message"] == "Auth failed"
 
     def test_save_batch_summary_no_ns_manager(self):
         """Returns empty list when no network storage manager."""
