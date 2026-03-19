@@ -1606,6 +1606,8 @@ class CardManager:
             key = key.strip().upper()
             val = val.strip()
             if not val:
+                if 'FPLMN' in key or 'FORBIDDEN' in key:
+                    in_fplmn_block = True
                 continue
             if 'IMSI' in key:
                 self.card_info['IMSI'] = val
