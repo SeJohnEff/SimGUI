@@ -1581,8 +1581,21 @@ class CardManager:
         type from pySim-read.py output.  These are public fields that
         don't require ADM1 auth.
         """
-        fplmn_values: list[str] = []
-        for line in output.splitlines():
+fplmn_values: list[str] = []
+in_fplmn_block = False
+for line in output.splitlines():
+            # Handle indented FPLMN sub-lines (e.g. "\t42f010 # MCC: 240 MNC: 01")
+            if in_fplmn_block and line.startswith('\t'):
+                if '# MCC:' in line and 'MNC:' in line:
+                    try:
+                        mcc = line.split('MCC:')[1].split()[0].strip()
+                        mnc = line.split('MNC:')[1].split()[0].strip()
+                        fplmn_values.append(f"{mcc}{mnc.zfill(2)}")
+                    except (IndexError, ValueError):
+                        pass
+                continue
+            else:
+                in_fplmn_block = False
             if ':' not in line:
                 continue
             # Skip lines that look like tracebacks or file paths
@@ -1603,9 +1616,7 @@ class CardManager:
             elif key == 'SPN' or 'SERVICE PROVIDER' in key:
                 self.card_info['SPN'] = val
             elif 'FPLMN' in key or 'FORBIDDEN' in key:
-                # pySim may output multiple FPLMN lines or a single one
-                if val and val.lower() not in ('none', 'empty', 'ffffff'):
-                    fplmn_values.append(val)
+                in_fplmn_block = True
             elif 'AUTODETECTED CARD TYPE' in key:
                 ct = self._PYSIM_CARD_TYPE_MAP.get(val.lower())
                 if ct is not None:
