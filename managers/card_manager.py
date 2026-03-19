@@ -1581,9 +1581,9 @@ class CardManager:
         type from pySim-read.py output.  These are public fields that
         don't require ADM1 auth.
         """
-fplmn_values: list[str] = []
-in_fplmn_block = False
-for line in output.splitlines():
+        fplmn_values: list[str] = []
+        in_fplmn_block = False
+        for line in output.splitlines():
             # Handle indented FPLMN sub-lines (e.g. "\t42f010 # MCC: 240 MNC: 01")
             if in_fplmn_block and line.startswith('\t'):
                 if '# MCC:' in line and 'MNC:' in line:
