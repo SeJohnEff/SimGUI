@@ -1,3 +1,15 @@
+__version__ = "0.5.26"
+
+**`debian/changelog`** — add at the top:
+
+simgui (0.5.26) unstable; urgency=medium
+
+  * fix: remove -t flag from pySim-read in verify_after_program
+  * fix: parse FPLMN from pySim-read multi-line tabbed output
+  * fix: detect FPLMN block when key has empty value after colon
+
+ -- John Fornehed <john@teleaura.com>  Thu, 19 Mar 2026 12:00:00 +0100
+
 simgui (0.5.25) unstable; urgency=medium
 
   * fix: gialersim SPN not written — add 'name' handler to GialerSim
@@ -5,7 +17,7 @@ simgui (0.5.25) unstable; urgency=medium
   * fix: remove broken -t flag from pySim-shell for gialersim cards
   * fix: route FPLMN via pySim-prog instead of broken pySim-shell path
 
- -- John Fornehed <john@example.com>  Thu, 19 Mar 2026 08:00:00 +0100
+ -- John Fornehed <john.fornehed@furunomirai.se>  Thu, 19 Mar 2026 08:00:00 +0100
 
 simgui (0.5.23-1) unstable; urgency=medium
 
@@ -24,7 +36,7 @@ simgui (0.5.23-1) unstable; urgency=medium
   * 29 new tests in test_phase3_bugfixes.py.
   * 2113 tests pass, 0 failures.
 
- -- SimGUI Maintainer <john@virtugrp.com>  Wed, 18 Mar 2026 19:00:00 +0100
+ -- SimGUI Maintainer <john.fornehed@furunomirai.se>  Wed, 18 Mar 2026 19:00:00 +0100
 
 simgui (0.5.21-1) unstable; urgency=high
 
@@ -40,7 +52,7 @@ simgui (0.5.21-1) unstable; urgency=high
   * 19 new tests in test_phase1_bugfixes.py, updated test_card_safety.py.
   * 2067 tests pass, 0 failures.
 
- -- SimGUI Maintainer <john@virtugrp.com>  Wed, 18 Mar 2026 14:30:00 +0100
+ -- SimGUI Maintainer <john.fornehed@furunomirai.se>  Wed, 18 Mar 2026 14:30:00 +0100
 
 simgui (0.5.20-1) unstable; urgency=medium
 
@@ -56,7 +68,7 @@ simgui (0.5.20-1) unstable; urgency=medium
   * Comprehensive tests: card type detection, hex conversion, routing.
   * 2044 tests pass.
 
- -- SimGUI Developers <simgui@example.com>  Tue, 17 Mar 2026 17:40:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Tue, 17 Mar 2026 17:40:00 +0100
 
 simgui (0.5.19-1) unstable; urgency=high
 
@@ -68,7 +80,7 @@ simgui (0.5.19-1) unstable; urgency=high
     ≤8 chars = ASCII format. Fixes incorrect conversion for different file formats.
   * Prevent reader contention causing 6f00 on VERIFY APDU.
 
- -- SimGUI Developers <simgui@example.com>  Mon, 17 Mar 2026 12:00:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Mon, 17 Mar 2026 12:00:00 +0100
 
 simgui (0.5.18-1) unstable; urgency=high
 
@@ -83,7 +95,7 @@ simgui (0.5.18-1) unstable; urgency=high
   * check_sudo_mount uses file-existence instead of sudo probe.
   * docs: add TODO.md with test quality audit backlog.
 
- -- SimGUI Developers <simgui@example.com>  Mon, 16 Mar 2026 18:00:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Mon, 16 Mar 2026 18:00:00 +0100
 
 simgui (0.5.17-1) unstable; urgency=critical
 
@@ -97,7 +109,7 @@ simgui (0.5.17-1) unstable; urgency=critical
   * Init-failure detection relies on output scanning (unchanged).
   * Updated tests: assert --noprompt is NOT present.
 
- -- SimGUI Developers <simgui@example.com>  Mon, 16 Mar 2026 14:00:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Mon, 16 Mar 2026 14:00:00 +0100
 
 simgui (0.5.4-1) unstable; urgency=high
 
@@ -106,7 +118,7 @@ simgui (0.5.4-1) unstable; urgency=high
   * Share indicator shows grey at startup, updates when background
     thread completes.
 
- -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 21:00:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Sun, 15 Mar 2026 21:00:00 +0100
 
 simgui (0.5.3-1) unstable; urgency=high
 
@@ -118,7 +130,7 @@ simgui (0.5.3-1) unstable; urgency=high
   * Periodic share poll no longer duplicates _refresh_share_indicator at
     startup (removed redundant call that could add latency).
 
- -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 19:20:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Sun, 15 Mar 2026 19:20:00 +0100
 
 simgui (0.5.2-1) unstable; urgency=low
 
@@ -128,7 +140,7 @@ simgui (0.5.2-1) unstable; urgency=low
   * Added workflow plan document (docs/WORKFLOW_PLAN.md).
   * Improved blank-card messaging (distinct states for data-ready vs empty).
 
- -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 18:15:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Sun, 15 Mar 2026 18:15:00 +0100
 
 simgui (0.5.1-1) unstable; urgency=low
 
@@ -138,7 +150,7 @@ simgui (0.5.1-1) unstable; urgency=low
   * Fix: CSV row selection no longer resets 'Insert SIM' when card present.
   * Versioned installs via: sudo bash -s -- v0.5.1
 
- -- SimGUI Developers <simgui@example.com>  Sun, 15 Mar 2026 16:30:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Sun, 15 Mar 2026 16:30:00 +0100
 
 simgui (0.5.0-1) unstable; urgency=low
 
@@ -152,7 +164,7 @@ simgui (0.5.0-1) unstable; urgency=low
   * ICCID index caching to avoid re-parsing unchanged files.
   * Auto-artifact per-card CSV on every programming.
 
- -- SimGUI Developers <simgui@example.com>  Sat, 15 Mar 2026 14:00:00 +0100
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Sat, 15 Mar 2026 14:00:00 +0100
 
 simgui (0.2.0-1) unstable; urgency=low
 
@@ -162,7 +174,7 @@ simgui (0.2.0-1) unstable; urgency=low
   * Install launcher directly as /usr/bin/simgui (no symlink).
   * Support pip --break-system-packages for Ubuntu 23.04+.
 
- -- SimGUI Developers <simgui@example.com>  Thu, 12 Mar 2026 12:00:00 +0000
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Thu, 12 Mar 2026 12:00:00 +0000
 
 simgui (0.1.0-1) unstable; urgency=low
 
@@ -173,4 +185,4 @@ simgui (0.1.0-1) unstable; urgency=low
   * ICCID cross-verification safety check before ADM1 authentication.
   * Debian packaging for easy installation.
 
- -- SimGUI Developers <simgui@example.com>  Thu, 12 Mar 2026 12:00:00 +0000
+ -- SimGUI Developers <john.fornehed@furunomirai.se>  Thu, 12 Mar 2026 12:00:00 +0000

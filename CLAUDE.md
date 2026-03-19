@@ -246,6 +246,13 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - Double authentication (verify_adm in piped commands + -A flag) silently fails
 - ADM1 format varies by file source — always detect by length (16=hex, ≤8=ASCII)
 - Tests that mock implementation details and assert them back are tautological — test observable behavior instead
+- pySim-read does not support `-t` flag — auto-detection works without it
+- pySim-read outputs FPLMN as a multi-line block with tab-indented entries
+  in format `\t42f010 # MCC: 240 MNC: 01` — parser must handle this
+- FPLMN key line has empty value after colon — must set in_fplmn_block=True
+  before the `if not val: continue` check fires
+- ADM1 Left cannot be read for gialersim cards — CHV 0x0C counter not
+  accessible via standard VERIFY-no-data APDU (shows as `-`, acceptable)
 
 ## StateManager Signal Architecture
 
