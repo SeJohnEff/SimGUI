@@ -1450,14 +1450,7 @@ class CardManager:
                 time.sleep(self._VERIFY_DELAY_S)
                 logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
-            # Pass card type to pySim-read for gialersim cards so it
-            # can locate EFs (e.g. EF_SPN) that require type-specific
-            # knowledge.  Without -t, pySim-read may fail to read SPN.
-            if self.card_type == CardType.GIALERSIM:
-                ok, stdout, stderr = self._run_cli(
-                    'pySim-read.py', '-p0', '-t', 'gialersim')
-            else:
-                ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
             logger.info("Verify read-back (attempt %d): ok=%s, "
                         "stdout_lines=%d, stderr_lines=%d",
                         attempt, ok,
