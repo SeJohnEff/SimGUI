@@ -1,3 +1,12 @@
+simgui (0.5.25) unstable; urgency=medium
+
+  * fix: gialersim SPN not written — add 'name' handler to GialerSim
+    in pySim legacy/cards.py
+  * fix: remove broken -t flag from pySim-shell for gialersim cards
+  * fix: route FPLMN via pySim-prog instead of broken pySim-shell path
+
+ -- John Fornehed <john@example.com>  Thu, 19 Mar 2026 08:00:00 +0100
+
 simgui (0.5.23-1) unstable; urgency=medium
 
   * Phase 3: Fix 3 gialersim bugs + batch SPN/FPLMN feature.
