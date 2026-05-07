@@ -411,7 +411,7 @@ class SimGUIApp:
 
     _READER_ERROR_KEYWORDS = (
         "no reader", "no pc/sc", "pcsc", "reader not found",
-        "scard", "could not connect", "no smart card",
+        "scard", "could not connect", "no smart card", "no smart-card reader",
         "service not available", "establish_context",
     )
 
