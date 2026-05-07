@@ -218,7 +218,7 @@ class CardWatcher:
             try:
               self.on_reader_ready()
             except Exception:
-            pass
+              pass
         if present:
             atr = msg  # ATR hex string
             if not self._card_present or atr != self._last_atr:
