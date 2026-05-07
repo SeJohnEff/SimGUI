@@ -215,24 +215,26 @@ class CardWatcher:
     def _handle_probe_result(self, present: bool, msg: str):
         """Process the result of a fast PC/SC probe.
 
-        Three states:
-          present=True  → card in reader      → read and notify
-          present=False → reader ready, no card → fire on_reader_ready
-          (probe never called) → on_error fires via _poll_loop exception
+        probe_card_presence returns three distinct states:
+          (True,  atr_hex)                  → card in reader
+          (False, 'No card in reader')      → reader connected, no card
+          (False, 'No smart-card reader..') → no reader connected
+          (False, other error)              → reader error
         """
         if present:
-            atr = msg  # ATR hex string
+            # Card is in reader
+            atr = msg
             if not self._card_present or atr != self._last_atr:
-                # New card inserted (or different card swapped)
                 self._card_present = True
                 self._last_atr = atr
                 logger.info("CardWatcher: card present (ATR=%s), reading...", atr)
-                # Now do the full pySim-read to get ICCID/IMSI
                 self._read_and_notify()
             # Otherwise same card still present — do nothing
-        else:
+
+        elif msg == 'No card in reader':
+            # Reader connected but no card
             if self._card_present:
-                # Card was removed
+                # Card was just removed
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
@@ -244,12 +246,25 @@ class CardWatcher:
                     except Exception:
                         pass
             else:
-                # Reader connected, no card — notify UI
+                # Reader idle — notify UI to show "Insert a SIM card..."
                 if self.on_reader_ready:
                     try:
                         self.on_reader_ready()
                     except Exception:
                         pass
+
+        else:
+            # No reader connected or reader error
+            if self._card_present:
+                self._card_present = False
+                self._last_iccid = None
+                self._last_atr = None
+                self._atr_iccid_cache.clear()
+            if self.on_error:
+                try:
+                    self.on_error(msg)
+                except Exception:
+                    pass
 
     def _read_and_notify(self):
         """Do a full pySim-read and fire the appropriate callback.
