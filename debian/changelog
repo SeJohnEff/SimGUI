@@ -1,3 +1,13 @@
+simgui (0.5.27) unstable; urgency=medium
+
+  * fix: add pcscd and pcsc-tools to install dependencies
+  * fix: detect 'no smart-card reader' message in reader error check
+  * docs: add docs/file-formats.md with SimGUI standard CSV specification
+  * chore: add release target to Makefile
+  * chore: tag releases v0.5.25 and v0.5.26 retroactively
+
+ -- John Fornehed <John.fornehed@furunomirai.se>  Wed, 07 May 2026 12:00:00 +0100
+
 __version__ = "0.5.26"
 
 **`debian/changelog`** — add at the top:

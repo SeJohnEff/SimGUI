@@ -48,6 +48,14 @@
 
 - [ ] **Remove standalone ADM1 Authenticate button** — The separate "Authenticate" step in the Program SIM panel is unnecessary and confusing for operators. ADM1 authentication happens automatically when programming, so the button adds an extra step with no value. **Exception:** keep an authenticate action if there are protected fields that require ADM1 to *read* (e.g. Ki, OPc read-back). If read-back is the only use case, rename to "Read Protected Fields" or similar. The goal: operators should go from card-detected → program in one click, not card-detected → authenticate → program.
 
+- [ ] **Reader status not refreshing after popup dismissed** — When SimGUI starts with no reader, shows "No card reader" popup. After dismissing and connecting a reader, the status label stays on "No card reader detected" instead of updating to "Insert a SIM card...". Card is still read correctly when inserted. Minor UX issue — fix: trigger a card watcher status refresh when popup is dismissed.
+
+- [ ] **File parsing improvements** — See `docs/file-formats.md` for the SimGUI standard CSV format (documented v0.5.27). Planned parser improvements:
+  1. Auto-detect delimiter (comma, tab, semicolon) instead of assuming by file extension
+  2. Validate required fields after parsing — surface error in UI when ICCID, Ki, OPc, ADM1 are missing
+  3. Case-insensitive field name matching — accept `ADM`, `KI`, `OPC` and normalise to `ADM1`, `Ki`, `OPc`
+  4. Clear error message when card is found in index but programming data is incomplete
+
 ## Critical Bugs (Batch Programming)
 
 - [x] **FIXED v0.5.21: ATR-based ICCID caching breaks batch for blank cards** — All blank gialersim cards share the same ATR. After Card 1 is programmed, its ICCID was cached against that ATR. Card 2 (same ATR) was misidentified as Card 1. **Fix**: `_atr_iccid_cache.clear()` in both card-removal paths of `card_watcher.py` (`_handle_probe_result` and `_check_once_slow`).
