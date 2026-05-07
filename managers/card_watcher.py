@@ -77,6 +77,8 @@ class CardWatcher:
         self.on_card_unknown: Optional[Callable[[str], None]] = None
         self.on_card_removed: Optional[Callable[[], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
+        self.on_reader_ready: Optional[Callable[[], None]] = None
+        self._reader_ready_fired: bool = False
 
     @property
     def index(self):
@@ -210,6 +212,13 @@ class CardWatcher:
 
     def _handle_probe_result(self, present: bool, msg: str):
         """Process the result of a fast PC/SC probe."""
+        if not self._reader_ready_fired:
+          self._reader_ready_fired = True
+          if self.on_reader_ready:
+            try:
+              self.on_reader_ready()
+            except Exception:
+            pass
         if present:
             atr = msg  # ATR hex string
             if not self._card_present or atr != self._last_atr:

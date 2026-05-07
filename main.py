@@ -372,10 +372,14 @@ class SimGUIApp:
         def on_error(msg):
             self.root.after(0, self._on_auto_card_error, msg)
 
+        def on_reader_ready():
+            self.root.after(0, self._on_reader_ready)
+
         self._card_watcher.on_card_detected = on_detected
         self._card_watcher.on_card_unknown = on_unknown
         self._card_watcher.on_card_removed = on_removed
         self._card_watcher.on_error = on_error
+        self._card_watcher.on_reader_ready = on_reader_ready
         self._card_watcher.start()
 
     def _startup_detect_card(self):
@@ -434,6 +438,12 @@ class SimGUIApp:
         messagebox.showwarning("No Card Reader", body)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
+        self._card_watcher._reader_ready_fired = False  # re-arm for when reader is plugged in
+
+    def _on_reader_ready(self):
+        """Reader became available after being absent."""
+        self._card_panel.set_status("waiting", "Insert a SIM card...")
+        self._status_var.set("Insert a SIM card...")
 
     def _check_sudo_mount_permissions(self):
         """Warn the user at startup if passwordless sudo mount is not set up.
