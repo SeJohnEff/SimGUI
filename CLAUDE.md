@@ -256,6 +256,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - gialersim cards are incompatible with 5G SA networks using 5G-AKA — Magma with `enable5gFeatures: true` sends `xresStar`/`kseaf` auth vectors that gialersim cannot compute. Use SJA5 cards for 5G SA deployments.
 - pcscd must be installed as a system dependency — was missing from install.sh, causing "No card reader detected" on fresh Ubuntu installs. Fixed in v0.5.27.
 - After dismissing "No card reader" popup and connecting a reader, the status label does not refresh to "Insert a SIM card..." — known minor UI issue, card still works correctly when inserted.
+- Always verify ALL related changes are complete before committing — e.g. renaming a flag requires updating every reference across all files before pushing, not just the primary location.
 
 ## StateManager Signal Architecture
 

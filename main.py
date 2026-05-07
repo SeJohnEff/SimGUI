@@ -438,7 +438,7 @@ class SimGUIApp:
         messagebox.showwarning("No Card Reader", body)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
-        self._card_watcher._reader_ready_fired = False  # re-arm for when reader is plugged in
+        self._card_watcher._reader_was_error = True  # re-arm for when reader is plugged in
 
     def _on_reader_ready(self):
         """Reader became available after being absent."""
