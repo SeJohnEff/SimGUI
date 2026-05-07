@@ -48,7 +48,7 @@
 
 - [ ] **Remove standalone ADM1 Authenticate button** — The separate "Authenticate" step in the Program SIM panel is unnecessary and confusing for operators. ADM1 authentication happens automatically when programming, so the button adds an extra step with no value. **Exception:** keep an authenticate action if there are protected fields that require ADM1 to *read* (e.g. Ki, OPc read-back). If read-back is the only use case, rename to "Read Protected Fields" or similar. The goal: operators should go from card-detected → program in one click, not card-detected → authenticate → program.
 
-- [ ] **Reader status not refreshing after popup dismissed** — When SimGUI starts with no reader, shows "No card reader" popup. After dismissing and connecting a reader, the status label stays on "No card reader detected" instead of updating to "Insert a SIM card...". Card is still read correctly when inserted. Minor UX issue — fix: trigger a card watcher status refresh when popup is dismissed.
+- [x] **FIXED v0.5.28: Reader status not refreshing after no-reader warning** — Added `on_reader_ready` callback to CardWatcher. Fires once when the fast probe succeeds after being in error state. Resets in `_show_no_reader_warning` so it re-arms if reader is unplugged again. UI updates to "Insert a SIM card..." when reader is plugged in.
 
 - [ ] **File parsing improvements** — See `docs/file-formats.md` for the SimGUI standard CSV format (documented v0.5.27). Planned parser improvements:
   1. Auto-detect delimiter (comma, tab, semicolon) instead of assuming by file extension

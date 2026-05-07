@@ -1,3 +1,11 @@
+simgui (0.5.28) unstable; urgency=medium
+
+  * fix: update status to 'Insert a SIM card...' when reader is plugged
+    in after no-reader warning — adds on_reader_ready callback to
+    CardWatcher, resets flag in _show_no_reader_warning
+
+ -- John Fornehed <John.fornehed@furunomirai.se>  Thu, 07 May 2026 15:00:00 +0100
+
 simgui (0.5.27) unstable; urgency=medium
 
   * fix: add pcscd and pcsc-tools to install dependencies
