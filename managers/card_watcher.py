@@ -18,8 +18,11 @@ Events (callbacks):
       Card inserted but ICCID not found in any indexed file.
   on_card_removed()
       Card was removed from the reader.
+  on_reader_ready()
+      Reader is connected but no card is inserted.  Fired every poll
+      cycle while this state persists — the UI handler must be idempotent.
   on_error(message)
-      Reader communication error.
+      Reader communication error (no reader connected).
 
 Thread safety:
   All callbacks are invoked from the watcher thread.  The UI must
@@ -76,9 +79,8 @@ class CardWatcher:
             Callable[[str, dict, str], None]] = None
         self.on_card_unknown: Optional[Callable[[str], None]] = None
         self.on_card_removed: Optional[Callable[[], None]] = None
-        self.on_error: Optional[Callable[[str], None]] = None
         self.on_reader_ready: Optional[Callable[[], None]] = None
-        self._reader_was_error: bool = False
+        self.on_error: Optional[Callable[[str], None]] = None
 
     @property
     def index(self):
@@ -211,14 +213,13 @@ class CardWatcher:
         self._check_once_slow()
 
     def _handle_probe_result(self, present: bool, msg: str):
-        """Process the result of a fast PC/SC probe."""
-        if self._reader_was_error:
-          self._reader_was_error = False
-          if self.on_reader_ready:
-            try:
-              self.on_reader_ready()
-            except Exception:
-                pass
+        """Process the result of a fast PC/SC probe.
+
+        Three states:
+          present=True  → card in reader      → read and notify
+          present=False → reader ready, no card → fire on_reader_ready
+          (probe never called) → on_error fires via _poll_loop exception
+        """
         if present:
             atr = msg  # ATR hex string
             if not self._card_present or atr != self._last_atr:
@@ -240,6 +241,13 @@ class CardWatcher:
                 if self.on_card_removed:
                     try:
                         self.on_card_removed()
+                    except Exception:
+                        pass
+            else:
+                # Reader connected, no card — notify UI
+                if self.on_reader_ready:
+                    try:
+                        self.on_reader_ready()
                     except Exception:
                         pass
 
