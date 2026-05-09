@@ -495,7 +495,7 @@ class SimGUIApp:
         msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner)."
         if detail:
             msg += f" ({detail})"
-        show_toast(self.root, msg, level="warning", duration=5000)
+        show_toast(self.root, msg, level="warning", duration=1000)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
