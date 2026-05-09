@@ -90,11 +90,12 @@ class TestAuthenticateWithIccid:
         """Hardware path: matching ICCID passes cross-check but fails without CLI."""
         cm = CardManager()
         cm.card_info = {"ICCID": "89999111111111111111"}
+        cm.cli_backend = CLIBackend.NONE  # force no-backend regardless of environment
         ok, msg = cm.authenticate("12345678",
                                    expected_iccid="89999111111111111111")
         # ICCID check passes but no CLI backend => fails
         assert ok is False
-        assert 'not supported' in msg.lower() or 'not found' in msg.lower()
+        assert 'not supported' in msg.lower()
 
     def test_hardware_path_no_card_iccid_skips_check(self):
         """Hardware path: if card has no ICCID yet, skip check."""
@@ -295,9 +296,9 @@ class TestParsePysimOutput:
         assert cm.card_info["SPN"] == "BOLIDEN"
 
     def test_parse_fplmn(self):
-        """Parser extracts FPLMN from pySim-read output."""
+        """Parser extracts FPLMN from real pySim-read multi-line output."""
         cm = CardManager()
-        cm._parse_pysim_output("FPLMN: 24007")
+        cm._parse_pysim_output("FPLMN:\n\t42f007 # MCC: 240 MNC: 07")
         assert cm.card_info["FPLMN"] == "24007"
 
     def test_parse_all_new_fields(self):
@@ -308,7 +309,8 @@ class TestParsePysimOutput:
             "IMSI: 001010123456789\n"
             "ACC: 0004\n"
             "SPN: MyProvider\n"
-            "FPLMN: 24001\n"
+            "FPLMN:\n"
+            "\t42f010 # MCC: 240 MNC: 01\n"
         )
         cm._parse_pysim_output(output)
         assert cm.card_info["ICCID"] == "89860012345678901234"
@@ -318,9 +320,9 @@ class TestParsePysimOutput:
         assert cm.card_info["FPLMN"] == "24001"
 
     def test_parse_fplmn_ignores_empty(self):
-        """Parser ignores FPLMN lines with 'ffffff' (empty)."""
+        """Parser produces no FPLMN entry when the block has no sub-entries."""
         cm = CardManager()
-        cm._parse_pysim_output("FPLMN: ffffff")
+        cm._parse_pysim_output("FPLMN:\n")
         assert "FPLMN" not in cm.card_info
 
 

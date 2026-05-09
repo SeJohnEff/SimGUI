@@ -34,7 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Directories to skip (not production code)
-_SKIP_DIRS = {"__pycache__", "htmlcov", ".git", "debian", "scripts"}
+_SKIP_DIRS = {"__pycache__", "htmlcov", ".git", "debian", "scripts", "docs"}
 
 
 def _iter_py_files():
@@ -128,7 +128,8 @@ _KNOWN_CALLBACK_PATTERNS = {"on_progress", "on_card_result",
                             "on_csv_loaded_callback",
                             "on_card_programmed_callback",
                             "on_card_detected", "on_card_unknown",
-                            "on_card_removed", "on_error"}
+                            "on_card_removed", "on_error",
+                            "on_reader_ready"}
 
 
 class _SelfCallVisitor(ast.NodeVisitor):
@@ -225,7 +226,7 @@ def _collect_self_call_issues():
                 # It's either defined in this class OR it's an attribute
                 # set in __init__ (also in 'defined').  If not found, flag it.
                 if method_name not in defined:
-                    # Check if it's set via self.X = ... in any method
+                    # Check if it's set via self.X = ... or self.X: T = ...
                     found_as_attr = False
                     for item in ast.walk(node):
                         if (isinstance(item, ast.Assign)
@@ -235,6 +236,13 @@ def _collect_self_call_issues():
                                     and t.value.id == "self"
                                     and t.attr == method_name
                                     for t in item.targets)):
+                            found_as_attr = True
+                            break
+                        if (isinstance(item, ast.AnnAssign)
+                                and isinstance(item.target, ast.Attribute)
+                                and isinstance(item.target.value, ast.Name)
+                                and item.target.value.id == "self"
+                                and item.target.attr == method_name):
                             found_as_attr = True
                             break
                     if not found_as_attr:

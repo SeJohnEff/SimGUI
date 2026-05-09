@@ -14,6 +14,12 @@
     and asserts it back, rather than testing observable behavior or contract.
   - Priority: medium — these tests give false confidence and mask real bugs.
 
+- [x] **FIXED (session 2026-05-08): Environment-dependent test failures** — Three tests failed on Ubuntu (pySim installed) but would have passed on Mac (no pySim). Root cause: tests relied on `CLIBackend.NONE` being the default, but pySim is found on the VM. Fixes:
+  1. `authenticate()` — added no-card guard: returns `False` when `card_info`, `_original_card_data`, and `card_type` are all at their unset defaults. Prevents the blank-card early-return path from firing when no card was ever detected (`managers/card_manager.py`).
+  2. `test_authenticate_no_backend_fails` → renamed `test_authenticate_no_card_fails` with corrected docstring (`test_audit_fixes.py`).
+  3. `test_authenticate_invalid_adm1` — changed ADM1 from `'bad'` (3-char ASCII, valid per `validate_adm1`) to `'toolongkey!'` (11 chars, genuinely invalid). Test now fails at validation, not at the no-card guard (`test_card_manager.py`).
+  4. `test_hardware_path_iccid_match_proceeds` — explicitly sets `cm.cli_backend = CLIBackend.NONE` to make the "no CLI backend" condition environment-independent (`test_card_manager_full.py`).
+
 ## Completed (v0.5.18–0.5.20)
 
 - [x] Detect pySim-shell APDU errors (SwMatchError/6f00) even on exit code 0

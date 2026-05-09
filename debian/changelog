@@ -1,3 +1,17 @@
+simgui (0.5.29) unstable; urgency=medium
+
+  * fix: authenticate() returns False when no card has been detected —
+    blank-card early-return path was incorrectly firing on empty
+    card_info/card_type (card_manager.py)
+  * test: rename test_authenticate_no_backend_fails →
+    test_authenticate_no_card_fails with corrected docstring
+  * test: fix test_authenticate_invalid_adm1 to use a genuinely invalid
+    ADM1 ('toolongkey!' — 11 chars) instead of 'bad' (valid per validator)
+  * test: fix test_hardware_path_iccid_match_proceeds to explicitly set
+    cli_backend = CLIBackend.NONE, making it environment-independent
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Thu, 08 May 2026 00:00:00 +0100
+
 simgui (0.5.28) unstable; urgency=medium
 
   * fix: update status to 'Insert a SIM card...' when reader is plugged
@@ -15,10 +29,6 @@ simgui (0.5.27) unstable; urgency=medium
   * chore: tag releases v0.5.25 and v0.5.26 retroactively
 
  -- John Fornehed <John.fornehed@furunomirai.se>  Wed, 07 May 2026 12:00:00 +0100
-
-__version__ = "0.5.26"
-
-**`debian/changelog`** — add at the top:
 
 simgui (0.5.26) unstable; urgency=medium
 

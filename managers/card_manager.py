@@ -850,6 +850,11 @@ class CardManager:
         #    with their own internal auth sequence.  The standard
         #    verify_adm (CHV 0x0A) will always fail.  pySim-prog
         #    with -t gialersim handles auth correctly.
+        # No card detected at all (both data stores empty and type unknown)
+        if (not self.card_info and not self._original_card_data
+                and self.card_type == CardType.UNKNOWN):
+            return False, "No SIM card detected. Insert a card and try again."
+
         orig = self._original_card_data or {}
         is_blank = (not orig
                     or (not orig.get('ICCID') and not orig.get('IMSI')))
@@ -1211,9 +1216,10 @@ class CardManager:
                             changed: Dict[str, str]) -> Tuple[bool, str]:
         """Initial programming of a blank card via pySim-prog.py.
 
-        ``pySim-prog.py`` handles ICCID, IMSI, Ki, OPc, SPN, and ACC.
-        Any remaining fields (e.g. FPLMN) are written in a follow-up
-        ``pySim-shell.py`` call after the card has been initialised.
+        ``pySim-prog.py`` handles ICCID, IMSI, Ki, OPc, SPN, ACC, and FPLMN.
+        Any remaining fields not in ``_PYSIM_PROG_FIELDS`` (e.g. PIN1) are
+        written in a follow-up ``pySim-shell.py`` call after the card has
+        been initialised.
 
         Falls back to pySim-shell.py entirely if pySim-prog.py is not
         available.
@@ -1238,8 +1244,8 @@ class CardManager:
             prog_summary = ', '.join(prog_fields.keys())
             logger.info("pySim-prog succeeded: %s", prog_summary)
 
-            # Write extra fields (FPLMN etc.) via pySim-shell now that
-            # the card is initialised and pySim-shell can detect it.
+            # Write extra fields (not handled by pySim-prog) via pySim-shell
+            # now that the card is initialised and pySim-shell can detect it.
             if extra_fields:
                 logger.info("Writing extra fields via pySim-shell: %s",
                             list(extra_fields.keys()))

@@ -28,7 +28,8 @@ class TestCardManagerDetect:
 
 class TestCardManagerAuth:
     def test_authenticate_invalid_adm1(self, card_manager):
-        ok, msg = card_manager.authenticate('bad')
+        # 'toolongkey!' is 11 chars — exceeds 8 ASCII and is not 16 hex chars
+        ok, msg = card_manager.authenticate('toolongkey!')
         assert ok is False
 
     def test_authenticate_no_backend_fails(self, card_manager):

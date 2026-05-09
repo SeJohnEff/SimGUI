@@ -491,11 +491,11 @@ class TestProgramEmptyCard:
         assert 'failed' in msg.lower()
 
     def test_extra_fields_written_via_shell_after_prog(self, tmp_path):
-        """FPLMN is not supported by pySim-prog -> follow-up shell call."""
+        """Fields outside _PYSIM_PROG_FIELDS (e.g. PIN1) go via shell after prog."""
         cm = _auth_manager(tmp_path, original_data={})
         changed = {
             'IMSI': '456', 'Ki': 'A' * 32, 'OPc': 'B' * 32,
-            'FPLMN': '24007;24024',
+            'PIN1': '1234',  # not in _PYSIM_PROG_FIELDS -> extra field
         }
         card_data = dict(changed)
 
@@ -507,11 +507,11 @@ class TestProgramEmptyCard:
                                   return_value=(True, 'OK', {})):
                     ok, msg = cm._program_empty_card(card_data, changed)
 
-        # _program_nonempty_card should have been called with FPLMN
+        # _program_nonempty_card should have been called with the extra field
         mock_shell.assert_called_once()
         extra_changed = mock_shell.call_args[0][1]
-        assert 'FPLMN' in extra_changed
-        assert 'IMSI' not in extra_changed  # prog fields handled by prog
+        assert 'PIN1' in extra_changed
+        assert 'IMSI' not in extra_changed  # prog fields handled by pySim-prog
         assert ok is True
 
 

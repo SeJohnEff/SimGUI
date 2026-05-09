@@ -599,11 +599,11 @@ class TestSimulatorBackendDeckLoading:
 class TestCardManagerUncoveredPaths:
     """Cover auth guard and ICCID cross-check paths."""
 
-    def test_authenticate_no_backend_fails(self):
-        """CardManager.authenticate fails without CLI backend (no simulator)."""
+    def test_authenticate_no_card_fails(self):
+        """CardManager.authenticate fails when no card has been detected."""
         from managers.card_manager import CardManager
         cm = CardManager()
-        # No simulator active, no CLI backend
+        # No card detected — authenticate should fail regardless of backend
         ok, msg = cm.authenticate("12345678")
         assert ok is False
         assert isinstance(msg, str)
