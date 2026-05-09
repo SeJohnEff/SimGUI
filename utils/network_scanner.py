@@ -2,9 +2,10 @@
 Network discovery utilities — find SMB servers on the local network.
 
 Discovery methods (tried in priority order):
-1. avahi-browse (mDNS/DNS-SD) — discovers ``_smb._tcp`` services
-2. nmblookup (NetBIOS) — fallback for networks without mDNS
-3. smbclient -L — list shares on a specific server
+1. avahi-browse (mDNS/DNS-SD) — discovers ``_smb._tcp`` services (Linux)
+2. dns-sd (Bonjour) — macOS native mDNS discovery
+3. nmblookup (NetBIOS) — fallback for networks without mDNS
+4. smbclient -L — list shares on a specific server
 
 All methods are optional: if the required tool is not installed the
 function returns an empty list and logs a warning.
@@ -12,9 +13,11 @@ function returns an empty list and logs a warning.
 
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
+_MACOS = sys.platform == "darwin"
 
 
 @dataclass
@@ -64,6 +67,57 @@ def _parse_avahi_output(output: str) -> list[DiscoveredServer]:
             servers[key] = DiscoveredServer(
                 hostname=hostname, ip=ip, name=name,
             )
+    return list(servers.values())
+
+
+def _parse_dns_sd_output(output: str) -> list[DiscoveredServer]:
+    """Parse ``dns-sd -B _smb._tcp local`` output into server objects.
+
+    Expected format (browsing results)::
+
+        Browsing for _smb._tcp
+        DATE: ...
+           Instance Name: ServerName
+           Domain: local
+           Type: _smb._tcp
+           Extra: [hostname.local 192.168.1.10:445 ...]
+
+    We extract hostname and IP from the "Instance Name" and "Extra" lines.
+    """
+    servers: dict[str, DiscoveredServer] = {}
+    current_name: str | None = None
+
+    for line in output.splitlines():
+        line_stripped = line.strip()
+
+        # New instance entry
+        if "Instance Name:" in line:
+            current_name = line_stripped.split("Instance Name:", 1)[1].strip()
+            continue
+
+        # Extract IP from Extra line (contains hostname.local IP:port)
+        if "Extra:" in line and current_name:
+            extra = line_stripped.split("Extra:", 1)[1].strip()
+            # Format: hostname.local 192.168.1.10:445 ...
+            parts = extra.split()
+            if len(parts) >= 2:
+                hostname = parts[0]
+                ip_port = parts[1]
+                if ":" in ip_port:
+                    ip = ip_port.split(":")[0]
+                else:
+                    ip = ip_port
+                if "." in ip:  # Validate IP format
+                    key = ip
+                    if key not in servers:
+                        name = f"{current_name} ({ip})"
+                        servers[key] = DiscoveredServer(
+                            hostname=hostname,
+                            ip=ip,
+                            name=name,
+                        )
+            current_name = None
+
     return list(servers.values())
 
 
@@ -208,8 +262,8 @@ def _run_cmd(
 def scan_smb_servers(timeout: int = 10) -> list[DiscoveredServer]:
     """Discover SMB servers on the local network.
 
-    Tries avahi-browse first, then falls back to nmblookup.
-    Results from both methods are merged and deduplicated by IP.
+    Tries avahi-browse (Linux) or dns-sd (macOS) first, then falls back
+    to nmblookup. Results from both methods are merged and deduplicated by IP.
 
     Args:
         timeout: Maximum seconds to wait for each discovery command.
@@ -219,17 +273,28 @@ def scan_smb_servers(timeout: int = 10) -> list[DiscoveredServer]:
     """
     servers: dict[str, DiscoveredServer] = {}
 
-    # Method 1: avahi-browse (mDNS/DNS-SD)
+    # Method 1: avahi-browse (Linux mDNS/DNS-SD)
     # -r flag is essential: without it avahi-browse prints "+" (found)
     # lines instead of "=" (resolved) lines, meaning we never get
     # hostnames or IP addresses.
-    ok, output = _run_cmd(
-        ["avahi-browse", "-tpkr", "_smb._tcp"], timeout=timeout,
-    )
-    if ok and output.strip():
-        for srv in _parse_avahi_output(output):
-            servers[srv.ip] = srv
-        log.info("avahi-browse found %d server(s)", len(servers))
+    if not _MACOS:
+        ok, output = _run_cmd(
+            ["avahi-browse", "-tpkr", "_smb._tcp"], timeout=timeout,
+        )
+        if ok and output.strip():
+            for srv in _parse_avahi_output(output):
+                servers[srv.ip] = srv
+            log.info("avahi-browse found %d server(s)", len(servers))
+
+    # Method 1b: dns-sd (macOS native Bonjour)
+    if _MACOS:
+        ok, output = _run_cmd(
+            ["dns-sd", "-B", "_smb._tcp", "local"], timeout=timeout,
+        )
+        if ok and output.strip():
+            for srv in _parse_dns_sd_output(output):
+                servers[srv.ip] = srv
+            log.info("dns-sd found %d server(s)", len(servers))
 
     # Method 2: nmblookup (NetBIOS) — fallback
     ok, output = _run_cmd(

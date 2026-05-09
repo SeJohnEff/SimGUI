@@ -17,13 +17,16 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from typing import Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
 MOUNT_BASE = "/tmp/simgui-mounts"
+_MACOS = sys.platform == "darwin"
 
 # Absolute paths for system commands — critical for desktop-launcher
 # environments where PATH may not include /usr/bin or sudo's
@@ -32,6 +35,7 @@ MOUNT_BASE = "/tmp/simgui-mounts"
 _SUDO = "/usr/bin/sudo"
 _MOUNT = "/usr/bin/mount"
 _UMOUNT = "/usr/bin/umount"
+_MOUNT_SMB_FS = "/sbin/mount_smbfs"  # macOS-specific
 
 
 @dataclass
@@ -309,6 +313,15 @@ class NetworkStorageManager:
     @staticmethod
     def _sudo_fix_message() -> str:
         """User-friendly message explaining how to fix sudo permissions."""
+        if _MACOS:
+            return (
+                "SimGUI needs permission to mount network shares.\n\n"
+                "On macOS, you may need to:\n"
+                "  1. Unlock System Settings > General > Login Items & Extensions\n"
+                "  2. Add yourself to the 'admin' group if needed\n"
+                "  3. Ensure mount_smbfs is available: /sbin/mount_smbfs --help\n\n"
+                "Or use native Finder: Cmd+K > 'smb://server/share'"
+            )
         return (
             "SimGUI needs permission to mount network shares.\n\n"
             "Run this once in a terminal to fix it:\n\n"
@@ -322,13 +335,13 @@ class NetworkStorageManager:
     def check_sudo_mount(self) -> bool:
         """Return True if passwordless sudo mount is available.
 
-        Checks for the existence of the sudoers drop-in file that
-        grants NOPASSWD mount/umount access.  This is more reliable
-        than running ``sudo -n mount ...`` because the sudoers rule
-        only matches specific argument patterns (``-t cifs *``,
-        ``-t nfs *``) — generic probes like ``mount --help`` don't
-        match and falsely report failure.
+        On Linux, checks for a sudoers drop-in file. On macOS, assumes
+        the user is in the admin group and has sudo access (mount_smbfs
+        requires sudo, but macOS typically grants it to admin users).
         """
+        if _MACOS:
+            # On macOS, sudo is available to admin users by default
+            return True
         sudoers_path = '/etc/sudoers.d/simgui-mount'
         try:
             return os.path.isfile(sudoers_path)
@@ -348,6 +361,24 @@ class NetworkStorageManager:
                     "-o", opts, src, mp]
 
         # SMB / CIFS
+        if _MACOS:
+            # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
+            if profile.username:
+                user = quote(profile.username, safe="")
+                if profile.password:
+                    pwd = quote(profile.password, safe="")
+                    url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
+                else:
+                    url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
+            else:
+                url = f"//{profile.server}/{profile.share.lstrip('/')}"
+            cmd = [_SUDO, _MOUNT_SMB_FS]
+            if profile.mount_options:
+                cmd.extend(["-o", profile.mount_options])
+            cmd.extend([url, mp])
+            return cmd
+
+        # Linux CIFS
         opts_parts = [
             f"uid={os.getuid()}",
             f"gid={os.getgid()}",

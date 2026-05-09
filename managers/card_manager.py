@@ -157,6 +157,13 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     Returns:
         (path, backend) -- path to the tool directory and which backend it is.
     """
+    # Check for pySim inside a PyInstaller .app bundle (macOS)
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        bundle_pysim = os.path.join(sys._MEIPASS, 'pysim')
+        if os.path.isdir(bundle_pysim):
+            logger.info("Found pySim in PyInstaller bundle: %s", bundle_pysim)
+            return bundle_pysim, CLIBackend.PYSIM
+
     # Check environment variable first (sysmo-usim-tool)
     env_path = os.environ.get('SYSMO_USIM_TOOL_PATH')
     if env_path and os.path.isdir(env_path):

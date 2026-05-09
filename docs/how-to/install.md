@@ -1,11 +1,15 @@
-# How to: Install SimGUI on Ubuntu
+# How to: Install SimGUI
+
+Choose your platform below: [Ubuntu](#ubuntu-installation) | [macOS](#macos-installation)
+
+---
+
+## Ubuntu Installation
 
 **Applies to:** Ubuntu 22.04 LTS and later (desktop)  
 **Time required:** 5 minutes on a fresh system
 
----
-
-## Prerequisites
+### Prerequisites
 
 - Ubuntu 22.04 or later (x86-64 or ARM/aarch64)
 - `sudo` access
@@ -106,7 +110,78 @@ Log out and back in for the group change to take effect.
 
 ---
 
-## Using SimGUI with UTM (macOS)
+## macOS Installation
+
+**Applies to:** macOS 12 (Monterey) or later (Intel or Apple Silicon)  
+**Time required:** 2 minutes for simulator mode; 10 minutes with hardware support
+
+### Quick Start — Simulator Mode (No Hardware)
+
+For a zero-configuration experience without a physical card reader:
+
+1. **Download** `SimGUI.app` from [GitHub Releases](https://github.com/SeJohnEff/SimGUI/releases)
+2. **Drag** `SimGUI.app` to `/Applications`
+3. **Double-click** to run — simulator mode activates automatically with 20 virtual SIM cards
+
+That's it! The app has no dependencies and works without installing anything.
+
+### Hardware Support — Real SIM Card Programming
+
+To enable hardware card reader support, install pySim and dependencies:
+
+```bash
+bash /Applications/SimGUI.app/Contents/Resources/scripts/install-macos.sh
+```
+
+Or manually:
+
+```bash
+git clone https://gitea.osmocom.org/sim-card/pysim.git ~/pysim
+cd ~/pysim
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Then set the environment variable (add to `~/.zshrc` or `~/.bash_profile`):
+
+```bash
+export PYSIM_PATH=~/pysim
+```
+
+Restart SimGUI — it will now auto-detect pySim and enable hardware card operations.
+
+### PCSC Reader Detection
+
+macOS includes native PC/SC support (`PCSC.framework`) — no daemon installation needed. When you plug in a USB PCSC-compatible card reader (e.g. OMNIKEY 3x21), it will be auto-detected.
+
+Verify the reader is visible:
+
+```bash
+system_profiler SPUSBDataType | grep -i "smart\|omnikey\|realtek"
+```
+
+### Network Share Mounting (Optional)
+
+To mount SMB/CIFS shares for artifact export:
+
+1. In **SimGUI Settings**, add a share profile (hostname, share name, credentials)
+2. Click **Mount** — macOS will use `mount_smbfs` to attach the share
+3. Choose **Allow** if prompted for sudo access
+
+Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point SimGUI to the mounted volume.
+
+### Troubleshooting (macOS)
+
+| Symptom | Fix |
+|---|---|
+| "No reader detected" | Plug in your USB card reader; quit and restart SimGUI |
+| "CLI tool not found" | Run the `install-macos.sh` script to install pySim |
+| Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
+| pySim import errors | Set `export PYSIM_PATH=~/pysim` and restart |
+
+---
+
+## Using SimGUI with UTM (macOS → Linux VM)
 
 If running Ubuntu in UTM on macOS, additional USB configuration is required for the card reader to work reliably.
 

@@ -1,3 +1,22 @@
+simgui (0.5.37) unstable; urgency=medium
+
+  * feat: native macOS support — SimGUI now runs on macOS as a standalone
+    .app bundle (zero prerequisites) or via native Python with pySim
+  * feat: macOS SMB mount support — network_storage_manager now uses
+    mount_smbfs syntax on macOS instead of CIFS mount
+  * feat: macOS mDNS discovery — utils/network_scanner now tries dns-sd
+    (Bonjour) when avahi-browse is unavailable (macOS has neither)
+  * feat: PyInstaller bundle support — card_manager checks for pySim
+    inside .app bundle first, enabling optional bundling; app auto-falls
+    back to simulator mode if no CLI tools present (no hardware needed)
+  * build: new SimGUI.spec and scripts/build-macos-app.sh for creating
+    distributable macOS .app; new scripts/install-macos.sh for developer
+    hardware setup (Homebrew + pySim to ~/pysim)
+  * docs: added macOS installation guide (docs/how-to/install.md);
+    documents both simulator-only mode and hardware setup workflows
+
+ -- John Fornehed <john.fornehed@gmail.com>  Fri, 09 May 2026 00:00:00 +0100
+
 simgui (0.5.36) unstable; urgency=medium
 
   * fix: USB reader not detected on app restart — pyscard module-level

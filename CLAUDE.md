@@ -305,10 +305,19 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 
 ## Hardware Environment
 
+**Primary (native macOS):**
+- MacBook Air M4, macOS 26.4.1
+- USB Reader: HID Global OMNIKEY 3x21 (direct USB, no VM)
+- pySim installed at `~/pysim` or via `PYSIM_PATH` env var
+- Uses macOS built-in `PCSC.framework` — no daemon installation needed
+- SimGUI runs as native `.app` (PyInstaller bundle) or via `python3 main.py`
+
+**Legacy (Ubuntu via UTM):**
 - MacBook Air M4 → UTM VM → Ubuntu (ARM/aarch64)
 - USB Reader: HID Global OMNIKEY 3x21 (USB passthrough to VM)
 - pySim installed at `/opt/pysim` with `.venv`
-- pcscd service required for PCSC reader access
+- pcscd service (systemd) required for PCSC reader access
+- SimGUI installed as `.deb` package
 
 ## Project Stats
 
