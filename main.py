@@ -889,8 +889,7 @@ class SimGUIApp:
         """CardWatcher error (runs on main thread)."""
         logger.warning("CardWatcher error: %s", msg)
         if self._is_reader_error(msg):
-            self._card_panel.set_status("error", "No card reader detected")
-            self._status_var.set("No card reader — check USB connection")
+            self._show_no_reader_warning(msg)
 
     def _on_card_programmed(self, card_data):
         """Called after successful card programming — save auto-artifact.
