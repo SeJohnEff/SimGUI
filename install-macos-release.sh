@@ -20,17 +20,20 @@ TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
 cd "$TEMP_DIR"
-curl -fsSL -o SimGUI.pkg https://github.com/SeJohnEff/SimGUI/releases/download/v0.5.37/SimGUI.pkg
+curl -fsSL -o SimGUI.dmg https://github.com/SeJohnEff/SimGUI/releases/download/v0.5.37/SimGUI.dmg
+
+# Mount DMG
+echo "Mounting disk image..."
+hdiutil attach -quiet SimGUI.dmg
+
+# Copy app
+echo "Installing to /Applications..."
+cp -r /Volumes/SimGUI/SimGUI.app /Applications/
+
+# Unmount DMG
+hdiutil detach -quiet /Volumes/SimGUI
 
 # Remove Gatekeeper quarantine
-echo "Preparing installer..."
-xattr -d com.apple.quarantine SimGUI.pkg 2>/dev/null || true
-
-# Install
-echo "Installing SimGUI..."
-sudo installer -pkg SimGUI.pkg -target /
-
-# Remove quarantine from installed app
 echo "Finalizing..."
 xattr -d com.apple.quarantine /Applications/SimGUI.app 2>/dev/null || true
 
