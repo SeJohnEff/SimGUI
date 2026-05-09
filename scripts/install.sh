@@ -189,6 +189,74 @@ if ! command -v mount.cifs >/dev/null 2>&1; then
     apt-get install -y -qq cifs-utils 2>&1 || warn "cifs-utils install failed"
 fi
 
+# --- SmartCard USB hotplug monitoring (for UTM USB passthrough recovery) ---
+# UTM's auto-connect USB feature doesn't work reliably; this service monitors
+# for smartcard reader hotplug events and notifies the user to re-attach in UTM.
+# This enables recovery if the reader is unplugged during use.
+info "Setting up smartcard hotplug monitoring..."
+
+# Create systemd service
+mkdir -p /etc/systemd/system
+tee /etc/systemd/system/smartcard-hotplug-monitor.service > /dev/null <<'SERVICEEOF'
+[Unit]
+Description=Monitor smartcard reader hotplug events and notify user
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/smartcard-hotplug-monitor.sh
+Restart=always
+RestartSec=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+# Create monitoring script
+tee /usr/local/bin/smartcard-hotplug-monitor.sh > /dev/null <<'SCRIPTEOF'
+#!/bin/bash
+# Monitor for Realtek smartcard reader (0bda:0165) hotplug events
+# When device appears, notify user and restart pcscd for SimGUI
+
+PREV_STATE=""
+
+while true; do
+  # Check if Realtek smartcard reader is in lsusb output
+  CURR_STATE=$(lsusb 2>/dev/null | grep -c "0bda:0165" || echo "0")
+
+  # Device appeared (transition from 0 to 1)
+  if [ "$CURR_STATE" = "1" ] && [ "$PREV_STATE" != "1" ]; then
+    logger -t smartcard-monitor "Smartcard reader detected (0bda:0165)"
+    # Restart pcscd to prepare for re-attachment
+    systemctl restart pcscd 2>/dev/null || true
+    # Send notification if notify-send is available
+    if command -v notify-send >/dev/null 2>&1; then
+      DISPLAY=:0 notify-send -u low "SmartCard Reader" \
+        "USB reader detected.\nPlease re-attach in UTM's USB menu for SimGUI to use it." 2>/dev/null || true
+    fi
+  fi
+
+  # Device disappeared
+  if [ "$CURR_STATE" = "0" ] && [ "$PREV_STATE" = "1" ]; then
+    logger -t smartcard-monitor "Smartcard reader disconnected"
+  fi
+
+  PREV_STATE="$CURR_STATE"
+  sleep 2
+done
+SCRIPTEOF
+
+chmod +x /usr/local/bin/smartcard-hotplug-monitor.sh
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable smartcard-hotplug-monitor.service 2>/dev/null || warn "Could not enable smartcard-hotplug-monitor service"
+systemctl start smartcard-hotplug-monitor.service 2>/dev/null || warn "Could not start smartcard-hotplug-monitor service"
+
+info "SmartCard hotplug monitoring service installed and started."
+
 # --- Done -------------------------------------------------------
 VERSION=$(dpkg-query -W -f='${Version}' simgui 2>/dev/null || echo "unknown")
 info "SimGUI $VERSION installed successfully."
