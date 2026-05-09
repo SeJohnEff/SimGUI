@@ -14,8 +14,11 @@ simgui (0.5.37) unstable; urgency=medium
     hardware setup (Homebrew + pySim to ~/pysim)
   * docs: added macOS installation guide (docs/how-to/install.md);
     documents both simulator-only mode and hardware setup workflows
+  * fix: Python 3.9 compatibility for PyInstaller bundle — converted all
+    Python 3.10+ union type syntax (X | Y) to typing.Optional/Union since
+    bundled Python runtime is 3.9; all 25+ type annotations now compatible
 
- -- John Fornehed <john.fornehed@gmail.com>  Fri, 09 May 2026 00:00:00 +0100
+ -- John Fornehed <john.fornehed@gmail.com>  Fri, 09 May 2026 21:58:00 +0100
 
 simgui (0.5.36) unstable; urgency=medium
 

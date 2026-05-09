@@ -1,5 +1,23 @@
 # SimGUI — TODO / Backlog
 
+## Current Blockers (v0.5.37+)
+
+### macOS GUI Asset Loading
+- **Status**: In progress
+- **Issue**: tkinter `PhotoImage` fails to load PNG from PyInstaller temp directory
+  ```
+  _tkinter.TclError: couldn't recognize data in image file "/var/folders/.../SimGUI-256.png"
+  ```
+- **Workaround**: Run from source instead of bundled app
+- **Root Cause**: tkinter JPEG/PNG support via PIL unavailable; fallback fails on temp paths
+- **Fix Options**:
+  1. Bundle Pillow in PyInstaller (add to `hiddenimports`)
+  2. Convert PNG → PPM (native tkinter support)
+  3. Embed image data as base64 strings
+  4. Migrate to PyQt6 (Phase 1 work in progress in `qt_main.py`)
+
+---
+
 ## Test Quality Audit
 
 - [ ] **Audit tests for "tautological assertions"** — tests that only verify the code

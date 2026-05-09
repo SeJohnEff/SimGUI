@@ -23,17 +23,32 @@ to run card operations from a desktop GUI.
 - **Progress tracking** — thread-safe progress bar and log output for long operations
 - **Modern theme** — platform-aware fonts and macOS-inspired styling (Linux, Windows, macOS)
 
-## Installation (Ubuntu)
+## Installation
 
-On a fresh Ubuntu desktop (22.04+):
+### macOS (native .app bundle — v0.5.37+)
+
+One-liner (downloads and installs `.pkg`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install-macos-release.sh | bash
+```
+
+Then launch from Applications or use `open /Applications/SimGUI.app`.
+
+For hardware support (programming real SIM cards), optionally install pySim:
+
+```bash
+bash scripts/install-macos.sh
+export PYSIM_PATH=~/pysim
+```
+
+### Ubuntu (22.04+)
+
+One-liner (downloads, builds, and installs `.deb`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install.sh | sudo bash
 ```
-
-That's it. The script installs build dependencies, builds the `.deb` package,
-installs it (including runtime dependencies like `smbclient`, `avahi-utils`,
-`cifs-utils`, and `nfs-common`), and cleans up.
 
 For manual installation or CLI tool setup, see the [documentation](docs/index.md).
 
@@ -56,17 +71,24 @@ simgui
 
 Or follow the [first-card tutorial](docs/tutorials/first-card.md).
 
-## Requirements
+## Platform Support
 
-- Ubuntu 22.04+ (x86-64 or ARM/aarch64)
-- Python 3.10+
-- PyQt6
-- At least one of:
-  - [sysmo-usim-tool](https://github.com/SeJohnEff/sysmo-usim-tool) (recommended)
-  - [pySim](https://github.com/osmocom/pysim)
-- A USB PCSC card reader (for hardware operations)
+| Platform | Status | Package |
+|----------|--------|---------|
+| **macOS 12+** (Apple Silicon & Intel) | ✅ Native .app (v0.5.37+) | `.pkg` installer |
+| **Ubuntu 22.04+** (x86-64, ARM/aarch64) | ✅ Stable | `.deb` package |
 
-Simulator mode works without a card reader.
+### Requirements
+
+**For simulator mode** (no hardware needed):
+- macOS 12+ or Ubuntu 22.04+
+- That's it — 20 virtual SIM profiles included
+
+**For hardware support** (programming real SIM cards):
+- [pySim](https://github.com/osmocom/pysim) (or sysmo-usim-tool for older versions)
+- A USB PCSC-compatible card reader (e.g., OMNIKEY 3x21)
+- macOS: uses built-in `PCSC.framework`
+- Ubuntu: requires `pcscd` service (installed automatically)
 
 ## Development
 

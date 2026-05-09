@@ -250,6 +250,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - Future ideas and extensions (document them in `docs/TODO.md`)
 
 ### Lessons Learned (the hard way)
+- PyInstaller bundles Python 3.9 but codebase initially used Python 3.10+ union type syntax (`X | Y`) — all type annotations must use `typing.Optional` and `typing.Union` for compatibility. Fixed in v0.5.37.
 - `--noprompt` in pySim-shell silently breaks stdin piping — commands are ignored (pySim-shell is now auth-only via `_run_pysim_shell_safe`; writes go through pySim-prog)
 - pySim-shell returns exit code 0 on APDU failures — you MUST scan stdout for errors
 - `exit` doesn't work in pySim-shell — must use `quit`
@@ -305,12 +306,14 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 
 ## Hardware Environment
 
-**Primary (native macOS):**
+**Primary (native macOS) — v0.5.37+:**
 - MacBook Air M4, macOS 26.4.1
 - USB Reader: HID Global OMNIKEY 3x21 (direct USB, no VM)
-- pySim installed at `~/pysim` or via `PYSIM_PATH` env var
+- pySim installed at `~/pysim` or via `PYSIM_PATH` env var (optional)
 - Uses macOS built-in `PCSC.framework` — no daemon installation needed
-- SimGUI runs as native `.app` (PyInstaller bundle) or via `python3 main.py`
+- SimGUI runs as native `.app` (PyInstaller bundle with Python 3.9 runtime)
+- Distribution: `.pkg` installer or direct `.app` bundle
+- **Status**: App launches successfully; imports work; image asset loading has minor issues (workaround: run from command line)
 
 **Legacy (Ubuntu via UTM):**
 - MacBook Air M4 → UTM VM → Ubuntu (ARM/aarch64)

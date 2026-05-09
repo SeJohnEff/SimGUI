@@ -117,13 +117,19 @@ Log out and back in for the group change to take effect.
 
 ### Quick Start — Simulator Mode (No Hardware)
 
-For a zero-configuration experience without a physical card reader:
+For a zero-configuration experience without a physical card reader, use the installer script:
 
-1. **Download** `SimGUI.app` from [GitHub Releases](https://github.com/SeJohnEff/SimGUI/releases)
-2. **Drag** `SimGUI.app` to `/Applications`
-3. **Double-click** to run — simulator mode activates automatically with 20 virtual SIM cards
+```bash
+curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install-macos-release.sh | bash
+```
 
-That's it! The app has no dependencies and works without installing anything.
+Or manually:
+
+1. **Download** `SimGUI.pkg` from [GitHub Releases](https://github.com/SeJohnEff/SimGUI/releases/tag/v0.5.37)
+2. **Double-click** to install (places `SimGUI.app` in `/Applications`)
+3. **Launch** from Applications or use `open /Applications/SimGUI.app`
+
+The app has no dependencies and works immediately with 20 virtual SIM cards for simulator mode.
 
 ### Hardware Support — Real SIM Card Programming
 
@@ -178,6 +184,7 @@ Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point S
 | "CLI tool not found" | Run the `install-macos.sh` script to install pySim |
 | Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
 | pySim import errors | Set `export PYSIM_PATH=~/pysim` and restart |
+| GUI won't load (image error) | **Known issue v0.5.37**: tkinter can't load PNG assets from bundled app temp directory. Workaround: Run from source instead: `python3 /Applications/SimGUI.app/Contents/Resources/SimGUI/main.py` |
 
 ---
 
