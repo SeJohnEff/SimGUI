@@ -14,11 +14,17 @@
     and asserts it back, rather than testing observable behavior or contract.
   - Priority: medium — these tests give false confidence and mask real bugs.
 
-- [x] **FIXED (session 2026-05-08): Environment-dependent test failures** — Three tests failed on Ubuntu (pySim installed) but would have passed on Mac (no pySim). Root cause: tests relied on `CLIBackend.NONE` being the default, but pySim is found on the VM. Fixes:
-  1. `authenticate()` — added no-card guard: returns `False` when `card_info`, `_original_card_data`, and `card_type` are all at their unset defaults. Prevents the blank-card early-return path from firing when no card was ever detected (`managers/card_manager.py`).
-  2. `test_authenticate_no_backend_fails` → renamed `test_authenticate_no_card_fails` with corrected docstring (`test_audit_fixes.py`).
-  3. `test_authenticate_invalid_adm1` — changed ADM1 from `'bad'` (3-char ASCII, valid per `validate_adm1`) to `'toolongkey!'` (11 chars, genuinely invalid). Test now fails at validation, not at the no-card guard (`test_card_manager.py`).
-  4. `test_hardware_path_iccid_match_proceeds` — explicitly sets `cm.cli_backend = CLIBackend.NONE` to make the "no CLI backend" condition environment-independent (`test_card_manager_full.py`).
+- [x] **FIXED (session 2026-05-08): Test suite audit — 9 failures → 0** — Full test correctness pass across multiple test files. Root causes and fixes:
+  1. `authenticate()` no-card guard — changed `_original_card_data` sentinel from `{}` to `None`; `None` = no card detected, `{}` = blank card detected. Guard now uses `is None` check.
+  2. `disconnect()` resets `_original_card_data` to `None` (was `{}`).
+  3. Environment-dependent tests — 3 tests assumed `CLIBackend.NONE` but pySim is installed on the VM. Fixed by setting `cli_backend` explicitly or renaming to reflect actual behavior.
+  4. FPLMN parser tests — were using single-line `"FPLMN: 24007"` format; real pySim-read uses multi-line tab-indented format. Updated across 3 test files.
+  5. Phase1 `_make_card_watcher` — missing `on_error`, `on_reader_ready`, `on_card_detected` attrs (bypasses `__init__` via `__new__`).
+  6. Phase3 gialersim shell/verify tests — expected `-t gialersim` flag but pySim-shell and pySim-read don't support `-t`.
+  7. Phase3 extra_fields test — FPLMN moved to `_PYSIM_PROG_FIELDS`; rewrote to mock `_program_nonempty_card` directly.
+  8. `test_connect_share_refreshes_list` — patched `dialogs.load_card_file_dialog.NetworkStorageDialog` but it's a local import inside the method; changed to patch at source module.
+  9. `test_interface_contracts` — added `docs` to `_SKIP_DIRS`; added `on_reader_ready` to callback patterns; fixed AST checker to handle `ast.AnnAssign`.
+  - **Final result: 2154 passed, 14 skipped, 0 failures.**
 
 ## Completed (v0.5.18–0.5.20)
 

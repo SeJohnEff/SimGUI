@@ -1,14 +1,22 @@
 simgui (0.5.29) unstable; urgency=medium
 
-  * fix: authenticate() returns False when no card has been detected —
-    blank-card early-return path was incorrectly firing on empty
-    card_info/card_type (card_manager.py)
+  * fix: authenticate() returns False when no card has been detected;
+    change _original_card_data sentinel from {} to None so blank-card
+    path can be distinguished from no-card state
+  * fix: disconnect() resets _original_card_data to None (was {})
   * test: rename test_authenticate_no_backend_fails →
     test_authenticate_no_card_fails with corrected docstring
-  * test: fix test_authenticate_invalid_adm1 to use a genuinely invalid
-    ADM1 ('toolongkey!' — 11 chars) instead of 'bad' (valid per validator)
-  * test: fix test_hardware_path_iccid_match_proceeds to explicitly set
-    cli_backend = CLIBackend.NONE, making it environment-independent
+  * test: fix test_authenticate_invalid_adm1 — use genuinely invalid ADM1
+  * test: fix test_hardware_path_iccid_match_proceeds — set cli_backend=NONE
+  * test: fix FPLMN parser tests to use real pySim-read multi-line format
+  * test: fix test_extra_fields_written_via_shell_after_prog — use PIN1
+  * test: add on_error/on_reader_ready to phase1 _make_card_watcher
+  * test: fix gialersim shell/verify tests — pySim-shell/-read have no -t flag
+  * test: rewrite test_program_empty_card_extra_fields — mock _program_nonempty_card
+  * test: fix NetworkStorageDialog patch target (local import, not module attr)
+  * test: add 'docs' to _SKIP_DIRS; add on_reader_ready to callback patterns
+  * test: fix ast checker to handle ast.AnnAssign (type-annotated attrs)
+  * 2154 passed, 14 skipped, 0 failures
 
  -- John Fornehed <john.fornehed@furunomirai.se>  Thu, 08 May 2026 00:00:00 +0100
 
