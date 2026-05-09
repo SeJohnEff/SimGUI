@@ -370,3 +370,143 @@ class TestEmptyColumnWhitespace:
         assert "ADM1" in mgr.columns
         assert "Ki" in mgr.columns
         assert "OPc" in mgr.columns
+
+
+# -- Semicolon delimiter ---------------------------------------------------------
+
+SEMICOLON_HEADER = "ICCID;IMSI;Ki;OPc;ADM1"
+SEMICOLON_ROWS = [
+    "8949440000001672706;999700000167270;E049AF7DBE25B0AECD0CE2FEE03FD919;9EB1A95173A8F40281EFBA24D4053A0E;76510072",
+    "8949440000001672714;999700000167271;8224F445CE586BF9048A8659BC99BD64;3149618671ACB135BFB7668FE8F10AD4;95478281",
+]
+
+
+class TestSemicolonDelimiter:
+    def test_load_semicolon_csv(self):
+        content = SEMICOLON_HEADER + "\n" + "\n".join(SEMICOLON_ROWS) + "\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            assert mgr.load_csv(path) is True
+            assert mgr.get_card_count() == 2
+            assert mgr.get_card(0)["IMSI"] == "999700000167270"
+            assert mgr.get_card(1)["ADM1"] == "95478281"
+        finally:
+            os.unlink(path)
+
+    def test_semicolon_columns_normalized(self):
+        header = "iccid;imsi;ki;opc;adm"
+        row = "8949440000001672706;999700000167270;AABB;CCDD;76510072"
+        path = _write_tmp(header + "\n" + row + "\n", suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            assert "ICCID" in mgr.columns
+            assert "Ki" in mgr.columns
+            assert "OPc" in mgr.columns
+            assert "ADM1" in mgr.columns
+        finally:
+            os.unlink(path)
+
+    def test_semicolon_no_warnings_when_complete(self):
+        content = SEMICOLON_HEADER + "\n" + SEMICOLON_ROWS[0] + "\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            assert mgr.load_warnings == []
+        finally:
+            os.unlink(path)
+
+
+# -- Tab delimiter ---------------------------------------------------------------
+
+TAB_HEADER = "ICCID\tIMSI\tKi\tOPc\tADM1"
+TAB_ROWS = [
+    "8949440000001672706\t999700000167270\tE049AF7DBE25B0AECD0CE2FEE03FD919\t9EB1A95173A8F40281EFBA24D4053A0E\t76510072",
+    "8949440000001672714\t999700000167271\t8224F445CE586BF9048A8659BC99BD64\t3149618671ACB135BFB7668FE8F10AD4\t95478281",
+]
+
+
+class TestTabDelimiter:
+    def test_load_tab_csv(self):
+        content = TAB_HEADER + "\n" + "\n".join(TAB_ROWS) + "\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            assert mgr.load_csv(path) is True
+            assert mgr.get_card_count() == 2
+            assert mgr.get_card(0)["IMSI"] == "999700000167270"
+        finally:
+            os.unlink(path)
+
+    def test_tab_txt_extension(self):
+        content = TAB_HEADER + "\n" + TAB_ROWS[0] + "\n"
+        path = _write_tmp(content, suffix=".txt")
+        try:
+            mgr = CSVManager()
+            assert mgr.load_csv(path) is True
+            assert mgr.get_card_count() == 1
+        finally:
+            os.unlink(path)
+
+
+# -- load_warnings ---------------------------------------------------------------
+
+class TestLoadWarnings:
+    def test_no_warnings_on_init(self):
+        mgr = CSVManager()
+        assert mgr.load_warnings == []
+
+    def test_warnings_when_required_fields_missing(self):
+        content = "ICCID,IMSI\n8949440000001672706,999700000167270\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            assert mgr.load_csv(path) is True
+            assert len(mgr.load_warnings) == 1
+            w = mgr.load_warnings[0]
+            assert "Ki" in w
+            assert "OPc" in w
+            assert "ADM1" in w
+        finally:
+            os.unlink(path)
+
+    def test_no_warnings_when_all_required_present(self):
+        content = "ICCID,IMSI,Ki,OPc,ADM1\n8949440000001672706,999700000167270,AA,BB,CC\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            assert mgr.load_warnings == []
+        finally:
+            os.unlink(path)
+
+    def test_warning_lists_only_missing_fields(self):
+        content = "ICCID,Ki,OPc\n8949440000001672706,AA,BB\n"
+        path = _write_tmp(content, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(path)
+            assert mgr.load_warnings
+            w = mgr.load_warnings[0]
+            assert "ADM1" in w
+            assert "Ki" not in w
+            assert "OPc" not in w
+        finally:
+            os.unlink(path)
+
+    def test_warnings_cleared_on_new_load(self):
+        partial = "ICCID,IMSI\n8949440000001672706,999700000167270\n"
+        full = "ICCID,IMSI,Ki,OPc,ADM1\n8949440000001672706,999700000167270,AA,BB,CC\n"
+        p1 = _write_tmp(partial, suffix=".csv")
+        p2 = _write_tmp(full, suffix=".csv")
+        try:
+            mgr = CSVManager()
+            mgr.load_csv(p1)
+            assert mgr.load_warnings
+            mgr.load_csv(p2)
+            assert mgr.load_warnings == []
+        finally:
+            os.unlink(p1)
+            os.unlink(p2)

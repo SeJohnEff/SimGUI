@@ -41,6 +41,9 @@ SIM_DATA_FILETYPES = [
     ("All files", "*.*"),
 ]
 
+# Columns that must be present for card programming to succeed
+_REQUIRED_PROGRAMMING_COLUMNS = frozenset({'ICCID', 'Ki', 'OPc', 'ADM1'})
+
 
 def _normalize_column(name: str) -> str:
     """Normalize a column name to internal standard."""
@@ -57,6 +60,7 @@ class CSVManager:
         self.cards: List[Dict[str, str]] = []
         self.columns: List[str] = list(STANDARD_COLUMNS)
         self.filepath: Optional[str] = None
+        self.load_warnings: List[str] = []
 
     # ---- I/O -----------------------------------------------------------
 
@@ -95,6 +99,7 @@ class CSVManager:
         self.cards = normalised_cards
         self.filepath = filepath
         self._eml_metadata = meta
+        self._check_required_columns()
         return True
 
     def load_csv(self, filepath: str) -> bool:
@@ -110,13 +115,17 @@ class CSVManager:
             if not content.strip():
                 return False
 
-            # Try comma-separated first
             lines = content.splitlines()
-            header_fields = lines[0].split(',')
-            if len(header_fields) > 1:
-                # Comma-separated CSV
+            first_line = lines[0]
+            delimiter = None
+            for delim in (',', '\t', ';'):
+                if delim in first_line:
+                    delimiter = delim
+                    break
+
+            if delimiter is not None:
                 import io
-                reader = csv.DictReader(io.StringIO(content))
+                reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
                 if reader.fieldnames is None:
                     return False
                 raw_columns = list(reader.fieldnames)
@@ -135,6 +144,7 @@ class CSVManager:
                 for card in raw_cards
             ]
             self.filepath = filepath
+            self._check_required_columns()
             return True
         except Exception as e:
             logger.error("Error loading CSV: %s", e)
@@ -171,6 +181,18 @@ class CSVManager:
                 if len(fields_single) == n_headers:
                     cards.append(dict(zip(headers, fields_single)))
         return headers, cards
+
+    def _check_required_columns(self) -> None:
+        """Populate load_warnings with any required programming columns that are missing."""
+        present = set(self.columns)
+        missing = _REQUIRED_PROGRAMMING_COLUMNS - present
+        if missing:
+            self.load_warnings = [
+                f"Missing required programming fields: {', '.join(sorted(missing))}. "
+                "Cards can be viewed but not programmed from this file."
+            ]
+        else:
+            self.load_warnings = []
 
     def save_csv(self, filepath: str) -> bool:
         """Save card configurations to a CSV file."""

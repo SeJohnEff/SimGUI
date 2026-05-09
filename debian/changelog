@@ -1,3 +1,24 @@
+simgui (0.5.34) unstable; urgency=medium
+
+  * feat: auto-detect delimiter (comma, tab, semicolon) in load_csv() —
+    parser sniffs the header line instead of assuming by file extension;
+    falls back to whitespace-delimited when no delimiter character found
+  * feat: load_warnings property on CSVManager — populated after every
+    load with a message listing required programming fields that are
+    absent (ICCID, Ki, OPc, ADM1); empty list when all are present
+  * ux: show warning dialog on file load when required fields are missing —
+    Program SIM, Batch, and CSV Editor panels all surface load_warnings
+    via messagebox.showwarning; _from_sync loads are silent (already warned
+    in originating tab)
+  * ux: show warning toast when detected card's data file is missing Ki,
+    OPc, or ADM1 — operator learns about incomplete data before attempting
+    to program rather than getting a cryptic failure mid-operation
+  * docs: update file-formats.md — correct "field names are case-sensitive"
+    (normalisation has been case-insensitive since v0.5.x), document
+    auto-detection behaviour, rewrite Known Limitations section
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Sat, 09 May 2026 20:00:00 +0100
+
 simgui (0.5.33) unstable; urgency=medium
 
   * refactor: unify all card programming through pySim-prog (all card

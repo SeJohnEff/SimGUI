@@ -102,6 +102,9 @@ class CSVEditorPanel(ttk.Frame):
             if self._csv_manager.load_file(fp):
                 self._refresh_table()
                 self._unsaved_changes = False
+                if self._csv_manager.load_warnings:
+                    messagebox.showwarning("Missing Fields",
+                                           "\n".join(self._csv_manager.load_warnings))
             else:
                 messagebox.showerror("Load Error",
                                      f"No card data found in {fp}")

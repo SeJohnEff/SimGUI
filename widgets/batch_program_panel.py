@@ -594,6 +594,9 @@ class BatchProgramPanel(ttk.Frame):
         self._range_start_var.set("1")
         self._range_count_var.set("0")
         self._apply_csv_filters()
+        if not _from_sync and self._csv.load_warnings:
+            messagebox.showwarning("Missing Fields",
+                                   "\n".join(self._csv.load_warnings))
         # Cross-tab sync
         if not _from_sync and callable(self.on_csv_loaded_callback):
             self.on_csv_loaded_callback(path)

@@ -63,15 +63,15 @@
   - **Confirmed working readers**: OMNIKEY 3x21 (HID Global), Realtek 0bda:0165 (cheap Amazon USB reader). Both work via PCSC passthrough in UTM VM.
   - Consider: detect if reader is read-only vs read/write capable and warn the operator if a read-only reader is connected when programming is attempted.
 
-- [ ] **Remove standalone ADM1 Authenticate button** — The separate "Authenticate" step in the Program SIM panel is unnecessary and confusing for operators. ADM1 authentication happens automatically when programming, so the button adds an extra step with no value. **Exception:** keep an authenticate action if there are protected fields that require ADM1 to *read* (e.g. Ki, OPc read-back). If read-back is the only use case, rename to "Read Protected Fields" or similar. The goal: operators should go from card-detected → program in one click, not card-detected → authenticate → program.
+- [x] **FIXED v0.5.32: Remove standalone ADM1 Authenticate button** — The separate "Authenticate" step in the Program SIM panel is unnecessary and confusing for operators. ADM1 authentication happens automatically when programming, so the button adds an extra step with no value. **Exception:** keep an authenticate action if there are protected fields that require ADM1 to *read* (e.g. Ki, OPc read-back). If read-back is the only use case, rename to "Read Protected Fields" or similar. The goal: operators should go from card-detected → program in one click, not card-detected → authenticate → program.
 
 - [x] **FIXED v0.5.28: Reader status not refreshing after no-reader warning** — Added `on_reader_ready` callback to CardWatcher. Fires once when the fast probe succeeds after being in error state. Resets in `_show_no_reader_warning` so it re-arms if reader is unplugged again. UI updates to "Insert a SIM card..." when reader is plugged in.
 
-- [ ] **File parsing improvements** — See `docs/file-formats.md` for the SimGUI standard CSV format (documented v0.5.27). Planned parser improvements:
+- [x] **FIXED v0.5.34: File parsing improvements** — See `docs/file-formats.md` for the SimGUI standard CSV format. Implemented:
   1. Auto-detect delimiter (comma, tab, semicolon) instead of assuming by file extension
-  2. Validate required fields after parsing — surface error in UI when ICCID, Ki, OPc, ADM1 are missing
-  3. Case-insensitive field name matching — accept `ADM`, `KI`, `OPC` and normalise to `ADM1`, `Ki`, `OPc`
-  4. Clear error message when card is found in index but programming data is incomplete
+  2. `load_warnings` property on CSVManager — warning dialog on load when ICCID, Ki, OPc, ADM1 are missing
+  3. Case-insensitive field name matching — already implemented; docs updated to reflect this
+  4. Toast when detected card's data file is missing Ki, OPc, or ADM1
 
 ## Critical Bugs (Batch Programming)
 

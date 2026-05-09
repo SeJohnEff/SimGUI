@@ -351,6 +351,9 @@ class ProgramSIMPanel(ttk.Frame):
         self._csv_count_lbl.configure(
             text=f"({self._csv.get_card_count()} cards)")
         self._refresh_card_tree()
+        if not _from_sync and self._csv.load_warnings:
+            messagebox.showwarning("Missing Fields",
+                                   "\n".join(self._csv.load_warnings))
         # Cross-tab sync
         if not _from_sync and callable(self.on_csv_loaded_callback):
             self.on_csv_loaded_callback(path)

@@ -695,6 +695,16 @@ class SimGUIApp:
         self._card_panel.set_programmed_indicator(already)
         # Auto-populate Program SIM tab
         self._program_panel.on_card_detected(iccid, card_data, file_path)
+        # Warn if the data file is missing required programming fields
+        required_fields = {'Ki', 'OPc', 'ADM1'}
+        missing_fields = required_fields - {k for k, v in card_data.items() if v}
+        if missing_fields:
+            show_toast(
+                self.root,
+                f"Card data incomplete — missing: {', '.join(sorted(missing_fields))}",
+                level="warning",
+                duration=6000,
+            )
         # Sync the Read SIM tab (public fields)
         self._read_panel.refresh()
         status = (f"\u26d4 CARD BLOCKED: {iccid}" if is_blocked

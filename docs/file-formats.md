@@ -47,11 +47,11 @@ ICCID,IMSI,Ki,OPc,ADM1,ACC,PIN1,PUK1,PIN2,PUK2,SPN,FPLMN
 
 ### Field naming
 
-Field names are case-sensitive. Use exactly:
-- `ADM1` not `ADM`
-- `OPc` not `OPC` or `opc`
-- `Ki` not `KI` or `ki`
-- `ICCID`, `IMSI`, `ACC`, `SPN`, `FPLMN` in uppercase
+Column names are normalized case-insensitively on load:
+- `ADM` or `adm` → `ADM1`
+- `KI` or `ki` → `Ki`
+- `OPC` or `opc` → `OPc`
+- All others are uppercased (e.g. `imsi` → `IMSI`, `iccid` → `ICCID`)
 
 ---
 
@@ -124,33 +124,24 @@ Parsed via `utils/eml_parser.py`. Field names are normalised during parsing.
 
 ---
 
-## Known Parser Limitations (as of SimGUI 0.5.26)
+## Parser behaviour (as of SimGUI 0.5.34)
 
 ### Delimiter auto-detection
-- `.csv` files are assumed to be comma-delimited. Files using semicolon or other
-  delimiters will parse silently with wrong column alignment.
-- `.txt` files are assumed to be tab-delimited. Comma-delimited `.txt` files will
-  parse silently with wrong column alignment.
-- **Workaround:** Convert files to comma-delimited `.csv` before use.
+The parser auto-detects the delimiter from the header line in priority order:
+comma → tab → semicolon. If none of these appear, it falls back to
+whitespace-delimited parsing. No file extension assumptions are made.
 
-### Field name case sensitivity
-- Field names are case-sensitive. `ADM` instead of `ADM1`, `OPC` instead of `OPc`,
-  or `KI` instead of `Ki` will cause fields to be silently missing.
-- **Workaround:** Rename columns to match SimGUI standard before use.
+### Field name normalisation
+Column names are normalised case-insensitively on load (see Field naming above).
+No manual renaming is required.
 
 ### Missing required fields
-- If a file is missing required fields (e.g. `OPc`, `ADM1`), SimGUI will find the
-  card by ICCID but silently fail to populate programming data. The UI shows
-  "ICCID not found" or empty fields with no explanation.
-- **Workaround:** Ensure all required columns are present.
+If a file is missing required programming fields (`ICCID`, `Ki`, `OPc`, `ADM1`),
+SimGUI shows a warning dialog on load listing the missing fields. The file still
+loads (cards can be viewed) but programming will fail without those fields.
+Additionally, a toast notification appears when a detected card's data file is
+missing `Ki`, `OPc`, or `ADM1`.
 
 ### No user-visible parse errors
-- File parse failures are logged to the terminal only (`logger.warning`). No
-  error is shown in the UI.
-- **Workaround:** Run SimGUI from terminal to see parse warnings.
-
-### Planned improvements
-- Auto-detect delimiter (comma, tab, semicolon)
-- Validate required fields after parsing and surface errors in UI
-- Case-insensitive field name matching
-- Clear error message when card is found but programming data is incomplete
+Fatal parse errors (unreadable file, corrupt content) are shown as an error
+dialog. Soft issues (missing columns) appear as warning dialogs.
