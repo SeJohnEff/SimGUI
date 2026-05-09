@@ -113,6 +113,9 @@ class SimGUIApp:
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
 
+        # Non-blocking dialog for "No reader" warning
+        self._no_reader_dialog: Optional[tk.Toplevel] = None
+
         # Shared state: last card data read from Read SIM tab
         self.last_read_data: dict[str, str] = {}
 
@@ -375,12 +378,75 @@ class SimGUIApp:
         def on_reader_ready():
             self.root.after(0, self._on_reader_ready)
 
+        def on_reading():
+            self.root.after(0, self._on_card_reading)
+
         self._card_watcher.on_card_detected = on_detected
         self._card_watcher.on_card_unknown = on_unknown
         self._card_watcher.on_card_removed = on_removed
         self._card_watcher.on_error = on_error
         self._card_watcher.on_reader_ready = on_reader_ready
+        self._card_watcher.on_reading = on_reading
         self._card_watcher.start()
+
+    def _check_pcscd_health(self):
+        """Check if pcscd (PC/SC daemon) is running.
+
+        Runs from the background startup thread. Warns the user if
+        pcscd is not active.
+        """
+        if self._mode_var.get() != "hardware":
+            return
+        if self._card_manager.cli_backend == CLIBackend.NONE:
+            return
+
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'pcscd'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode != 0:
+                msg = "pcscd service is not running. Card reader detection will not work."
+                logger.warning(msg)
+                self.root.after(0, self._show_pcscd_warning)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # systemctl not available (non-systemd system) or timeout — skip check
+            pass
+        except Exception as exc:
+            logger.debug("pcscd health check error: %s", exc)
+
+    def _show_pcscd_warning(self):
+        """Show a non-blocking banner warning that pcscd is not running."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("pcscd Not Running")
+        dlg.resizable(False, False)
+        dlg.geometry("500x180")
+
+        pad_m = ModernTheme.get_padding('medium')
+
+        msg_frame = ttk.Frame(dlg, padding=pad_m)
+        msg_frame.pack(fill=tk.BOTH, expand=True)
+
+        body = (
+            "The PC/SC daemon (pcscd) is not running.\n\n"
+            "To enable it now, run:\n"
+            "  sudo systemctl start pcscd\n\n"
+            "To enable it permanently:\n"
+            "  sudo systemctl enable --now pcscd\n"
+        )
+
+        msg_label = ttk.Label(msg_frame, text=body, justify=tk.LEFT)
+        msg_label.pack(fill=tk.BOTH, expand=True)
+
+        btn_frame = ttk.Frame(dlg, padding=pad_m)
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(
+            btn_frame, text="OK",
+            command=dlg.destroy
+        ).pack(side=tk.RIGHT)
+
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
 
     def _startup_detect_card(self):
         """Trigger an initial card detection at startup for Hardware Mode.
@@ -425,7 +491,10 @@ class SimGUIApp:
         return any(kw in lower for kw in self._READER_ERROR_KEYWORDS)
 
     def _show_no_reader_warning(self, detail: str = ""):
-        """Show a popup warning about missing USB smart-card reader."""
+        """Show a non-blocking banner warning about missing USB smart-card reader.
+
+        The dialog auto-dismisses when the reader becomes available.
+        """
         body = (
             "No USB smart-card reader detected.\n\n"
             "Please check:\n"
@@ -435,12 +504,49 @@ class SimGUIApp:
         )
         if detail:
             body += f"\nDetail: {detail}"
-        messagebox.showwarning("No Card Reader", body)
+        if self._no_reader_dialog is not None:
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("No Card Reader")
+        dlg.resizable(False, False)
+        dlg.geometry("500x200")
+
+        pad_m = ModernTheme.get_padding('medium')
+
+        msg_frame = ttk.Frame(dlg, padding=pad_m)
+        msg_frame.pack(fill=tk.BOTH, expand=True)
+
+        msg_label = ttk.Label(msg_frame, text=body, justify=tk.LEFT)
+        msg_label.pack(fill=tk.BOTH, expand=True)
+
+        btn_frame = ttk.Frame(dlg, padding=pad_m)
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(
+            btn_frame, text="OK",
+            command=self._dismiss_no_reader_dialog
+        ).pack(side=tk.RIGHT)
+
+        dlg.protocol("WM_DELETE_WINDOW", self._dismiss_no_reader_dialog)
+
+        self._no_reader_dialog = dlg
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
+    def _dismiss_no_reader_dialog(self):
+        """Close the non-blocking no-reader warning dialog."""
+        if self._no_reader_dialog is not None:
+            self._no_reader_dialog.destroy()
+            self._no_reader_dialog = None
+
+    def _on_card_reading(self):
+        """Card ATR detected; about to read card data (runs on main thread)."""
+        self._card_panel.set_status("waiting", "Reading card...")
+        self._status_var.set("Reading card...")
+
     def _on_reader_ready(self):
         """Reader became available after being absent."""
+        self._dismiss_no_reader_dialog()
         self._card_panel.set_status("waiting", "Insert a SIM card...")
         self._status_var.set("Insert a SIM card...")
 
@@ -541,7 +647,13 @@ class SimGUIApp:
         # 6. Start the periodic indicator refresh (first poll after 30 s)
         self.root.after(0, self._start_share_indicator_poll)
 
-        # 7. Initial card detection (pySim-read can take 10-30 s).
+        # 7. Check pcscd health
+        try:
+            self._check_pcscd_health()
+        except Exception as exc:
+            logger.warning("pcscd health check failed: %s", exc)
+
+        # 8. Initial card detection (pySim-read can take 10-30 s).
         #    Runs LAST so that network/indicator is already up.
         try:
             self._startup_detect_card()

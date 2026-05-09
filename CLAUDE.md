@@ -272,6 +272,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - `detect_card()` retries pySim-read once after 1 s on "protocolerror" — transient PCSC lock contention clears within 1 s.
 - Blank gialersim cards have no ICCID — hardware tests must NOT assert `"ICCID" in card_info`; assert `card_type != UNKNOWN or card_info` instead.
 - Always verify ALL related changes are complete before committing — e.g. renaming a flag requires updating every reference across all files before pushing, not just the primary location.
+- pyscard module-level cache (`_pyscard_available`) is set once and persists for the process lifetime — if pcscd is not running at app startup, the cache is set to `False` and never re-evaluated. Solution: add a `reset_pyscard()` function to clear the cache and force re-import. CardWatcher calls this periodically when no reader is detected, enabling automatic recovery when pcscd/USB becomes available. Fixed in v0.5.36.
 
 ## StateManager Signal Architecture
 

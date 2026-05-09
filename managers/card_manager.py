@@ -101,6 +101,19 @@ def _init_pyscard(venv_python: Optional[str] = None) -> bool:
     return False
 
 
+def reset_pyscard() -> None:
+    """Force _init_pyscard to re-run on next probe call.
+
+    Used when the PC/SC system state changes (e.g. pcscd restarts, reader
+    reconnects) and we need to force a fresh enumeration. Clears the module-level
+    cache so _init_pyscard will attempt import and context establishment again.
+    """
+    global _pyscard_available, _smartcard_readers
+    _pyscard_available = None
+    _smartcard_readers = None
+    logger.debug("pyscard cache cleared; next probe will re-initialize")
+
+
 class CardType(Enum):
     UNKNOWN = auto()
     SJS1 = auto()
@@ -245,6 +258,14 @@ class CardManager:
         }
 
     # ---- helpers -------------------------------------------------------
+
+    def reset_pyscard(self) -> None:
+        """Force pyscard re-initialization on next probe.
+
+        Call this when the PC/SC system state may have changed (e.g. pcscd
+        restarted, reader reconnected, or pyscard context became stale).
+        """
+        reset_pyscard()
 
     def _validate_script_path(self, script: str) -> Optional[str]:
         """Resolve and validate a script path, preventing traversal."""

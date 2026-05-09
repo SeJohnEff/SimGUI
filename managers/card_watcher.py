@@ -12,6 +12,9 @@ Detection uses a two-tier approach:
      Called once when a new card is detected (ATR changes).
 
 Events (callbacks):
+  on_reading()
+      Card ATR detected; about to read card data (before pySim-read blocks).
+      Fired immediately, before on_card_detected/on_card_unknown.
   on_card_detected(iccid, card_data, file_path)
       Card inserted, matched in index.  *card_data* is the full profile.
   on_card_unknown(iccid)
@@ -34,6 +37,10 @@ import threading
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# Reset pyscard roughly every 10 seconds (7 polls at 1.5s interval) when
+# no reader is detected, to handle stale PC/SC context or pcscd becoming available.
+_NO_READER_RESET_AFTER = 7
 
 
 class CardWatcher:
@@ -79,6 +86,10 @@ class CardWatcher:
         # that re-insertion of the same card (same ATR) is recognised
         # immediately without relying on pySim-read succeeding.
         self._atr_iccid_cache: dict[str, str] = {}
+        # Counter for "no reader" condition — after N consecutive polls
+        # without a reader, force pyscard re-initialization to handle
+        # stale PC/SC context or pcscd becoming available.
+        self._no_reader_poll_count: int = 0
 
         # Callbacks (set by UI layer)
         self.on_card_detected: Optional[
@@ -87,6 +98,7 @@ class CardWatcher:
         self.on_card_removed: Optional[Callable[[], None]] = None
         self.on_reader_ready: Optional[Callable[[], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
+        self.on_reading: Optional[Callable[[], None]] = None
 
     @property
     def index(self):
@@ -229,13 +241,20 @@ class CardWatcher:
           (False, other error)              → reader error
         """
         if present:
-            # Card is in reader — reset removal debounce
+            # Card is in reader — reset removal debounce and no-reader counter
             self._no_card_streak = 0
+            self._no_reader_poll_count = 0
             atr = msg
             if not self._card_present or atr != self._last_atr:
                 self._card_present = True
                 self._last_atr = atr
                 logger.info("CardWatcher: card present (ATR=%s), reading...", atr)
+                # Signal UI that we're about to read the card (immediate feedback)
+                if self.on_reading:
+                    try:
+                        self.on_reading()
+                    except Exception:
+                        pass
                 self._read_and_notify()
             # Otherwise same card still present — do nothing
 
@@ -277,6 +296,17 @@ class CardWatcher:
                 self._last_iccid = None
                 self._last_atr = None
                 self._atr_iccid_cache.clear()
+            # Periodic pyscard reset: every ~10 seconds when no reader detected,
+            # force re-initialization in case PC/SC context is stale or pcscd
+            # just became available.
+            self._no_reader_poll_count += 1
+            if self._no_reader_poll_count >= _NO_READER_RESET_AFTER:
+                self._no_reader_poll_count = 0
+                try:
+                    self._cm.reset_pyscard()
+                    logger.debug("Reset pyscard context (no reader detected)")
+                except Exception:
+                    pass
             if self.on_error:
                 try:
                     self.on_error(msg)

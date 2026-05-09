@@ -26,14 +26,16 @@ This script:
 
 1. Installs build dependencies (`python3`, `python3-pip`, `python3-venv`, `dpkg-dev`, etc.)
 2. Clones and sets up **pySim** at `/opt/pysim` with its own virtual environment and dependencies
-3. Builds the `.deb` package from source
-4. Installs the `.deb` including all runtime dependencies:
+3. Applies the GialerSim SPN patch to pySim automatically
+4. Builds the `.deb` package from source
+5. Installs the `.deb` including all runtime dependencies:
    - `smbclient` — SMB share access
    - `avahi-utils` — mDNS network discovery
    - `cifs-utils` — CIFS/SMB mount support
    - `nfs-common` — NFS mount support
    - `pcscd`, `pcsc-tools` — PCSC daemon for card readers
-5. Configures a sudoers rule for password-free network mount/unmount
+6. **Enables and starts pcscd immediately** so the card reader is detected right away
+7. Configures a sudoers rule for password-free network mount/unmount
 
 After installation, SimGUI is available as:
 
@@ -68,22 +70,27 @@ See [CLI integration reference](../reference/cli-integration.md) for full auto-d
 
 ---
 
-## Enable the PCSC daemon
+## Verify the PCSC daemon
 
-The PCSC daemon must be running for the card reader to work:
-
-```bash
-sudo systemctl enable pcscd
-sudo systemctl start pcscd
-```
-
-Verify the reader is visible:
+The install script automatically enables and starts the PCSC daemon (`pcscd`). Verify the reader is visible:
 
 ```bash
 pcsc_scan
 ```
 
 Insert a card — `pcsc_scan` should print the ATR and card information.
+
+If `pcsc_scan` reports "No reader detected," the daemon may need to be manually started:
+
+```bash
+sudo systemctl start pcscd
+```
+
+To ensure pcscd survives a reboot:
+
+```bash
+sudo systemctl enable pcscd
+```
 
 ---
 

@@ -48,6 +48,11 @@ if ! apt-get update -qq 2>&1; then
 fi
 apt-get install -y -qq git dpkg-dev debhelper pcscd pcsc-tools python3-pyscard 2>&1 | grep -v "is already the newest" || true
 
+# Enable pcscd so the reader is detected immediately and on reboot
+info "Enabling pcscd service..."
+systemctl enable pcscd 2>/dev/null || warn "Could not enable pcscd (socket activation may handle it)"
+systemctl start pcscd 2>/dev/null || warn "Could not start pcscd (may not be needed until reader is connected)"
+
 # --- Clone into temp directory ----------------------------------
 BUILD_DIR=$(mktemp -d /tmp/simgui-build.XXXXXX)
 trap 'rm -rf "$BUILD_DIR"' EXIT
@@ -127,6 +132,39 @@ if [ -d "$PYSIM_DIR" ] && [ -f "$PYSIM_DIR/pySim-shell.py" ]; then
             warn "pySim package install failed"
     fi
     info "pySim ready at $PYSIM_DIR"
+
+    # Apply GialerSim SPN patch if not already applied
+    PYSIM_CARDS="$PYSIM_DIR/pySim/legacy/cards.py"
+    if [ -f "$PYSIM_CARDS" ]; then
+        if grep -q "'name'" "$PYSIM_CARDS"; then
+            info "GialerSim SPN patch already applied."
+        else
+            info "Applying GialerSim SPN patch..."
+            python3 - "$PYSIM_CARDS" <<'PYEOF'
+import sys
+path = sys.argv[1]
+try:
+    text = open(path).read()
+    # Find the GialerSim _program_handlers dict and add 'name' key
+    old = "'opc': lambda opc: self.update_uicc_auth_key(ki=None, opc=opc),"
+    new = (old + "\n            'name': lambda name: self.update_spn("
+           "name=name, show_in_hplmn=True, hide_in_oplmn=False),")
+    if old in text and "'name'" not in text:
+        open(path, 'w').write(text.replace(old, new))
+        print("Patch applied.")
+    else:
+        print("Patch skipped (already applied or pattern not found).")
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+            if grep -q "'name'" "$PYSIM_CARDS"; then
+                info "GialerSim SPN patch applied successfully."
+            else
+                warn "GialerSim SPN patch could not be applied — SPN writes to blank cards will be silently skipped."
+            fi
+        fi
+    fi
 fi
 
 # --- Sudoers rule for network mounts ----------------------------

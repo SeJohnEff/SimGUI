@@ -1,3 +1,25 @@
+simgui (0.5.36) unstable; urgency=medium
+
+  * fix: USB reader not detected on app restart — pyscard module-level
+    cache was set to False once and never cleared; added reset_pyscard()
+    function to allow re-initialization; CardWatcher now resets pyscard
+    cache every ~10 seconds when no reader is detected, so reader is
+    found automatically when pcscd/USB recovers without requiring replug
+  * feat: immediate "Reading card..." feedback when card ATR detected —
+    added on_reading callback to CardWatcher, fired before pySim-read
+    blocks; eliminates silent 3-4 second gap
+  * ux: replace blocking "No reader" popup with non-modal Toplevel banner
+    that auto-dismisses when reader becomes available; prevents dialog
+    from halting the UI after VM USB passthrough is enabled
+  * feat: pcscd health check at startup — warns if pcscd is not running
+    with exact commands to enable it; non-blocking dialog auto-closes
+  * build: install.sh now enables pcscd with systemctl enable --now so
+    it's running immediately and persists through reboots
+  * build: install.sh applies GialerSim SPN patch automatically after
+    pySim setup; removes need for manual patch after each pySim update
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Fri, 09 May 2026 23:30:00 +0100
+
 simgui (0.5.35) unstable; urgency=medium
 
   * fix: debounce blank-card removal in CardWatcher — require two
