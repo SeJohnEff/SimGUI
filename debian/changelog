@@ -1,3 +1,13 @@
+simgui (0.5.30) unstable; urgency=medium
+
+  * fix: detect_card() retries once on transient 'protocolerror' from
+    pySim-read (PCSC lock contention clears within 1 s); delay is 1.0 s
+  * test: detect_card() retries once on protocolerror, not on other errors
+  * test: fix test_detect_real_card — blank gialersim has no ICCID; assert
+    card_type != UNKNOWN or card_info instead of "ICCID" in card_info
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Fri, 08 May 2026 12:00:00 +0100
+
 simgui (0.5.29) unstable; urgency=medium
 
   * fix: authenticate() returns False when no card has been detected;

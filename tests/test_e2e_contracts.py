@@ -911,7 +911,11 @@ class TestHardwareGated:
 
     @hardware
     def test_detect_real_card(self):
-        """detect_card() succeeds with a real SIM inserted."""
+        """detect_card() succeeds with a real SIM inserted.
+
+        Works for both pre-programmed cards (ICCID present) and blank
+        gialersim cards (no ICCID, but pySim-read still succeeds).
+        """
         cm = CardManager()
         path, backend = _find_cli_tool()
         if path is None:
@@ -919,7 +923,10 @@ class TestHardwareGated:
         cm.set_cli_path(path)
         ok, msg = cm.detect_card()
         assert ok is True, f"detect_card failed: {msg}"
-        assert "ICCID" in cm.card_info
+        # Pre-programmed cards have ICCID; blank gialersim cards do not.
+        assert cm.card_type != CardType.UNKNOWN or cm.card_info, (
+            "Expected card type or card info to be populated after detection"
+        )
 
     @hardware
     def test_authenticate_real_card(self):

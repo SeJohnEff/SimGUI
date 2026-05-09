@@ -26,6 +26,11 @@
   9. `test_interface_contracts` — added `docs` to `_SKIP_DIRS`; added `on_reader_ready` to callback patterns; fixed AST checker to handle `ast.AnnAssign`.
   - **Final result: 2154 passed, 14 skipped, 0 failures.**
 
+- [x] **FIXED (session 2026-05-08): Hardware test robustness** — `test_detect_real_card` was failing with "protocolerror" due to transient PCSC lock contention when pySim-read is first invoked. Two fixes:
+  1. `detect_card()` now retries once (after 1 s delay) when pySim-read returns "protocolerror"; PCSC contention clears within 1 s.
+  2. `test_detect_real_card` assertion updated — blank gialersim cards have no ICCID; assert `card_type != UNKNOWN or card_info` instead of `"ICCID" in card_info`.
+  - **Bumped to v0.5.30.**
+
 ## Completed (v0.5.18–0.5.20)
 
 - [x] Detect pySim-shell APDU errors (SwMatchError/6f00) even on exit code 0

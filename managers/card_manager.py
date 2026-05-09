@@ -380,6 +380,10 @@ class CardManager:
 
         if self.cli_backend == CLIBackend.PYSIM:
             ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            if not ok and 'protocolerror' in stderr.lower():
+                # Transient PCSC lock contention — retry once after a short delay.
+                time.sleep(1.0)
+                ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
             if ok:
                 self._parse_pysim_output(stdout)
                 self._original_card_data = dict(self.card_info)  # snapshot

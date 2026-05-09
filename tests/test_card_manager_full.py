@@ -507,6 +507,34 @@ class TestDetectCard:
         # card_type is not set by pySim path (hardware limitation) but card_info is
         assert "ICCID" in cm.card_info
 
+    def test_detect_retries_once_on_protocolerror(self, tmp_path):
+        """detect_card() retries once when pySim-read returns protocolerror."""
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        # First call: transient protocolerror; second call: success
+        side_effects = [
+            (False, "", "smartcard.Exceptions.CardConnectionException: ProtocolError"),
+            (True, "ICCID: 8946000000\nIMSI: 001010000", ""),
+        ]
+        with patch.object(cm, "_run_cli", side_effect=side_effects) as m, \
+             patch("managers.card_manager.time.sleep") as mock_sleep:
+            ok, msg = cm.detect_card()
+        assert ok is True
+        assert m.call_count == 2
+        mock_sleep.assert_called_once_with(1.0)
+
+    def test_detect_no_retry_on_other_errors(self, tmp_path):
+        """detect_card() does NOT retry on non-transient errors."""
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        with patch.object(cm, "_run_cli",
+                          return_value=(False, "", "No card in reader")) as m:
+            ok, msg = cm.detect_card()
+        assert ok is False
+        assert m.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # verify_card
