@@ -798,12 +798,15 @@ class CardManager:
         # blank Fiskarheden cards share the same default ADM1 so a mismatch
         # cannot lock the wrong card.
         if expected_iccid is not None:
-            _orig = self._original_card_data or {}
-            _is_blank_or_gialersim = (
-                self.card_type == CardType.GIALERSIM
-                or (not _orig.get('ICCID') and not _orig.get('IMSI'))
+            _orig = self._original_card_data  # None=no card, {}=blank, {...}=data
+            _is_gialersim = self.card_type == CardType.GIALERSIM
+            # Blank: card WAS detected (_orig is not None) but has no ICCID/IMSI
+            _is_blank = (
+                _orig is not None
+                and not _orig.get('ICCID')
+                and not _orig.get('IMSI')
             )
-            if not _is_blank_or_gialersim:
+            if not (_is_gialersim or _is_blank):
                 card_iccid = self.read_iccid()
                 if card_iccid and card_iccid != expected_iccid:
                     return False, (
