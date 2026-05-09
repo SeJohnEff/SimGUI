@@ -493,12 +493,13 @@ class SimGUIApp:
     def _show_no_reader_warning(self, detail: str = ""):
         """Show a toast warning about missing USB smart-card reader.
 
-        The toast auto-dismisses after a timeout.
+        The toast stays visible until the user closes it or the reader is reconnected.
         """
         msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner)."
         if detail:
             msg += f" ({detail})"
-        show_toast(self.root, msg, level="warning", duration=1000)
+        # High duration (10 minutes) so toast stays visible until reconnected
+        show_toast(self.root, msg, level="warning", duration=600000)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
