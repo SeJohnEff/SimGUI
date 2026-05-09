@@ -495,9 +495,7 @@ class SimGUIApp:
 
         The toast stays visible until the user closes it or the reader is reconnected.
         """
-        msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner)."
-        if detail:
-            msg += f" ({detail})"
+        msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner). Disconnect/connect in top right menu."
         # High duration (10 minutes) so toast stays visible until reconnected
         show_toast(self.root, msg, level="warning", duration=600000)
         self._card_panel.set_status("error", "No card reader detected")
