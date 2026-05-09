@@ -114,6 +114,8 @@ docs/                      # Diátaxis documentation
 
 ```
 authenticate(adm1_ascii):
+  0. If _original_card_data is None AND no card_info:
+     → Return False, "No SIM card detected" (no detect_card() ever succeeded)
   1. Check retry counter (abort if 0 — card blocked)
   2. If card is blank/gialersim OR has no ICCID/IMSI:
      → Store ADM1 for later pySim-prog use
@@ -159,8 +161,15 @@ python pySim-shell.py -p 0 -A <hex_ADM1>
 
 ## Empty Card Detection
 
+`_original_card_data` sentinel:
+- `None` — no card detected yet (initial state; also set by `disconnect()`).
+  `authenticate()` returns False immediately when sentinel is None.
+- `{}` — card detected but blank (gialersim: no ICCID, no IMSI).
+  `_is_empty_card()` returns True.
+- `{…data…}` — card detected and has fields.
+
 `_is_empty_card()` returns True if ANY of:
-1. `_original_card_data` is falsy (None or empty dict)
+1. `_original_card_data` is falsy (`None` or `{}`)
 2. `_original_card_data` has no ICCID AND no IMSI (partial read, like ACC-only)
 3. `card_type == CardType.GIALERSIM`
 
@@ -190,8 +199,9 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 ## Testing
 
 - Framework: pytest
-- 2044+ tests, 48 skipped (Qt/GUI tests needing display)
-- Run: `python -m pytest tests/ -x -q`
+- 2156 passed, 14 skipped (Qt/GUI tests needing display, hardware-gated)
+- Hardware-gated tests: `SIMGUI_HW_TEST=1 python3 -m pytest tests/test_e2e_contracts.py::TestHardwareGated -v`
+- Run: `python3 -m pytest tests/ -x -q`
 - Key test files:
   - `tests/test_empty_card_programming.py` — blank/gialersim card flows
   - `tests/test_card_manager.py` — core card manager unit tests
@@ -255,7 +265,10 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
   accessible via standard VERIFY-no-data APDU (shows as `-`, acceptable)
 - gialersim cards are incompatible with 5G SA networks using 5G-AKA — Magma with `enable5gFeatures: true` sends `xresStar`/`kseaf` auth vectors that gialersim cannot compute. Use SJA5 cards for 5G SA deployments.
 - pcscd must be installed as a system dependency — was missing from install.sh, causing "No card reader detected" on fresh Ubuntu installs. Fixed in v0.5.27.
-- After dismissing "No card reader" popup and connecting a reader, the status label does not refresh to "Insert a SIM card..." — known minor UI issue, card still works correctly when inserted.
+- After dismissing "No card reader" popup and connecting a reader, the status label now refreshes to "Insert a SIM card..." via the `on_reader_ready` CardWatcher callback. Fixed in v0.5.28.
+- `_original_card_data` sentinel: `None` = no card detected, `{}` = blank card detected. Never confuse the two — `authenticate()` returns False for `None` (no card), but succeeds (blank path) for `{}`.
+- `detect_card()` retries pySim-read once after 1 s on "protocolerror" — transient PCSC lock contention clears within 1 s.
+- Blank gialersim cards have no ICCID — hardware tests must NOT assert `"ICCID" in card_info`; assert `card_type != UNKNOWN or card_info` instead.
 - Always verify ALL related changes are complete before committing — e.g. renaming a flag requires updating every reference across all files before pushing, not just the primary location.
 
 ## StateManager Signal Architecture
@@ -295,6 +308,6 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 ## Project Stats
 
 - Started: 2026-02-28
-- ~48 hours of development across 13 sessions over 18 calendar days
-- 12,600+ lines of application code, 2067+ tests
-- 97+ commits, versions v0.1.0 through v0.5.21
+- ~48 hours of development across 14 sessions over 21 calendar days
+- 12,600+ lines of application code, 2156+ tests
+- 100+ commits, versions v0.1.0 through v0.5.30
