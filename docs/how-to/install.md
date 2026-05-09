@@ -106,6 +106,44 @@ Log out and back in for the group change to take effect.
 
 ---
 
+## Using SimGUI with UTM (macOS)
+
+If running Ubuntu in UTM on macOS, additional USB configuration is required for the card reader to work reliably.
+
+### Enable USB Sharing in UTM
+
+1. Open your SimGUI VM in UTM
+2. Go to **Settings → Input**
+3. Enable the **"USB sharing"** toggle (specify max shared devices if prompted)
+4. Restart the VM for the setting to take effect
+
+### Configure the Card Reader for Auto-Connect
+
+1. In the running UTM VM, click the **USB icon in the top-right corner**
+2. Find your card reader (e.g., "Realtek Semiconductor Smart Card Reader")
+3. Click to attach it to the VM
+4. In the device list, check the **"auto-connect"** checkbox for the reader
+
+### Workflow
+
+**At startup:**
+- USB reader must be physically connected to the Mac before starting the VM
+- With auto-connect enabled, the reader will be automatically available in the VM
+- Start SimGUI and the reader will be detected
+
+**If the reader is unplugged during use:**
+- SimGUI will show a notification that the reader is missing
+- A background monitoring service will detect when the reader is re-connected
+- You will see a desktop notification: *"SmartCard Reader detected — toggle in UTM's USB menu"*
+- Click the USB icon in UTM's top-right corner and toggle the reader to re-attach it
+- SimGUI will detect it within 10 seconds
+
+**If issues persist:**
+- As a last resort, you can reboot the VM (the reader will auto-attach on restart)
+- Or manually disconnect/reconnect the reader in UTM's USB device menu
+
+---
+
 ## Verify the installation
 
 ```bash
