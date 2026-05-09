@@ -279,7 +279,7 @@ class TestConnectShare:
 
             dlg._populate_shares = track_populate
 
-            with patch("dialogs.load_card_file_dialog.NetworkStorageDialog"):
+            with patch("dialogs.network_storage_dialog.NetworkStorageDialog"):
                 dlg._on_connect_share()
 
             assert len(populate_called) >= 1
