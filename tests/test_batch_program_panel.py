@@ -129,5 +129,6 @@ class TestStartErrorMessages:
     @patch("widgets.batch_program_panel.messagebox")
     def test_no_error_when_preview_data_exists(self, mock_mb, panel):
         panel._preview_data = [{"IMSI": "123", "ICCID": "456", "ADM1": "abc"}]
-        panel._on_start()
+        with patch.object(panel._batch_mgr, 'start'):
+            panel._on_start()
         mock_mb.showinfo.assert_not_called()
