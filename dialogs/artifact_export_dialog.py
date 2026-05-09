@@ -7,6 +7,8 @@ share is connected, it is offered as a quick destination alongside local
 file browse.
 """
 
+from typing import Optional, Union
+
 import csv
 import os
 import tkinter as tk
@@ -32,8 +34,8 @@ class ArtifactExportDialog(tk.Toplevel):
     """Modal dialog for exporting programming artifacts."""
 
     def __init__(self, parent, records: list[dict],
-                 ns_manager: NetworkStorageManager | None = None,
-                 default_fields: list[str] | None = None):
+                 ns_manager: Optional[NetworkStorageManager]= None,
+                 default_fields: Optional[list[str]]= None):
         """
         Parameters
         ----------

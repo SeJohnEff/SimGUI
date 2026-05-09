@@ -5,6 +5,8 @@ Program multiple SIM cards sequentially.
 Data comes from a CSV or from an auto-generated IMSI/ICCID sequence.
 """
 
+from typing import Optional, Union
+
 import csv
 import logging
 import os
@@ -81,7 +83,7 @@ class BatchProgramPanel(ttk.Frame):
         self._ns_manager = ns_manager
         self._iccid_index = iccid_index
         self._auto_artifact = auto_artifact_manager
-        self._last_browse_dir: str | None = None
+        self._last_browse_dir: Optional[str]= None
         self._batch_mgr = BatchManager(card_manager, card_watcher=card_watcher)
         self._csv = CSVManager()
         self._all_csv_cards: list[dict[str, str]] = []  # all rows from CSV

@@ -6,6 +6,8 @@ instantiates each class (covering __init__ + _build_ui), then exercises
 public methods to maximise statement coverage.
 """
 
+from typing import Optional, Union
+
 import importlib
 import importlib.util
 import os
@@ -192,7 +194,7 @@ def _build_mocks():
 
 
 def _load_module(module_rel_path: str, module_name: str,
-                 extra_mocks: dict | None = None):
+                 extra_mocks: Optional[dict]= None):
     """Load a source module under mocked tkinter."""
     _tk, _ttk, _th, _tp = _build_mocks()
 

@@ -13,7 +13,6 @@ a = Analysis(
     datas=[
         ('simulator/data', 'simulator/data'),
         ('assets', 'assets'),
-        ('docs', 'docs'),
     ],
     hiddenimports=[
         'smartcard',
@@ -44,7 +43,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # Disable UPX to avoid bytecode issues
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # No console window on macOS

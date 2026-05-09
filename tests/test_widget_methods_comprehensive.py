@@ -5,6 +5,8 @@ us to test actual source methods on fake `self` objects without a real
 display server.
 """
 
+from typing import Optional, Union
+
 import csv
 import importlib
 import importlib.util
@@ -110,7 +112,7 @@ def _build_mocks():
     return _tk, _ttk, _th, _tp
 
 
-def _load_module(module_rel_path: str, module_name: str, extra_mocks: dict | None = None):
+def _load_module(module_rel_path: Optional[str, module_name: str, extra_mocks: dict]= None):
     """Load a module with mocked tkinter using importlib.
 
     Args:

@@ -11,6 +11,8 @@ Layout uses a vertical PanedWindow so the operator can drag the divider
 to give more space to the card-data fields or the CSV table.
 """
 
+from typing import Optional, Union
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -37,13 +39,13 @@ class ProgramSIMPanel(ttk.Frame):
     """Tab for programming a single SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
-                 last_read_data: dict | None = None,
+                 last_read_data: Optional[dict]= None,
                  ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
-        self._last_browse_dir: str | None = None
+        self._last_browse_dir: Optional[str]= None
         self._csv = CSVManager()
         self._last_read_data = last_read_data if last_read_data is not None else {}
         self._mode_var = tk.StringVar(value="manual")

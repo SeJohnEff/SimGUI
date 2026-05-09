@@ -21,6 +21,8 @@ They will be replaced in Phases 1–3.
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import logging
 import os
 import sys
@@ -67,7 +69,7 @@ logger = logging.getLogger(__name__)
 class _PlaceholderPanel(QWidget):
     """Temporary stub for tabs not yet migrated."""
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(self, title: Optional[str, parent: QWidget]= None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         label = QLabel(f"{title}\n(migration in progress)")

@@ -1,6 +1,7 @@
 """Utility functions for SimGUI."""
 
 import os
+from typing import Optional
 
 from utils.iccid_utils import (
     compute_luhn_check,
@@ -12,7 +13,7 @@ from utils.network_scanner import DiscoveredServer, list_smb_shares, scan_smb_se
 from utils.validation import validate_adm1, validate_hex_field, validate_iccid, validate_imsi
 
 
-def get_browse_initial_dir(ns_manager=None, last_dir: str | None = None) -> str | None:
+def get_browse_initial_dir(ns_manager=None, last_dir: Optional[str] = None) -> Optional[str]:
     """Return the best initial directory for file browse dialogs.
 
     Priority:

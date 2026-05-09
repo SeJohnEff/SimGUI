@@ -11,6 +11,8 @@ All methods are optional: if the required tool is not installed the
 function returns an empty list and logs a warning.
 """
 
+from typing import Optional, Union
+
 import logging
 import subprocess
 import sys
@@ -85,7 +87,7 @@ def _parse_dns_sd_output(output: str) -> list[DiscoveredServer]:
     We extract hostname and IP from the "Instance Name" and "Extra" lines.
     """
     servers: dict[str, DiscoveredServer] = {}
-    current_name: str | None = None
+    current_name: Optional[str]= None
 
     for line in output.splitlines():
         line_stripped = line.strip()
@@ -143,7 +145,7 @@ def _parse_nmblookup_output(output: str) -> list[DiscoveredServer]:
     back to showing just the IP.
     """
     servers: dict[str, DiscoveredServer] = {}
-    current_ip: str | None = None
+    current_ip: Optional[str]= None
 
     for line in output.splitlines():
         stripped = line.strip()

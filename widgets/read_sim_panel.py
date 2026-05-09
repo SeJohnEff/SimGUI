@@ -11,6 +11,8 @@ This tab observes the card manager state — call refresh() after
 a detect/mode change from the main window.
 """
 
+from typing import Optional, Union
+
 import csv
 import os
 import tkinter as tk
@@ -58,13 +60,13 @@ class ReadSIMPanel(ttk.Frame):
     """Tab that guides the user through reading a SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
-                 last_read_data: dict | None = None,
+                 last_read_data: Optional[dict]= None,
                  ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
-        self._last_browse_dir: str | None = None
+        self._last_browse_dir: Optional[str]= None
         self._last_read_data = last_read_data if last_read_data is not None else {}
         self._public_data: dict = {}
         self._protected_data: dict = {}

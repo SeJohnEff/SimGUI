@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """CSV Editor Panel Widget - Treeview-based CSV table editor"""
@@ -21,7 +23,7 @@ class CSVEditorPanel(ttk.Frame):
         super().__init__(parent, **kwargs)
         self._csv_manager = CSVManager()
         self._ns_manager = ns_manager
-        self._last_browse_dir: str | None = None
+        self._last_browse_dir: Optional[str]= None
         self._unsaved_changes = False
         self._create_widgets()
 

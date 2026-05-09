@@ -20,7 +20,7 @@ Usage::
 from __future__ import annotations
 
 import platform
-from typing import Any
+from typing import Optional, Union, Any
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +461,7 @@ class QtTheme:
     FONTS = FONTS
     PADDING = PADDING
 
-    _stylesheet: str | None = None
+    _stylesheet: Optional[str]= None
 
     @classmethod
     def apply(cls, app: Any) -> None:

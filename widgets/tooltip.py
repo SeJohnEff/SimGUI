@@ -5,6 +5,8 @@ Shows a small popup with help text when the mouse hovers over a widget.
 Supports multi-line text and automatic edge-of-screen repositioning.
 """
 
+from typing import Optional, Union
+
 import tkinter as tk
 
 
@@ -24,8 +26,8 @@ class Tooltip:
     def __init__(self, widget: tk.Widget, text: str):
         self._widget = widget
         self._text = text
-        self._tip_window: tk.Toplevel | None = None
-        self._after_id: str | None = None
+        self._tip_window: Optional[tk.Toplevel]= None
+        self._after_id: Optional[str]= None
         widget.bind("<Enter>", self._on_enter, add="+")
         widget.bind("<Leave>", self._on_leave, add="+")
         widget.bind("<ButtonPress>", self._on_leave, add="+")

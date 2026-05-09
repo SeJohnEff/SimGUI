@@ -38,7 +38,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Union, Any, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -187,7 +187,7 @@ class StateManager(QObject):
     card_programmed = pyqtSignal(dict)
     iccid_index_updated = pyqtSignal()
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: Optional[QObject]= None) -> None:
         super().__init__(parent)
 
         # Internal state
@@ -276,7 +276,7 @@ class StateManager(QObject):
 
     def update_share_status(
         self,
-        mount_paths: list[tuple[str, str]] | None = None,
+        mount_paths: Optional[list[tuple[str, str]]]= None,
     ) -> None:
         """Refresh share status from the active mount list.
 
@@ -320,9 +320,9 @@ class StateManager(QObject):
 
     def update_simulator_info(
         self,
-        current_index: int | None = None,
-        total_cards: int | None = None,
-        active: bool | None = None,
+        current_index: Optional[int]= None,
+        total_cards: Optional[int]= None,
+        active: Optional[bool]= None,
     ) -> None:
         """Update simulator info and emit if changed."""
         changed = False

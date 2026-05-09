@@ -19,6 +19,8 @@ UX principles:
   until the user explicitly saves.
 """
 
+from typing import Optional, Union
+
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -98,9 +100,9 @@ class NetworkStorageDialog(tk.Toplevel):
 
         self._ns = ns_manager
         self._profiles: list[StorageProfile] = ns_manager.load_profiles()
-        self._current_idx: int | None = None
+        self._current_idx: Optional[int]= None
         self._field_vars: dict[str, tk.BooleanVar] = {}
-        self._tooltip_win: tk.Toplevel | None = None
+        self._tooltip_win: Optional[tk.Toplevel]= None
         self._dirty: bool = False  # True when form has unsaved changes
 
         # Build server history from saved profiles
@@ -709,7 +711,7 @@ class NetworkStorageDialog(tk.Toplevel):
 
     # ---- Actions -------------------------------------------------------
 
-    def _form_to_profile(self) -> StorageProfile | None:
+    def _form_to_profile(self) -> Optional[StorageProfile]:
         """Read form into a StorageProfile (validates required fields).
 
         If the Name field is blank, auto-generates one from server + share.
@@ -746,7 +748,7 @@ class NetworkStorageDialog(tk.Toplevel):
             export_fields=fields,
         )
 
-    def _save_profile(self) -> StorageProfile | None:
+    def _save_profile(self) -> Optional[StorageProfile]:
         """Save or update the current profile from the form.
 
         Returns the saved profile on success, None on validation failure.
