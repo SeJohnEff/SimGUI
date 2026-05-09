@@ -115,6 +115,7 @@ class SimGUIApp:
 
         # Track whether "no reader" toast has been shown in current disconnection state
         self._no_reader_toast_shown = False
+        self._no_reader_toast: Optional[tk.Toplevel] = None
 
         # Shared state: last card data read from Read SIM tab
         self.last_read_data: dict[str, str] = {}
@@ -497,7 +498,7 @@ class SimGUIApp:
         """
         msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner). Disconnect/connect in top right menu."
         # High duration (10 minutes) so toast stays visible until reconnected
-        show_toast(self.root, msg, level="warning", duration=600000)
+        self._no_reader_toast = show_toast(self.root, msg, level="warning", duration=600000)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
@@ -508,6 +509,14 @@ class SimGUIApp:
 
     def _on_reader_ready(self):
         """Reader became available after being absent."""
+        # Dismiss the "no reader" toast if it's still visible
+        if self._no_reader_toast is not None:
+            try:
+                if self._no_reader_toast.winfo_exists():
+                    self._no_reader_toast.destroy()
+            except tk.TclError:
+                pass
+            self._no_reader_toast = None
         self._no_reader_toast_shown = False
         self._card_panel.set_status("waiting", "Insert a SIM card...")
         self._status_var.set("Insert a SIM card...")
