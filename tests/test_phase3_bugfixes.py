@@ -432,8 +432,8 @@ class TestExtraFieldsAfterPysimProg:
 
     def test_program_empty_card_extra_fields_use_gialersim_shell(
             self, tmp_path):
-        """After pySim-prog, extra fields (outside _PYSIM_PROG_FIELDS) written
-        via pySim-shell without -A (gialersim auth handled by pySim-prog)."""
+        """After pySim-prog, extra fields (outside _PYSIM_PROG_FIELDS) are
+        routed to _program_nonempty_card (the shell path)."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
 
         card_data = {
@@ -444,31 +444,27 @@ class TestExtraFieldsAfterPysimProg:
             'SPN': 'TestOp',
             'ACC': '0001',
             'FPLMN': '24007;24024',
-            'PIN1': '1234',  # outside _PYSIM_PROG_FIELDS -> goes via shell
+            'PIN1': '1234',  # outside _PYSIM_PROG_FIELDS -> routed to shell
         }
 
-        shell_calls = []
-
-        def mock_run(cmd, **kwargs):
-            shell_calls.append(cmd)
-            return MagicMock(returncode=0, stdout='Done', stderr='')
-
-        with patch('subprocess.run', side_effect=mock_run):
-            with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, msg = cm._program_empty_card(
-                    card_data,
-                    dict(card_data))  # all fields as "changed"
+        with patch.object(cm, '_run_pysim_prog',
+                          return_value=(True, 'Done', '')):
+            with patch.object(cm, '_program_nonempty_card',
+                              return_value=(True, 'Shell OK')) as mock_shell:
+                with patch.object(cm, 'verify_after_program',
+                                  return_value=(True, 'OK', {})):
+                    ok, msg = cm._program_empty_card(
+                        card_data,
+                        dict(card_data))
 
         assert ok is True
-        # At least 2 calls: pySim-prog + pySim-shell for PIN1
-        assert len(shell_calls) >= 2
-
-        # pySim-shell for gialersim must NOT use -A (auth via pySim-prog)
-        # pySim-shell does not support -t flag
-        shell_cmd = shell_calls[1]
-        assert '-A' not in shell_cmd
-        assert '-t' not in shell_cmd
+        # _program_nonempty_card must be called with the extra field
+        mock_shell.assert_called_once()
+        extra_changed = mock_shell.call_args[0][1]
+        assert 'PIN1' in extra_changed
+        # Core prog fields must NOT be in the shell call
+        assert 'IMSI' not in extra_changed
+        assert 'FPLMN' not in extra_changed
 
 
 # ===========================================================================
