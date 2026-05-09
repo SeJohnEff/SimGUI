@@ -87,11 +87,14 @@ docs/                      # Diátaxis documentation
 - pySim-read auto-detects gialersim cards: output contains `Autodetected card type: gialersim`
 - Blank gialersim cards have no ICCID or IMSI, but may have `ACC: ffff` from pySim-read
 
-### Programming Flows
-- **Non-empty cards (SJA5)**: Use `pySim-shell` with `-A <hex_ADM1>` and piped commands for delta writes. ICCID is read-only (factory-assigned, used for traceability).
-- **Empty/gialersim cards**: Use `pySim-prog` with `-t gialersim -a <ASCII_ADM1>` for full card programming. ICCID is written from CSV because blank cards have no ICCID.
+### Programming Flows (v0.5.32+)
+- **ALL card types** use `pySim-prog` as the single write engine (`_program_via_pysim_prog`).
+  - **Non-empty cards (SJA5)**: delta-write — only changed fields sent to pySim-prog; ICCID excluded (factory-assigned). pySim-prog uses `-t sysmoISIM-SJA5 -A <hex_ADM1>`.
+  - **Empty/gialersim cards**: full write — all non-empty fields sent to pySim-prog. Uses `-t gialersim -a <ASCII_ADM1>`. ICCID written from CSV.
+- **pySim-shell** is used ONLY for authentication (`_run_pysim_shell_safe`) — never for writes.
 - **NEVER** use `-t auto` for gialersim — it causes CHV 0x0A VERIFY which fails with 6f00.
 - **NEVER** change ICCID on non-empty cards.
+- Ki and OPc share the same EF — if either changes, both are written together.
 
 ### ADM1 Key Format
 - ADM1 is an **administrative key** (not a PIN). 8 bytes.
@@ -199,7 +202,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 ## Testing
 
 - Framework: pytest
-- 2156 passed, 14 skipped (Qt/GUI tests needing display, hardware-gated)
+- ~2200 passed, 14 skipped (Qt/GUI tests needing display, hardware-gated)
 - Hardware-gated tests: `SIMGUI_HW_TEST=1 python3 -m pytest tests/test_e2e_contracts.py::TestHardwareGated -v`
 - Run: `python3 -m pytest tests/ -x -q`
 - Key test files:
@@ -230,7 +233,6 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - This is not optional cleanup — it is part of "done".
 
 ### Safety Rules
-- **v0.5.8 non-empty SIM flow is frozen** — do not change non-empty card programming
 - **Safety first**: Confirm ICCID matches before ADM1 auth. A mismatch = wrong ADM1 = card bricked after 3 fails.
 - **ICCID is read-only for non-empty cards** (factory traceability). Only written on blank cards.
 - **Good checks everywhere**: e.g. confirm ICCID read from card matches data in file before any ADM1 operation
@@ -248,7 +250,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - Future ideas and extensions (document them in `docs/TODO.md`)
 
 ### Lessons Learned (the hard way)
-- `--noprompt` in pySim-shell silently breaks stdin piping — commands are ignored
+- `--noprompt` in pySim-shell silently breaks stdin piping — commands are ignored (pySim-shell is now auth-only via `_run_pysim_shell_safe`; writes go through pySim-prog)
 - pySim-shell returns exit code 0 on APDU failures — you MUST scan stdout for errors
 - `exit` doesn't work in pySim-shell — must use `quit`
 - Blank gialersim cards use CHV 0x0C, not 0x0A — standard VERIFY burns retry attempts

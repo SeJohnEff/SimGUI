@@ -1,3 +1,21 @@
+simgui (0.5.33) unstable; urgency=medium
+
+  * refactor: unify all card programming through pySim-prog (all card
+    types — SJA5, gialersim, blank — now use a single _program_via_pysim_prog
+    path; eliminates _program_nonempty_card, _program_empty_card, all
+    _pysim_write_* helpers, _run_pysim_shell (with -A), and the
+    _PYSIM_PROG_FIELDS / extra-fields split; pySim-shell is now used
+    exclusively for authentication (VERIFY APDU) via _run_pysim_shell_safe
+  * test: rewrite test_empty_card_programming.py for unified path;
+    remove tautological pySim-shell write tests; add TestProgramViaPysimProg,
+    TestProgramCardRouting (all-via-pySim-prog), Ki/OPc pair invariant,
+    ICCID-exclusion and delta-write tests
+  * test: update test_card_safety.py, test_phase3_bugfixes.py,
+    test_verify_after_program.py to use _run_pysim_prog instead of
+    _run_pysim_shell for write assertions
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Sat, 09 May 2026 16:00:00 +0100
+
 simgui (0.5.32) unstable; urgency=medium
 
   * ux: remove standalone Authenticate button from Program SIM tab —

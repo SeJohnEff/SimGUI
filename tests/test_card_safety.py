@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 class TestAuthenticateNeverUsesAFlag(unittest.TestCase):
     """The -A flag sends a VERIFY APDU at startup, consuming an attempt.
-    authenticate() must NEVER pass -A.  Only _program_nonempty_card should."""
+    authenticate() must NEVER pass -A.  All writes go through pySim-prog."""
 
     def _make_card_manager(self):
         """Create a CardManager with mocked pySim paths."""
@@ -60,18 +60,19 @@ class TestAuthenticateNeverUsesAFlag(unittest.TestCase):
         self.assertIn('verify_adm', cmd)
         self.assertIn('--pin-is-hex', cmd)
 
-    @patch('managers.card_manager.CardManager._run_pysim_shell')
     @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
-    def test_authenticate_does_not_call_unsafe_shell(
-            self, mock_retry, mock_safe, mock_unsafe):
-        """authenticate() must NEVER call _run_pysim_shell (which uses -A)."""
+    def test_authenticate_only_uses_safe_shell(
+            self, mock_retry, mock_safe):
+        """authenticate() must use _run_pysim_shell_safe, never the -A variant."""
         cm = self._make_card_manager()
         mock_retry.return_value = 3
         mock_safe.return_value = (True, 'ok', '')
 
-        cm.authenticate('88888888')
-        mock_unsafe.assert_not_called()
+        ok, _ = cm.authenticate('88888888')
+        self.assertTrue(ok)
+        # Safe variant called exactly once
+        mock_safe.assert_called_once()
 
     @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -279,8 +280,8 @@ class TestRetryCounterParsing(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestPySimShellSafeVsUnsafe(unittest.TestCase):
-    """Tests that _run_pysim_shell_safe and _run_pysim_shell differ in -A usage."""
+class TestPySimShellSafe(unittest.TestCase):
+    """Tests that _run_pysim_shell_safe never uses -A (authentication only)."""
 
     def _make_card_manager(self):
         from managers.card_manager import CardManager, CardType, CLIBackend
@@ -308,21 +309,6 @@ class TestPySimShellSafeVsUnsafe(unittest.TestCase):
 
         cmd = mock_run.call_args[0][0]
         self.assertNotIn('-A', cmd)
-
-    @patch('managers.card_manager.CardManager._validate_script_path')
-    @patch('subprocess.run')
-    def test_unsafe_shell_has_a_flag(self, mock_run, mock_validate):
-        """_run_pysim_shell must include -A with the hex key."""
-        mock_validate.return_value = '/opt/pysim/pySim-shell.py'
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout='', stderr='')
-
-        cm = self._make_card_manager()
-        cm._run_pysim_shell('DEADBEEF12345678', 'some_command')
-
-        cmd = mock_run.call_args[0][0]
-        self.assertIn('-A', cmd)
-        self.assertIn('DEADBEEF12345678', cmd)
 
     @patch('managers.card_manager.CardManager._validate_script_path')
     @patch('subprocess.run')
@@ -671,78 +657,10 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         self.assertTrue(ok)  # None means we can't check, so allow
 
 
-class TestProgramNonemptyUseSafeShell(unittest.TestCase):
-    """_program_nonempty_card must use safe shell (no -A flag).
 
-    Instead of -A, it prepends verify_adm to the command sequence.
-    This prevents 6f00 errors from -A being sent during init.
-    """
-
-    def _make_card_manager(self):
-        from managers.card_manager import CardManager, CLIBackend
-        cm = CardManager.__new__(CardManager)
-        cm.cli_path = '/opt/pysim'
-        cm.cli_backend = CLIBackend.PYSIM
-        cm._venv_python = '/opt/pysim/.venv/bin/python'
-        cm.card_type = MagicMock()
-        cm.authenticated = True
-        cm.card_info = {}
-        cm._authenticated_adm1_hex = '3838383838383838'
-        cm._original_card_data = {'ICCID': '123', 'IMSI': '001'}
-        cm._simulator = None
-        cm.card_blocked = False
-        cm._adm1_remaining_attempts = 3
-        cm._safety_override_acknowledged = False
-        return cm
-
-    @patch('managers.card_manager.CardManager.verify_after_program')
-    @patch('managers.card_manager.CardManager._run_pysim_shell')
-    def test_uses_pysim_shell_with_A_flag(self, mock_shell, mock_verify):
-        """_program_nonempty_card must use _run_pysim_shell (with -A).
-
-        Authentication is done via the -A flag (single VERIFY APDU
-        during pySim-shell init), NOT via piped verify_adm command.
-        The caller must pause the CardWatcher before calling.
-        """
-        cm = self._make_card_manager()
-        mock_shell.return_value = (True, 'OK', '')
-        mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
-
-        changed = {'IMSI': '001010000000001'}
-        ok, msg = cm._program_nonempty_card(
-            {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
-        self.assertTrue(ok)
-        mock_shell.assert_called_once()
-        # First arg is the ADM1 hex key
-        call_args = mock_shell.call_args
-        self.assertEqual(call_args[0][0], '3838383838383838')
-        # Commands should NOT contain verify_adm (auth is via -A flag)
-        commands_str = call_args[0][1]
-        self.assertNotIn('verify_adm', commands_str)
-        # Write commands should be present
-        self.assertIn('IMSI', commands_str)
-
-    @patch('managers.card_manager.CardManager.verify_after_program')
-    @patch('managers.card_manager.CardManager._run_pysim_shell')
-    def test_no_double_auth(self, mock_shell, mock_verify):
-        """Programming must NOT send a separate verify_adm command.
-
-        Auth is handled by the -A flag. Sending verify_adm as well
-        would consume an extra ADM1 attempt on every programming
-        operation.
-        """
-        cm = self._make_card_manager()
-        mock_shell.return_value = (True, 'OK', '')
-        mock_verify.return_value = (True, 'OK', {'IMSI': '001010000000001'})
-
-        changed = {'IMSI': '001010000000001'}
-        cm._program_nonempty_card(
-            {'ICCID': '123', 'IMSI': '001010000000001'}, changed)
-        commands_str = mock_shell.call_args[0][1]
-        lines = commands_str.strip().split('\n')
-        for line in lines:
-            self.assertFalse(line.strip().startswith('verify_adm'),
-                             f"verify_adm found in commands: {line}")
+# TestProgramNonemptyUseSafeShell removed: _program_nonempty_card and
+# _run_pysim_shell (with -A) were eliminated in v0.5.32.
+# All writes now go through _program_via_pysim_prog → pySim-prog.
 
 
 class TestAuthenticateDetects6983InOutput(unittest.TestCase):

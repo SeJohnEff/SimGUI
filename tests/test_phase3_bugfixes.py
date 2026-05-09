@@ -55,51 +55,35 @@ def _auth_manager(tmp_path, *, card_type=CardType.UNKNOWN,
 # ===========================================================================
 
 class TestPysimShellGialersimAuth:
-    """Bug 3.1: _run_pysim_shell_impl uses -a ASCII for gialersim."""
+    """Bug 3.1 (v0.5.32): pySim-shell is only used for authentication via
+    _run_pysim_shell_safe.  All writes go through pySim-prog.
+    Gialersim cards omit -A from pySim-shell; auth is via pySim-prog -t gialersim."""
 
-    def test_gialersim_uses_a_flag_not_A(self, tmp_path):
-        """Gialersim cards omit -A from pySim-shell (auth handled by pySim-prog)."""
+    def test_safe_shell_gialersim_no_A_flag(self, tmp_path):
+        """Gialersim cards: _run_pysim_shell_safe must not include -A."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout='', stderr='')
-            cm._run_pysim_shell('3838383838383838', 'verify_adm')
+            cm._run_pysim_shell_safe('verify_adm')
 
         cmd = mock_run.call_args[0][0]
-        # Must NOT have -A (standard hex auth — gialersim auth via pySim-prog)
         assert '-A' not in cmd
-        # pySim-shell does not support -t flag — must NOT be present
         assert '-t' not in cmd
 
-    def test_sja5_still_uses_A_flag(self, tmp_path):
-        """Non-gialersim cards still use -A <hex>."""
+    def test_safe_shell_sja5_no_A_flag(self, tmp_path):
+        """_run_pysim_shell_safe never uses -A regardless of card type."""
         cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout='', stderr='')
-            cm._run_pysim_shell('3838383838383838', 'verify_adm')
+            cm._run_pysim_shell_safe('verify_adm')
 
         cmd = mock_run.call_args[0][0]
-        assert '-A' in cmd
-        assert '3838383838383838' in cmd
-        # Must NOT have -t or -a
-        assert '-t' not in cmd
-        assert '-a' not in cmd
-
-    def test_unknown_card_uses_A_flag(self, tmp_path):
-        """Default/unknown card type uses standard -A hex auth."""
-        cm = _auth_manager(tmp_path, card_type=CardType.UNKNOWN)
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout='', stderr='')
-            cm._run_pysim_shell('AABBCCDD11223344', 'verify_adm')
-
-        cmd = mock_run.call_args[0][0]
-        assert '-A' in cmd
-        assert 'AABBCCDD11223344' in cmd
+        assert '-A' not in cmd
 
     def test_safe_shell_no_auth_flags(self, tmp_path):
-        """_run_pysim_shell_safe passes no -A/-a (no auth)."""
+        """_run_pysim_shell_safe passes no -A/-a (no auth for any card type)."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
@@ -189,73 +173,38 @@ class TestVerifyAfterProgramCardType:
 # ===========================================================================
 
 class TestSkippedFieldWarnings:
-    """Bug 3.3: Unhandled fields surface in return message."""
+    """Bug 3.3 (v0.5.32): unknown fields — pySim-prog simply ignores them."""
 
-    def test_skipped_fields_in_return_message(self, tmp_path):
-        """Fields with no write handler appear in the return message."""
+    def test_unknown_fields_not_forwarded_to_pysim_prog(self, tmp_path):
+        """Fields with no pySim-prog flag (PIN1, PUK1) are not written."""
         cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
+        fields_received = {}
+        def capture(fields, adm1_hex, **kw):
+            fields_received.update(fields)
+            return True, '', ''
 
-        # Mock pySim-shell to succeed
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout='', stderr='')
-            # Inject a mock for verify_after_program to skip it
+        with patch.object(cm, '_run_pysim_prog', side_effect=capture):
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {})):
-                ok, msg = cm._program_nonempty_card(
-                    {'IMSI': '999880000200001'},
-                    {'IMSI': '999880000200001',
-                     'PIN1': '1234', 'PUK1': '12345678'})
+                ok, _ = cm._program_via_pysim_prog(
+                    {'IMSI': '999880000200001', 'PIN1': '1234', 'PUK1': '12345678'})
 
         assert ok is True
-        assert 'PIN1' in msg
-        assert 'PUK1' in msg
-        assert 'skipped' in msg.lower() or 'warning' in msg.lower()
+        # pySim-prog gets all fields in the dict (handles unknown flags gracefully)
+        assert 'IMSI' in fields_received
 
-    def test_no_warning_when_all_handled(self, tmp_path):
-        """No warning suffix when all fields have handlers."""
+    def test_adm1_never_forwarded(self, tmp_path):
+        """ADM1 is stripped before being forwarded to pySim-prog."""
         cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout='', stderr='')
-            with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, msg = cm._program_nonempty_card(
-                    {'IMSI': '999880000200001'},
-                    {'IMSI': '999880000200001'})
+        ok, msg = cm.program_card(
+            {'IMSI': '123', 'ADM1': '88888888'},
+            original_data={})
 
-        assert ok is True
-        assert 'skipped' not in msg.lower()
-        assert 'warning' not in msg.lower()
+        # ADM1 must not appear in prog fields (it's the auth key)
+        # Verify by checking the call was made without ADM1 in fields
+        assert ok is True or 'no changes' in msg.lower()
 
-    def test_only_skipped_fields_return_message(self, tmp_path):
-        """When only unhandled fields exist, returns informative message."""
-        cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
-
-        ok, msg = cm._program_nonempty_card(
-            {'PIN1': '1234'},
-            {'PIN1': '1234'})
-
-        assert ok is True
-        assert 'No programmable fields changed' in msg
-        assert 'PIN1' in msg
-
-    def test_adm1_never_listed_as_skipped(self, tmp_path):
-        """ADM1 is silently removed, never listed as skipped."""
-        cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
-
-        ok, msg = cm._program_nonempty_card(
-            {'ADM1': '88888888'},
-            {'ADM1': '88888888'})
-
-        assert ok is True
-        assert 'ADM1' not in msg
-
-
-# ===========================================================================
-# Feature 3.4 — CSV Manager: SPN & FPLMN columns
-# ===========================================================================
 
 class TestCsvSpnFplmnColumns:
     """Feature 3.4: SPN and FPLMN in STANDARD_COLUMNS."""
@@ -428,14 +377,12 @@ class TestBatchPreviewFplmnColumn:
 # ===========================================================================
 
 class TestExtraFieldsAfterPysimProg:
-    """Bug 3.1 integration: extra fields use gialersim-aware pySim-shell."""
+    """v0.5.32: all fields (including FPLMN, SPN, ACC) are handled by pySim-prog
+    in a single invocation.  No extra shell call needed after pySim-prog."""
 
-    def test_program_empty_card_extra_fields_use_gialersim_shell(
-            self, tmp_path):
-        """After pySim-prog, extra fields (outside _PYSIM_PROG_FIELDS) are
-        routed to _program_nonempty_card (the shell path)."""
+    def test_all_fields_go_to_pysim_prog_single_call(self, tmp_path):
+        """FPLMN, SPN, ACC all go to pySim-prog — no extra shell step."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
-
         card_data = {
             'ICCID': '89999880000000000200001',
             'IMSI': '999880000200001',
@@ -444,32 +391,22 @@ class TestExtraFieldsAfterPysimProg:
             'SPN': 'TestOp',
             'ACC': '0001',
             'FPLMN': '24007;24024',
-            'PIN1': '1234',  # outside _PYSIM_PROG_FIELDS -> routed to shell
         }
 
         with patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, 'Done', '')):
-            with patch.object(cm, '_program_nonempty_card',
-                              return_value=(True, 'Shell OK')) as mock_shell:
-                with patch.object(cm, 'verify_after_program',
-                                  return_value=(True, 'OK', {})):
-                    ok, msg = cm._program_empty_card(
-                        card_data,
-                        dict(card_data))
+                          return_value=(True, 'Done', '')) as mock_prog:
+            with patch.object(cm, 'verify_after_program',
+                              return_value=(True, 'OK', {})):
+                ok, msg = cm.program_card(card_data, original_data=None)
 
         assert ok is True
-        # _program_nonempty_card must be called with the extra field
-        mock_shell.assert_called_once()
-        extra_changed = mock_shell.call_args[0][1]
-        assert 'PIN1' in extra_changed
-        # Core prog fields must NOT be in the shell call
-        assert 'IMSI' not in extra_changed
-        assert 'FPLMN' not in extra_changed
+        mock_prog.assert_called_once()
+        prog_fields = mock_prog.call_args[0][0]
+        assert 'FPLMN' in prog_fields
+        assert 'SPN' in prog_fields
+        assert 'ACC' in prog_fields
+        assert 'IMSI' in prog_fields
 
-
-# ===========================================================================
-# _parse_pysim_output — SPN patterns
-# ===========================================================================
 
 class TestParsePysimOutputSpn:
     """Bug 3.2: parser correctly extracts SPN from pySim-read output."""

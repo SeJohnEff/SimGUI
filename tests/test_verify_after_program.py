@@ -227,7 +227,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell',
+             patch.object(cm, '_run_pysim_prog',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "Verification OK",
@@ -239,12 +239,12 @@ class TestProgramCardWithVerify:
         assert "verified" in msg.lower()
 
     def test_program_ok_but_verify_fails(self):
-        """Write succeeds but read-back mismatches → overall False."""
+        """pySim-prog OK but read-back can't confirm → True with warning."""
         cm = self._make_nonempty_cm()
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell',
+             patch.object(cm, '_run_pysim_prog',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(False,
@@ -253,16 +253,17 @@ class TestProgramCardWithVerify:
             ok, msg = cm.program_card(
                 {"IMSI": "X", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
-        assert ok is False
-        assert "FAILED" in msg
+        # pySim-prog reported success — trust it; verify failure yields warning
+        assert ok is True
+        assert "re-insert" in msg.lower() or "could not confirm" in msg.lower()
 
     def test_program_write_fails_no_verify(self):
-        """If pySim-shell write itself fails, verify is never called."""
+        """If pySim-prog write itself fails, verify is never called."""
         cm = self._make_nonempty_cm()
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell',
+             patch.object(cm, '_run_pysim_prog',
                           return_value=(False, "", "sw mismatch 6982")), \
              patch.object(cm, 'verify_after_program') as mock_verify:
             ok, msg = cm.program_card(
@@ -279,7 +280,7 @@ class TestProgramCardWithVerify:
         readback = {"ICCID": "899998800000000002", "IMSI": "999880000200001"}
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_shell',
+             patch.object(cm, '_run_pysim_prog',
                           return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", readback)):

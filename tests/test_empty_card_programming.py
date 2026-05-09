@@ -1,14 +1,13 @@
-"""Tests for empty (blank) card programming — v0.5.14.
+"""Tests for card programming — v0.5.32 unified pySim-prog path.
 
 Validates:
 - Empty card detection (``_is_empty_card``)
 - ``_run_pysim_prog`` builds the correct CLI command
-- ``_program_empty_card`` uses pySim-prog, falls back to pySim-shell
-- ``_program_nonempty_card`` still works as before (pySim-shell delta)
-- ``program_card`` routes empty vs non-empty correctly
+- ``_run_pysim_shell_safe`` detects init failures via output scanning
 - ``authenticate`` handles blank-card init failures gracefully
-- ``_run_pysim_shell`` without ``--noprompt`` detects init failures via output scanning
-- FPLMN (extra field) follow-up after pySim-prog succeeds
+- ``program_card`` routes ALL card types through ``_program_via_pysim_prog``
+- Non-empty delta-write: only changed fields forwarded, ICCID excluded
+- Ki/OPc pair-write invariant preserved for non-empty cards
 """
 
 import os
@@ -29,7 +28,6 @@ def _make_hw_manager(tmp_path):
     """Create a CardManager wired to a fake pySim directory."""
     cli_dir = tmp_path / "pysim"
     cli_dir.mkdir()
-    # Create dummy scripts so _validate_script_path accepts them
     for script in ('pySim-shell.py', 'pySim-prog.py', 'pySim-read.py'):
         (cli_dir / script).write_text("# stub")
     cm = CardManager()
@@ -63,7 +61,6 @@ class TestIsEmptyCard:
 
     def test_empty_dict_original(self, tmp_path):
         cm = _auth_manager(tmp_path)
-        # Empty dict is falsy -> empty card
         assert cm._is_empty_card({}) is True
 
     def test_nonempty_original(self, tmp_path):
@@ -103,13 +100,12 @@ class TestRunPysimProg:
         assert '-p0' in cmd
         assert '-A' in cmd
         assert '3838383838383838' in cmd
-        assert '-s' in cmd  # ICCID
-        assert '-i' in cmd  # IMSI
-        assert '-k' in cmd  # Ki
-        assert '-o' in cmd  # OPc
-        assert '-n' in cmd  # SPN
-        assert '--acc' in cmd  # ACC
-        # MCC/MNC from IMSI
+        assert '-s' in cmd
+        assert '-i' in cmd
+        assert '-k' in cmd
+        assert '-o' in cmd
+        assert '-n' in cmd
+        assert '--acc' in cmd
         assert '-x' in cmd
         idx_x = cmd.index('-x')
         assert cmd[idx_x + 1] == '240'
@@ -125,9 +121,9 @@ class TestRunPysimProg:
             cm._run_pysim_prog(card_data, '3838383838383838')
 
         cmd = mock_run.call_args[0][0]
-        assert '-s' not in cmd  # no ICCID
-        assert '-k' not in cmd  # no Ki
-        assert '-o' not in cmd  # no OPc
+        assert '-s' not in cmd
+        assert '-k' not in cmd
+        assert '-o' not in cmd
 
     def test_returns_failure_on_nonzero_exit(self, tmp_path):
         cm = _make_hw_manager(tmp_path)
@@ -155,12 +151,38 @@ class TestRunPysimProg:
         assert ok is False
         assert 'timed out' in stderr
 
+    def test_fplmn_flags_added(self, tmp_path):
+        """Each FPLMN entry gets its own -f flag."""
+        cm = _make_hw_manager(tmp_path)
+        card_data = {'FPLMN': '24007;24001'}
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout='', stderr='')
+            cm._run_pysim_prog(card_data, '3838383838383838')
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd.count('-f') == 2
+
+    def test_gialersim_uses_ascii_adm1(self, tmp_path):
+        """Gialersim cards use -a (ASCII) not -A (hex)."""
+        cm = _make_hw_manager(tmp_path)
+        cm.card_type = CardType.GIALERSIM
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout='', stderr='')
+            cm._run_pysim_prog({'IMSI': '123'}, '3838383838383838')
+
+        cmd = mock_run.call_args[0][0]
+        assert '-a' in cmd
+        assert '-A' not in cmd
+        assert '88888888' in cmd
+
 
 # ---------------------------------------------------------------------------
-# _run_pysim_shell (interactive stdin + init-failure detection)
+# _run_pysim_shell_safe (stdin + init-failure detection)
 # ---------------------------------------------------------------------------
 
-class TestRunPysimShellInitDetection:
+class TestRunPysimShellSafeInitDetection:
 
     def test_noprompt_flag_NOT_present(self, tmp_path):
         """--noprompt must NOT be used — it prevents stdin command processing."""
@@ -168,16 +190,22 @@ class TestRunPysimShellInitDetection:
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout='', stderr='')
-            cm._run_pysim_shell('DEADBEEF', 'verify_adm')
+            cm._run_pysim_shell_safe('verify_adm')
         cmd = mock_run.call_args[0][0]
         assert '--noprompt' not in cmd
-        # -A flag should still be present when using _run_pysim_shell
-        assert '-A' in cmd
-        assert 'DEADBEEF' in cmd
-        # stdin must pipe commands with 'quit' appended
         call_kwargs = mock_run.call_args.kwargs
         assert 'input' in call_kwargs
         assert 'quit' in call_kwargs['input']
+
+    def test_no_A_flag_in_safe_mode(self, tmp_path):
+        """-A flag must NOT be present in safe (no-auth) mode."""
+        cm = _make_hw_manager(tmp_path)
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout='', stderr='')
+            cm._run_pysim_shell_safe('verify_adm')
+        cmd = mock_run.call_args[0][0]
+        assert '-A' not in cmd
 
     def test_detects_not_equipped(self, tmp_path):
         cm = _make_hw_manager(tmp_path)
@@ -186,9 +214,7 @@ class TestRunPysimShellInitDetection:
                 returncode=0,
                 stdout='pySim-shell not equipped!',
                 stderr='')
-            ok, stdout, stderr = cm._run_pysim_shell(
-                'DEADBEEF', 'verify_adm')
-        # Must report failure even though exit code was 0
+            ok, stdout, stderr = cm._run_pysim_shell_safe('verify_adm')
         assert ok is False
 
     def test_detects_card_error(self, tmp_path):
@@ -198,7 +224,7 @@ class TestRunPysimShellInitDetection:
                 returncode=0,
                 stdout='Card error, cannot do ADM verification',
                 stderr='')
-            ok, _, _ = cm._run_pysim_shell('DEADBEEF', 'verify_adm')
+            ok, _, _ = cm._run_pysim_shell_safe('verify_adm')
         assert ok is False
 
     def test_detects_autodetection_failed(self, tmp_path):
@@ -208,7 +234,7 @@ class TestRunPysimShellInitDetection:
                 returncode=0,
                 stdout='Autodetection failed\nWarning: Could not detect',
                 stderr='')
-            ok, _, _ = cm._run_pysim_shell('DEADBEEF', 'verify_adm')
+            ok, _, _ = cm._run_pysim_shell_safe('verify_adm')
         assert ok is False
 
     def test_normal_success_not_affected(self, tmp_path):
@@ -218,7 +244,7 @@ class TestRunPysimShellInitDetection:
                 returncode=0,
                 stdout='pySIM-shell (00:MF)> verify_adm\n9000',
                 stderr='')
-            ok, _, _ = cm._run_pysim_shell('DEADBEEF', 'verify_adm')
+            ok, _, _ = cm._run_pysim_shell_safe('verify_adm')
         assert ok is True
 
 
@@ -232,7 +258,7 @@ class TestAuthenticateBlankCard:
         """Blank card: VERIFY is never sent; ADM1 is stored for pySim-prog."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {}  # empty card
+        cm._original_card_data = {}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')
@@ -240,14 +266,12 @@ class TestAuthenticateBlankCard:
         assert cm.authenticated is True
         assert cm._authenticated_adm1_hex == '3838383838383838'
         assert 'stored' in msg.lower() or 'blank' in msg.lower()
-        # VERIFY must never be called on blank cards
         mock_shell.assert_not_called()
 
     def test_blank_card_skips_verify_with_none_original(self, tmp_path):
-        """Blank card with empty snapshot (no ICCID/IMSI): same early-return path."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {}  # empty dict = card detected but blank
+        cm._original_card_data = {}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')
@@ -256,10 +280,9 @@ class TestAuthenticateBlankCard:
         mock_shell.assert_not_called()
 
     def test_nonempty_card_init_failure_is_real_error(self, tmp_path):
-        """Non-empty card: init failure is a genuine auth problem."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {'ICCID': '123'}  # non-empty
+        cm._original_card_data = {'ICCID': '123'}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,
@@ -269,10 +292,9 @@ class TestAuthenticateBlankCard:
         assert ok is False
 
     def test_nonempty_card_wrong_adm1_fails(self, tmp_path):
-        """Non-empty card with wrong ADM1 (6982) returns failure."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {'ICCID': '123'}  # non-empty
+        cm._original_card_data = {'ICCID': '123'}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe',
                           return_value=(False,
@@ -283,10 +305,9 @@ class TestAuthenticateBlankCard:
         assert 'wrong adm1' in msg.lower() or 'failed' in msg.lower()
 
     def test_blank_card_with_acc_but_no_iccid_imsi(self, tmp_path):
-        """Blank gialersim card: has ACC from pySim-read but no ICCID/IMSI."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = {'ACC': 'ffff'}  # partial read, no ICCID/IMSI
+        cm._original_card_data = {'ACC': 'ffff'}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')
@@ -296,11 +317,10 @@ class TestAuthenticateBlankCard:
         mock_shell.assert_not_called()
 
     def test_gialersim_card_skips_verify(self, tmp_path):
-        """Gialersim card type always skips VERIFY (uses CHV 0x0C internally)."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
         cm.card_type = CardType.GIALERSIM
-        cm._original_card_data = {'ACC': 'ffff'}  # has some data
+        cm._original_card_data = {'ACC': 'ffff'}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')
@@ -327,7 +347,7 @@ class TestCardTypeDetection:
         )
         cm._parse_pysim_output(output)
         assert cm.card_type == CardType.GIALERSIM
-        assert cm.card_info.get('ICCID') is None  # empty = not stored
+        assert cm.card_info.get('ICCID') is None
 
     def test_sja5_detected(self, tmp_path):
         cm = _make_hw_manager(tmp_path)
@@ -382,207 +402,150 @@ class TestIsEmptyCardGialersim:
 class TestHexToAdm1Ascii:
 
     def test_standard_conversion(self):
-        from managers.card_manager import CardManager
         assert CardManager._hex_to_adm1_ascii('3838383838383838') == '88888888'
 
     def test_non_printable_returns_hex(self):
-        from managers.card_manager import CardManager
         assert CardManager._hex_to_adm1_ascii('0001020304050607') == '0001020304050607'
 
     def test_arbitrary_ascii(self):
-        from managers.card_manager import CardManager
         assert CardManager._hex_to_adm1_ascii('3332363237323431') == '32627241'
 
 
 # ---------------------------------------------------------------------------
-# program_card() routing
+# program_card() routing — all types go through _program_via_pysim_prog
 # ---------------------------------------------------------------------------
 
 class TestProgramCardRouting:
 
     def test_empty_card_routes_to_pysim_prog(self, tmp_path):
+        """Empty card (no original data) → _program_via_pysim_prog."""
         cm = _auth_manager(tmp_path, original_data={})
-        with patch.object(cm, '_program_empty_card',
-                          return_value=(True, 'OK')) as mock_empty:
-            with patch.object(cm, '_program_nonempty_card') as mock_non:
-                ok, msg = cm.program_card(
-                    {'IMSI': '123', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
-                    original_data=None)
-        mock_empty.assert_called_once()
-        mock_non.assert_not_called()
+        with patch.object(cm, '_program_via_pysim_prog',
+                          return_value=(True, 'OK')) as mock_prog:
+            ok, msg = cm.program_card(
+                {'IMSI': '123', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
+                original_data=None)
+        mock_prog.assert_called_once()
         assert ok is True
 
-    def test_nonempty_card_routes_to_pysim_shell(self, tmp_path):
+    def test_nonempty_card_routes_to_pysim_prog(self, tmp_path):
+        """Non-empty card with a changed field → _program_via_pysim_prog."""
         cm = _auth_manager(tmp_path,
                            original_data={'ICCID': '999', 'IMSI': 'old'})
-        with patch.object(cm, '_program_empty_card') as mock_empty:
-            with patch.object(cm, '_program_nonempty_card',
-                              return_value=(True, 'OK')) as mock_non:
-                ok, msg = cm.program_card(
-                    {'ICCID': '999', 'IMSI': 'new'},
-                    original_data={'ICCID': '999', 'IMSI': 'old'})
-        mock_empty.assert_not_called()
-        mock_non.assert_called_once()
+        with patch.object(cm, '_program_via_pysim_prog',
+                          return_value=(True, 'OK')) as mock_prog:
+            ok, msg = cm.program_card(
+                {'ICCID': '999', 'IMSI': 'new'},
+                original_data={'ICCID': '999', 'IMSI': 'old'})
+        mock_prog.assert_called_once()
         assert ok is True
 
     def test_no_changes_returns_early(self, tmp_path):
-        cm = _auth_manager(tmp_path,
-                           original_data={'IMSI': '123'})
+        cm = _auth_manager(tmp_path, original_data={'IMSI': '123'})
         ok, msg = cm.program_card(
             {'IMSI': '123'},
             original_data={'IMSI': '123'})
         assert ok is True
         assert 'no changes' in msg.lower()
 
+    def test_iccid_excluded_from_nonempty_delta(self, tmp_path):
+        """ICCID must never be rewritten on a non-empty card."""
+        orig = {'ICCID': '999', 'IMSI': 'old'}
+        cm = _auth_manager(tmp_path, original_data=orig)
+        captured = {}
+        def capture(fields):
+            captured['fields'] = fields
+            return True, 'OK'
+        with patch.object(cm, '_program_via_pysim_prog', side_effect=capture):
+            cm.program_card({'ICCID': '999', 'IMSI': 'new'}, original_data=orig)
+        assert 'ICCID' not in captured.get('fields', {})
+        assert 'IMSI' in captured.get('fields', {})
+
+    def test_ki_opc_pair_completed_for_nonempty(self, tmp_path):
+        """If Ki changed but OPc unchanged, OPc is still included (same EF)."""
+        orig = {'ICCID': '999', 'IMSI': 'x', 'Ki': 'C' * 32, 'OPc': 'D' * 32}
+        cm = _auth_manager(tmp_path, original_data=orig)
+        card_data = dict(orig)
+        card_data['Ki'] = 'A' * 32  # only Ki changed
+
+        captured = {}
+        def capture(fields):
+            captured['fields'] = fields
+            return True, 'OK'
+        with patch.object(cm, '_program_via_pysim_prog', side_effect=capture):
+            cm.program_card(card_data, original_data=orig)
+        assert 'Ki' in captured.get('fields', {})
+        assert 'OPc' in captured.get('fields', {})  # paired with Ki
+
 
 # ---------------------------------------------------------------------------
-# _program_empty_card
+# _program_via_pysim_prog
 # ---------------------------------------------------------------------------
 
-class TestProgramEmptyCard:
+class TestProgramViaPysimProg:
 
-    def test_pysim_prog_success_with_verify(self, tmp_path):
+    def test_success_with_verify(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={})
-        changed = {
-            'ICCID': '123', 'IMSI': '456',
-            'Ki': 'A' * 32, 'OPc': 'B' * 32,
-        }
-        card_data = dict(changed)
+        fields = {'ICCID': '123', 'IMSI': '456', 'Ki': 'A' * 32, 'OPc': 'B' * 32}
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')):
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {'ICCID': '123'})):
-                ok, msg = cm._program_empty_card(card_data, changed)
+                ok, msg = cm._program_via_pysim_prog(fields)
         assert ok is True
         assert 'verified' in msg.lower()
 
-    def test_pysim_prog_success_verify_fails_still_ok(self, tmp_path):
-        """pySim-prog succeeded — trust it even if verify can't confirm."""
+    def test_success_verify_fails_still_ok(self, tmp_path):
+        """pySim-prog OK — trust it even if verify can't confirm."""
         cm = _auth_manager(tmp_path, original_data={})
-        changed = {'IMSI': '456'}
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')):
             with patch.object(cm, 'verify_after_program',
                               return_value=(False, 'read failed', {})):
-                ok, msg = cm._program_empty_card({'IMSI': '456'}, changed)
+                ok, msg = cm._program_via_pysim_prog({'IMSI': '456'})
         assert ok is True
         assert 're-insert' in msg.lower() or 'could not confirm' in msg.lower()
 
-    def test_pysim_prog_missing_falls_back_to_shell(self, tmp_path):
+    def test_prog_failure_returns_error(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={})
-        changed = {'IMSI': '456', 'Ki': 'A' * 32, 'OPc': 'B' * 32}
-        with patch.object(cm, '_run_pysim_prog',
-                          return_value=(False, '', 'pySim-prog.py not found')):
-            with patch.object(cm, '_program_nonempty_card',
-                              return_value=(True, 'Shell OK')) as mock_shell:
-                ok, msg = cm._program_empty_card(
-                    {'IMSI': '456', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
-                    changed)
-        mock_shell.assert_called_once()
-        assert ok is True
-
-    def test_pysim_prog_genuine_failure(self, tmp_path):
-        cm = _auth_manager(tmp_path, original_data={})
-        changed = {'IMSI': '456'}
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(False, '', 'Card communication error')):
-            ok, msg = cm._program_empty_card({'IMSI': '456'}, changed)
+            ok, msg = cm._program_via_pysim_prog({'IMSI': '456'})
         assert ok is False
         assert 'failed' in msg.lower()
 
-    def test_extra_fields_written_via_shell_after_prog(self, tmp_path):
-        """Fields outside _PYSIM_PROG_FIELDS (e.g. PIN1) go via shell after prog."""
+    def test_not_found_error(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={})
-        changed = {
-            'IMSI': '456', 'Ki': 'A' * 32, 'OPc': 'B' * 32,
-            'PIN1': '1234',  # not in _PYSIM_PROG_FIELDS -> extra field
-        }
-        card_data = dict(changed)
-
         with patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, 'Done', '')):
-            with patch.object(cm, '_program_nonempty_card',
-                              return_value=(True, 'Shell OK')) as mock_shell:
-                with patch.object(cm, 'verify_after_program',
-                                  return_value=(True, 'OK', {})):
-                    ok, msg = cm._program_empty_card(card_data, changed)
-
-        # _program_nonempty_card should have been called with the extra field
-        mock_shell.assert_called_once()
-        extra_changed = mock_shell.call_args[0][1]
-        assert 'PIN1' in extra_changed
-        assert 'IMSI' not in extra_changed  # prog fields handled by pySim-prog
-        assert ok is True
-
-
-# ---------------------------------------------------------------------------
-# _program_nonempty_card (preserved from v0.5.8)
-# ---------------------------------------------------------------------------
-
-class TestProgramNonemptyCard:
-
-    def test_delta_write_only_changed(self, tmp_path):
-        cm = _auth_manager(tmp_path)
-        changed = {'IMSI': 'new_imsi'}
-        card_data = {'ICCID': '999', 'IMSI': 'new_imsi'}
-        with patch.object(cm, '_run_pysim_shell',
-                          return_value=(True, '', '')) as mock_shell:
-            with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, msg = cm._program_nonempty_card(card_data, changed)
-        assert ok is True
-        # First arg is ADM1 hex, second is commands
-        adm1_hex = mock_shell.call_args[0][0]
-        commands = mock_shell.call_args[0][1]
-        assert adm1_hex  # ADM1 hex key passed via -A flag
-        assert 'verify_adm' not in commands  # No double-auth
-        assert 'EF.IMSI' in commands
-        assert 'EF.ICCID' not in commands  # ICCID not changed
-
-    def test_shell_failure_returns_error(self, tmp_path):
-        cm = _auth_manager(tmp_path)
-        changed = {'IMSI': '123'}
-        with patch.object(cm, '_run_pysim_shell',
-                          return_value=(False, '', 'SW mismatch')):
-            ok, msg = cm._program_nonempty_card(
-                {'IMSI': '123'}, changed)
+                          return_value=(False, '', 'pySim-prog.py not found')):
+            ok, msg = cm._program_via_pysim_prog({'IMSI': '456'})
         assert ok is False
+        assert 'not found' in msg.lower()
 
-    def test_ki_opc_written_together(self, tmp_path):
-        cm = _auth_manager(tmp_path)
-        changed = {'Ki': 'A' * 32, 'OPc': 'B' * 32}
-        with patch.object(cm, '_run_pysim_shell',
-                          return_value=(True, '', '')) as mock_shell:
+    def test_adm1_not_forwarded_to_prog(self, tmp_path):
+        """ADM1 must not appear as a field in the pySim-prog command."""
+        cm = _auth_manager(tmp_path, original_data={})
+        fields_passed = {}
+        def capture_fields(fields, adm1_hex, **kw):
+            fields_passed.update(fields)
+            return True, '', ''
+        with patch.object(cm, '_run_pysim_prog', side_effect=capture_fields):
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK', {})):
-                cm._program_nonempty_card(
-                    {'Ki': 'A' * 32, 'OPc': 'B' * 32}, changed)
-        commands = mock_shell.call_args[0][1]
-        assert 'USIM_AUTH_KEY' in commands
-
-    def test_adm1_never_written(self, tmp_path):
-        """ADM1 field value is not written as data (auth is via -A flag)."""
-        cm = _auth_manager(tmp_path)
-        changed = {'ADM1': '88888888', 'IMSI': '123'}
-        with patch.object(cm, '_run_pysim_shell',
-                          return_value=(True, '', '')) as mock_shell:
-            with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                cm._program_nonempty_card(
-                    {'ADM1': '88888888', 'IMSI': '123'}, changed)
-        commands = mock_shell.call_args[0][1]
-        # ADM1 as a field name should never appear in write commands
-        assert 'ADM1' not in commands
+                cm._program_via_pysim_prog({'IMSI': '123', 'ADM1': 'secret'})
+        # ADM1 is an auth key, not data — it should appear as adm1_hex arg,
+        # not as a field key in the fields dict
+        assert 'ADM1' not in fields_passed
 
 
 # ---------------------------------------------------------------------------
-# Integration-style test: full flow from program_card
+# Integration-style: full flow from program_card
 # ---------------------------------------------------------------------------
 
 class TestProgramCardIntegration:
 
     def test_empty_card_full_flow(self, tmp_path):
-        """Empty card: program_card -> _program_empty_card -> pySim-prog."""
+        """Empty card: program_card → _run_pysim_prog. ADM1 excluded from fields."""
         cm = _auth_manager(tmp_path, original_data={})
         card_data = {
             'ICCID': '8946200000000000001',
@@ -595,48 +558,42 @@ class TestProgramCardIntegration:
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')) as mock_prog:
             with patch.object(cm, 'verify_after_program',
-                              return_value=(
-                                  True, 'OK',
-                                  {'ICCID': card_data['ICCID']})):
+                              return_value=(True, 'OK',
+                                            {'ICCID': card_data['ICCID']})):
                 ok, msg = cm.program_card(card_data, original_data=None)
 
         assert ok is True
         mock_prog.assert_called_once()
-        # ADM1 should NOT be in the prog_fields
         prog_fields = mock_prog.call_args[0][0]
         assert 'ADM1' not in prog_fields
+        assert 'ICCID' in prog_fields
+        assert 'IMSI' in prog_fields
 
     def test_nonempty_card_full_flow(self, tmp_path):
-        """Non-empty card: program_card -> _program_nonempty_card."""
+        """Non-empty card: delta → _run_pysim_prog with only changed fields."""
         orig = {'ICCID': '999', 'IMSI': 'old', 'Ki': 'C' * 32,
                 'OPc': 'D' * 32}
         cm = _auth_manager(tmp_path, original_data=orig)
         card_data = dict(orig)
         card_data['IMSI'] = 'new_imsi'
-        with patch.object(cm, 'check_adm1_retry_counter',
-                          return_value=3):
-            with patch.object(cm, '_run_pysim_shell',
-                              return_value=(True, '', '')) as mock_shell:
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3):
+            with patch.object(cm, '_run_pysim_prog',
+                              return_value=(True, 'Done', '')) as mock_prog:
                 with patch.object(cm, 'verify_after_program',
                                   return_value=(True, 'OK', {})):
                     ok, msg = cm.program_card(card_data, original_data=orig)
 
         assert ok is True
-        mock_shell.assert_called_once()
-        # First arg is ADM1 hex (-A flag), second is write commands
-        adm1_hex = mock_shell.call_args[0][0]
-        commands = mock_shell.call_args[0][1]
-        assert adm1_hex  # -A flag auth
-        assert 'verify_adm' not in commands  # No double-auth
-        assert 'EF.IMSI' in commands
-        assert 'USIM_AUTH_KEY' not in commands
+        mock_prog.assert_called_once()
+        prog_fields = mock_prog.call_args[0][0]
+        assert 'ICCID' not in prog_fields  # factory-assigned, not changed
+        assert 'IMSI' in prog_fields       # only changed field
+        assert 'Ki' not in prog_fields     # unchanged
+        assert 'OPc' not in prog_fields    # unchanged
 
     def test_original_data_empty_dict_treated_as_empty_card(self, tmp_path):
-        """Empty dict passed via `or None` pattern is treated as empty card."""
         cm = _auth_manager(tmp_path, original_data={})
         card_data = {'IMSI': '123', 'Ki': 'A' * 32, 'OPc': 'B' * 32}
-        # Simulates: program_card(card_data, original_data={} or None)
-        # {} or None == None, so original_data=None
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')):
             with patch.object(cm, 'verify_after_program',
