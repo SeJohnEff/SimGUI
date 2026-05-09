@@ -2,19 +2,20 @@
 
 ## Current Blockers (v0.5.37+)
 
-### macOS GUI Asset Loading
-- **Status**: In progress
+### macOS GUI Asset Loading — BLOCKER
+- **Status**: Blocking macOS .pkg release
 - **Issue**: tkinter `PhotoImage` fails to load PNG from PyInstaller temp directory
   ```
-  _tkinter.TclError: couldn't recognize data in image file "/var/folders/.../SimGUI-256.png"
+  _tkinter.TclError: couldn't recognize data in image file "/var/folders/.../assets/simgui-256.png"
   ```
-- **Workaround**: Run from source instead of bundled app
-- **Root Cause**: tkinter JPEG/PNG support via PIL unavailable; fallback fails on temp paths
-- **Fix Options**:
-  1. Bundle Pillow in PyInstaller (add to `hiddenimports`)
-  2. Convert PNG → PPM (native tkinter support)
-  3. Embed image data as base64 strings
-  4. Migrate to PyQt6 (Phase 1 work in progress in `qt_main.py`)
+- **Impact**: App imports work; crashes immediately on GUI initialization
+- **No workaround**: PyInstaller bundle structure doesn't expose source files
+- **Root Cause**: tkinter native PNG/JPEG support via PIL unavailable in bundled Python 3.9
+- **Fix Options** (pick one for v0.5.38):
+  1. Bundle Pillow in PyInstaller — add `'PIL'`, `'PIL.Image'`, `'PIL.ImageTk'` to `hiddenimports` in SimGUI.spec
+  2. Convert PNG → PPM — use ImageMagick/Pillow to convert assets/*.png to .ppm (native tkinter support)
+  3. Embed images as base64 strings — load from Python data, no external files
+  4. Migrate to PyQt6 (Phase 1+ work) — eliminates tkinter asset issues entirely
 
 ---
 

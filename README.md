@@ -25,22 +25,26 @@ to run card operations from a desktop GUI.
 
 ## Installation
 
-### macOS (native .app bundle — v0.5.37+)
+### macOS (v0.5.37+)
 
-One-liner (downloads and installs `.pkg`):
+**From source** (recommended for now):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install-macos-release.sh | bash
+git clone https://github.com/SeJohnEff/SimGUI
+cd SimGUI
+pip install -r requirements.txt
+python3 main.py
 ```
 
-Then launch from Applications or use `open /Applications/SimGUI.app`.
-
-For hardware support (programming real SIM cards), optionally install pySim:
+For hardware support (programming real SIM cards), also install pySim:
 
 ```bash
-bash scripts/install-macos.sh
+git clone https://gitea.osmocom.org/sim-card/pysim.git ~/pysim
+cd ~/pysim && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 export PYSIM_PATH=~/pysim
 ```
+
+**Note**: PyInstaller `.pkg` bundle is in progress (v0.5.37 fixed Python 3.9 compatibility; GUI asset loading blocked v0.5.38 release).
 
 ### Ubuntu (22.04+)
 

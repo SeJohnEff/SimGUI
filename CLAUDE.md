@@ -311,9 +311,9 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 - USB Reader: HID Global OMNIKEY 3x21 (direct USB, no VM)
 - pySim installed at `~/pysim` or via `PYSIM_PATH` env var (optional)
 - Uses macOS built-in `PCSC.framework` — no daemon installation needed
-- SimGUI runs as native `.app` (PyInstaller bundle with Python 3.9 runtime)
-- Distribution: `.pkg` installer or direct `.app` bundle
-- **Status**: App launches successfully; imports work; image asset loading has minor issues (workaround: run from command line)
+- SimGUI runs from source: `python3 main.py` (PyInstaller bundle in progress)
+- Distribution: Source-based for now; `.pkg` blocked by image asset loading issue
+- **Status (v0.5.37)**: Python 3.9 compatibility fixed; all imports work; PyInstaller bundle crashes on GUI init due to tkinter PNG loading from temp directory (see docs/TODO.md)
 
 **Legacy (Ubuntu via UTM):**
 - MacBook Air M4 → UTM VM → Ubuntu (ARM/aarch64)
