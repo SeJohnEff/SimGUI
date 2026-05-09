@@ -113,6 +113,9 @@ class SimGUIApp:
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
 
+        # Track whether "no reader" toast has been shown in current disconnection state
+        self._no_reader_toast_shown = False
+
         # Shared state: last card data read from Read SIM tab
         self.last_read_data: dict[str, str] = {}
 
@@ -506,6 +509,7 @@ class SimGUIApp:
 
     def _on_reader_ready(self):
         """Reader became available after being absent."""
+        self._no_reader_toast_shown = False
         self._card_panel.set_status("waiting", "Insert a SIM card...")
         self._status_var.set("Insert a SIM card...")
 
@@ -889,7 +893,10 @@ class SimGUIApp:
         """CardWatcher error (runs on main thread)."""
         logger.warning("CardWatcher error: %s", msg)
         if self._is_reader_error(msg):
-            self._show_no_reader_warning(msg)
+            # Only show toast once per disconnection event, not on every poll cycle
+            if not self._no_reader_toast_shown:
+                self._show_no_reader_warning(msg)
+                self._no_reader_toast_shown = True
 
     def _on_card_programmed(self, card_data):
         """Called after successful card programming — save auto-artifact.
