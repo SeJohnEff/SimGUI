@@ -492,10 +492,10 @@ class SimGUIApp:
 
         The toast auto-dismisses after a timeout.
         """
-        msg = "No USB smart-card reader detected. Check: reader is plugged in, pcscd is running."
+        msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner)."
         if detail:
             msg += f" ({detail})"
-        show_toast(self.root, msg, level="warning", duration=8000)
+        show_toast(self.root, msg, level="warning", duration=5000)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
 
