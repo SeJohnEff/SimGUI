@@ -8,11 +8,12 @@ simgui (0.5.36) unstable; urgency=medium
   * feat: immediate "Reading card..." feedback when card ATR detected —
     added on_reading callback to CardWatcher, fired before pySim-read
     blocks; eliminates silent 3-4 second gap
-  * ux: replace blocking "No reader" popup with non-modal Toplevel banner
-    that auto-dismisses when reader becomes available; prevents dialog
-    from halting the UI after VM USB passthrough is enabled
+  * ux: replace blocking "No reader" popup with non-blocking toast
+    notification that appears once per disconnection event; toast persists
+    until user closes it or reader is reconnected and auto-dismisses when
+    reader is detected; message guides user through UTM USB menu steps
   * feat: pcscd health check at startup — warns if pcscd is not running
-    with exact commands to enable it; non-blocking dialog auto-closes
+    with exact commands to enable it; non-blocking warning dialog
   * build: install.sh now enables pcscd with systemctl enable --now so
     it's running immediately and persists through reboots
   * build: install.sh applies GialerSim SPN patch automatically after

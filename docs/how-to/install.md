@@ -132,11 +132,12 @@ If running Ubuntu in UTM on macOS, additional USB configuration is required for 
 - Start SimGUI and the reader will be detected
 
 **If the reader is unplugged during use:**
-- SimGUI will show a notification that the reader is missing
+- SimGUI will show a toast notification: *"No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner). Disconnect/connect in top right menu."*
+- The toast persists until you click to close it or reconnect the reader
 - A background monitoring service will detect when the reader is re-connected
 - You will see a desktop notification: *"SmartCard Reader detected — toggle in UTM's USB menu"*
 - Click the USB icon in UTM's top-right corner and toggle the reader to re-attach it
-- SimGUI will detect it within 10 seconds
+- SimGUI's toast notification will auto-dismiss when the reader is detected
 
 **If issues persist:**
 - As a last resort, you can reboot the VM (the reader will auto-attach on restart)
