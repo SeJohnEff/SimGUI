@@ -955,5 +955,130 @@ class TestAuthenticateDetects6f00(unittest.TestCase):
         self.assertIn('FAILED', msg)
 
 
+class TestIccidCheckSkippedForBlankAndGialersim(unittest.TestCase):
+    """ICCID cross-verification must be skipped for blank and gialersim cards.
+
+    For blank/gialersim cards the target ICCID in the CSV is the one being
+    *written*, not what the card already holds.  All blank Fiskarheden cards
+    share the same default ADM1 so a mismatch cannot lock the wrong card.
+    """
+
+    def _make_gialersim_manager(self):
+        from managers.card_manager import CardManager, CardType, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = None
+        cm.card_type = CardType.GIALERSIM
+        cm.authenticated = False
+        cm.card_info = {}
+        cm._authenticated_adm1_hex = None
+        cm._original_card_data = {}   # blank card detected
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
+        return cm
+
+    def _make_blank_manager(self):
+        """Blank card: UNKNOWN type, no ICCID/IMSI in original data."""
+        from managers.card_manager import CardManager, CardType, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = None
+        cm.card_type = CardType.UNKNOWN
+        cm.authenticated = False
+        cm.card_info = {}
+        cm._authenticated_adm1_hex = None
+        cm._original_card_data = {}   # blank — no ICCID, no IMSI
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = None
+        cm._safety_override_acknowledged = False
+        return cm
+
+    def _make_sja5_manager(self):
+        from managers.card_manager import CardManager, CardType, CLIBackend
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = None
+        cm.card_type = CardType.SJA5
+        cm.authenticated = False
+        cm.card_info = {'ICCID': '8946000000000000001'}
+        cm._authenticated_adm1_hex = None
+        cm._original_card_data = {'ICCID': '8946000000000000001', 'IMSI': '001010000000001'}
+        cm._simulator = None
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
+        return cm
+
+    def test_gialersim_iccid_check_skipped_proceeds_to_auth(self):
+        """Gialersim card: expected_iccid mismatch must NOT abort authentication."""
+        cm = self._make_gialersim_manager()
+        # authenticate() for gialersim takes the blank-card path (stored, no VERIFY)
+        ok, msg = cm.authenticate('3838383838383838',
+                                  expected_iccid='8946000000000000099')
+        self.assertTrue(ok, f"Expected success for gialersim, got: {msg}")
+        self.assertNotIn('mismatch', msg.lower())
+
+    def test_gialersim_iccid_check_skipped_regardless_of_card_iccid(self):
+        """Even if card_info has an ICCID, gialersim skips the check."""
+        cm = self._make_gialersim_manager()
+        cm.card_info = {'ICCID': '8901901557518313028'}   # factory ICCID
+        cm._original_card_data = {'ICCID': '8901901557518313028'}
+        ok, msg = cm.authenticate('3838383838383838',
+                                  expected_iccid='8946000000000000099')
+        self.assertTrue(ok, f"Expected success for gialersim, got: {msg}")
+
+    def test_blank_card_iccid_check_skipped(self):
+        """Blank card (no ICCID/IMSI): expected_iccid mismatch must be skipped."""
+        cm = self._make_blank_manager()
+        ok, msg = cm.authenticate('3838383838383838',
+                                  expected_iccid='8946000000000000099')
+        self.assertTrue(ok, f"Expected success for blank card, got: {msg}")
+        self.assertNotIn('mismatch', msg.lower())
+
+    def test_blank_card_with_acc_only_iccid_check_skipped(self):
+        """Blank card that pySim-read returns ACC but no ICCID/IMSI."""
+        cm = self._make_blank_manager()
+        cm._original_card_data = {'ACC': 'ffff'}   # ACC present, no ICCID/IMSI
+        ok, msg = cm.authenticate('3838383838383838',
+                                  expected_iccid='8946000000000000099')
+        self.assertTrue(ok, f"Expected success for ACC-only card, got: {msg}")
+
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    def test_sja5_iccid_mismatch_still_aborts(self, mock_retry, mock_safe):
+        """Non-empty SJA5 card: ICCID mismatch must still abort authentication."""
+        cm = self._make_sja5_manager()
+        mock_retry.return_value = 3
+        ok, msg = cm.authenticate('88888888',
+                                  expected_iccid='9999999999999999999')
+        self.assertFalse(ok)
+        self.assertIn('mismatch', msg.lower())
+        mock_safe.assert_not_called()   # VERIFY must not have been sent
+
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    def test_sja5_iccid_match_proceeds_normally(self, mock_retry, mock_safe):
+        """Non-empty SJA5 card: matching expected_iccid proceeds to auth."""
+        cm = self._make_sja5_manager()
+        mock_retry.return_value = 3
+        mock_safe.return_value = (True, 'Authentication successful', '')
+        ok, msg = cm.authenticate('88888888',
+                                  expected_iccid='8946000000000000001')
+        self.assertTrue(ok)
+
+    def test_no_expected_iccid_always_skips_check(self):
+        """expected_iccid=None skips the check regardless of card type."""
+        cm = self._make_sja5_manager()
+        with patch.object(cm, 'read_iccid') as mock_read:
+            cm.authenticate('88888888', expected_iccid=None)
+        mock_read.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

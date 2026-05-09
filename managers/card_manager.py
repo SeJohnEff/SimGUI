@@ -792,15 +792,25 @@ class CardManager:
                 "This card cannot be programmed."
             )
 
-        # ICCID cross-verification safety check
+        # ICCID cross-verification safety check.
+        # Skipped for blank/gialersim cards: the target ICCID in the CSV is
+        # the one being *written* (not what the card already holds), and all
+        # blank Fiskarheden cards share the same default ADM1 so a mismatch
+        # cannot lock the wrong card.
         if expected_iccid is not None:
-            card_iccid = self.read_iccid()
-            if card_iccid and card_iccid != expected_iccid:
-                return False, (
-                    f"ICCID mismatch! Card ICCID: {card_iccid} does not match "
-                    f"expected: {expected_iccid}. Wrong card or wrong data row. "
-                    f"Authentication aborted to prevent card lockout."
-                )
+            _orig = self._original_card_data or {}
+            _is_blank_or_gialersim = (
+                self.card_type == CardType.GIALERSIM
+                or (not _orig.get('ICCID') and not _orig.get('IMSI'))
+            )
+            if not _is_blank_or_gialersim:
+                card_iccid = self.read_iccid()
+                if card_iccid and card_iccid != expected_iccid:
+                    return False, (
+                        f"ICCID mismatch! Card ICCID: {card_iccid} does not match "
+                        f"expected: {expected_iccid}. Wrong card or wrong data row. "
+                        f"Authentication aborted to prevent card lockout."
+                    )
 
         if self._simulator:
             ok, msg = self._simulator.authenticate(adm1, force=force)

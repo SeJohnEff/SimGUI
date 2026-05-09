@@ -1,3 +1,15 @@
+simgui (0.5.31) unstable; urgency=medium
+
+  * fix: skip ICCID cross-verification for blank/gialersim cards —
+    factory ICCID (if any) differs from target ICCID in CSV, and all
+    blank Fiskarheden cards share the same default ADM1 so a mismatch
+    cannot lock the wrong card
+  * test: 7 new tests in TestIccidCheckSkippedForBlankAndGialersim
+    covering gialersim, blank (no ICCID/IMSI), ACC-only, and SJA5
+    regression (mismatch still aborts for non-empty cards)
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Fri, 09 May 2026 10:00:00 +0100
+
 simgui (0.5.30) unstable; urgency=medium
 
   * fix: detect_card() retries once on transient 'protocolerror' from
