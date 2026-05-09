@@ -4,6 +4,41 @@ Common problems, their causes, and how to resolve them.
 
 ---
 
+## Reader and USB
+
+### "No reader detected" toast notification
+
+**Symptom:** SimGUI shows a toast notification: *"No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner). Disconnect/connect in top right menu."*
+
+This appears when:
+1. SimGUI starts and no USB card reader is detected
+2. A card reader is disconnected during operation
+
+**Resolution:**
+
+On Linux (native or Xorg session):
+1. Verify the reader is plugged in: `lsusb | grep -i card`
+2. Check pcscd is running: `sudo systemctl status pcscd` (or start it: `sudo systemctl start pcscd`)
+3. Verify the reader is detected: `pcsc_scan` (should show ATR when a card is inserted)
+
+On Ubuntu in UTM (macOS):
+1. Enable USB sharing in UTM: Settings → Input → enable "USB sharing" toggle
+2. Restart the VM for the setting to take effect
+3. In the running VM, click the USB icon (top right corner)
+4. Find your reader (e.g., "Realtek Semiconductor Smart Card Reader")
+5. Click to attach it to the VM
+6. Check the "auto-connect" checkbox for the reader
+7. The toast will auto-dismiss when the reader is detected
+
+If the reader was disconnected and reconnected:
+1. Click the USB icon in UTM's top-right corner
+2. Toggle the reader off and back on
+3. The toast will auto-dismiss when the reader is detected
+
+**Note:** The toast persists until either the reader is detected or you close it manually. Dismissing the toast does not prevent future notifications — reconnecting the reader will update the UI correctly.
+
+---
+
 ## Card detection
 
 ### Card not detected
