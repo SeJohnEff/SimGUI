@@ -729,50 +729,48 @@ class TestProgramSIMPanelInstantiation:
         panel.on_card_removed()
         assert panel._step == 0
 
-    def test_on_authenticate_before_detect(self):
+    def test_on_program_no_card(self):
+        # Step 0 = no card; _on_program returns immediately
         mod, panel, cm = self._make_panel()
         panel._step = 0
-        panel._on_authenticate()
+        panel._on_program()
+        cm.authenticate.assert_not_called()
 
-    def test_on_authenticate_no_adm1(self):
+    def test_on_program_no_adm1(self):
+        # Step 1 but ADM1 blank; _on_program returns with warning
         mod, panel, cm = self._make_panel()
         panel._step = 1
         panel._field_vars["ADM1"].set("")
-        panel._on_authenticate()
+        panel._on_program()
+        cm.authenticate.assert_not_called()
 
-    def test_on_authenticate_success(self):
-        mod, panel, cm = self._make_panel()
-        panel._step = 1
-        panel._field_vars["ADM1"].set("12345678")
-        panel._field_vars["ICCID"].set("89001")
-        cm.authenticate.return_value = (True, "Authenticated")
-        panel._on_authenticate()
-        assert panel._step == 2
-
-    def test_on_authenticate_failure(self):
+    def test_on_program_auth_failure(self):
+        # Auth fails; program_card is never called
         mod, panel, cm = self._make_panel()
         panel._step = 1
         panel._field_vars["ADM1"].set("12345678")
         cm.authenticate.return_value = (False, "Wrong key")
-        panel._on_authenticate()
-        assert panel._step == 1
-
-    def test_on_program_before_auth(self):
-        mod, panel, cm = self._make_panel()
-        panel._step = 1
         panel._on_program()
+        cm.program_card.assert_not_called()
+        assert panel._step == 1  # step stays at 1 (card still present)
 
     def test_on_program_success(self):
+        # Auth + program both succeed
         mod, panel, cm = self._make_panel()
-        panel._step = 2
+        panel._step = 1
         for key, _, _ in mod._FORM_FIELDS:
             panel._field_vars[key].set("testvalue")
+        cm.authenticate.return_value = (True, "Authenticated")
         cm.program_card.return_value = (True, "Programmed")
         panel._on_program()
+        cm.program_card.assert_called_once()
 
     def test_on_program_failure(self):
+        # Auth succeeds but program fails
         mod, panel, cm = self._make_panel()
-        panel._step = 2
+        panel._step = 1
+        panel._field_vars["ADM1"].set("testvalue")
+        cm.authenticate.return_value = (True, "Authenticated")
         cm.program_card.return_value = (False, "Program failed")
         panel._on_program()
 

@@ -2,9 +2,10 @@
 Program SIM Panel — Workflow 2.
 
 Program a single SIM card. Data comes from manual entry or CSV selection.
-Two-step flow: Authenticate → Program.  Card detection is automatic
-via CardWatcher.  When a card is inserted, fields are auto-populated
-from the IccidIndex if the card's ICCID is found in a loaded data file.
+Card detection is automatic via CardWatcher.  When a card is inserted,
+fields are auto-populated from the IccidIndex if the card's ICCID is
+found in a loaded data file.  Authentication runs automatically when
+the operator clicks Program.
 
 Layout uses a vertical PanedWindow so the operator can drag the divider
 to give more space to the card-data fields or the CSV table.
@@ -48,7 +49,7 @@ class ProgramSIMPanel(ttk.Frame):
         self._mode_var = tk.StringVar(value="manual")
         self._field_vars: dict[str, tk.StringVar] = {}
         self._field_entries: dict[str, ttk.Entry] = {}
-        self._step = 0  # 0=ready, 1=detected, 2=authenticated
+        self._step = 0  # 0=no card, 1=detected+ready
         self._original_form_data: dict[str, str] = {}  # baseline for change tracking
         self._detected_non_empty: bool = False  # True when a card with ICCID is detected
 
@@ -124,16 +125,12 @@ class ProgramSIMPanel(ttk.Frame):
 
         btn_row = ttk.Frame(act)
         btn_row.pack(fill=tk.X, padx=pad, pady=pad)
-        self._auth_btn = ttk.Button(
-            btn_row, text="1. Authenticate", command=self._on_authenticate,
-            state=tk.DISABLED)
-        self._auth_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(self._auth_btn, "Verify the ADM1 key with the card")
         self._prog_btn = ttk.Button(
-            btn_row, text="2. Program Card", command=self._on_program,
+            btn_row, text="Program Card", command=self._on_program,
             state=tk.DISABLED, style="Accent.TButton")
         self._prog_btn.pack(side=tk.LEFT)
-        add_tooltip(self._prog_btn, "Write all field values to the inserted SIM card")
+        add_tooltip(self._prog_btn,
+                    "Authenticate with ADM1 and write all field values to the inserted SIM card")
 
         # Selectable text widget for action status (not a Label — must be
         # copyable per user requirement).  Read-only tk.Text that looks
@@ -387,42 +384,36 @@ class ProgramSIMPanel(ttk.Frame):
         # If a card is already inserted (step >= 1), keep that state
         # so the user can authenticate.  Only reset if no card is present.
         if self._step >= 1:
-            # Card is present — re-enable authenticate, update status
-            self._auth_btn.configure(state=tk.NORMAL)
-            self._prog_btn.configure(state=tk.DISABLED)
-            self._step = 1  # reset to "detected" (need re-auth after data change)
+            # Card is present — data changed, stay ready to program
             self._set_action_status(
-                "CSV row selected \u2014 ready to authenticate",
+                "CSV row selected \u2014 ready to program",
                 "Success.TLabel")
         else:
             self._reset_step()
 
-    # ---- 2-step flow (auto-detect replaces manual Detect) ---------------
+    # ---- Workflow step helpers -----------------------------------------
 
     def _reset_step(self):
         """Reset the workflow step.
 
-        If a card is currently detected (step >= 1), reset back to
-        step 1 (detected, needs auth) instead of step 0 (no card).
-        This prevents the panel from showing 'Insert a SIM card'
-        when a card is already inserted.
+        If a card is currently detected (step >= 1), keep step 1 (ready)
+        instead of resetting to step 0 (no card).  This prevents the panel
+        from showing 'Insert a SIM card' when a card is already inserted.
         """
         if self._detected_non_empty or self._step >= 1:
-            # Card is present — reset to 'detected' (needs re-auth)
+            # Card is present — ready to program
             self._step = 1
-            self._auth_btn.configure(state=tk.NORMAL)
-            self._prog_btn.configure(state=tk.DISABLED)
+            self._prog_btn.configure(state=tk.NORMAL)
             iccid = self._field_vars["ICCID"].get().strip()
             if iccid:
                 self._set_action_status(
-                    f"Card detected (ICCID {iccid}) \u2014 authenticate to program")
+                    f"Card detected (ICCID {iccid}) \u2014 click Program to continue")
             else:
                 self._set_action_status(
-                    "Blank card detected \u2014 authenticate to program")
+                    "Blank card detected \u2014 click Program to continue")
         else:
             # No card present
             self._step = 0
-            self._auth_btn.configure(state=tk.DISABLED)
             self._prog_btn.configure(state=tk.DISABLED)
             self._set_action_status("Insert a SIM card...")
 
@@ -453,11 +444,10 @@ class ProgramSIMPanel(ttk.Frame):
         (empty ICCID) and no *card_data* is supplied, the method checks
         whether the form already contains data (e.g. from a CSV row
         selection).  If so, the existing field values are preserved and
-        the panel moves straight to STEP 1 (ready to authenticate).
+        the panel moves straight to STEP 1 (ready to program).
         """
         self._step = 1
-        self._auth_btn.configure(state=tk.NORMAL)
-        self._prog_btn.configure(state=tk.DISABLED)
+        self._prog_btn.configure(state=tk.NORMAL)
 
         # Track whether this is a non-empty card
         self._detected_non_empty = bool(iccid)
@@ -484,7 +474,7 @@ class ProgramSIMPanel(ttk.Frame):
             # the existing data — don't overwrite with empty values.
             self._original_form_data = {}  # all fields will be written
             self._set_action_status(
-                "Blank card detected \u2014 ready to authenticate",
+                "Blank card detected \u2014 ready to program",
                 "Success.TLabel")
         else:
             # Card found but not in index — just show ICCID
@@ -519,7 +509,7 @@ class ProgramSIMPanel(ttk.Frame):
         # Restore ICCID to editable (will be locked again on next detect)
         self._field_entries["ICCID"].configure(state="normal")
 
-    def _on_authenticate(self):
+    def _on_program(self):
         if self._step < 1:
             return
         adm1 = self._field_vars["ADM1"].get().strip()
@@ -527,9 +517,11 @@ class ProgramSIMPanel(ttk.Frame):
             self._set_action_status("ADM1 is required", "Warning.TLabel")
             return
         expected_iccid = self._field_vars["ICCID"].get().strip() or None
+        card_data = {k: self._field_vars[k].get().strip()
+                     for k, _, _ in _FORM_FIELDS}
 
         # Pause the card watcher so its probes don't interfere with
-        # the VERIFY APDU that authenticate() sends to the card.
+        # the VERIFY APDU and programming calls.
         if self._card_watcher:
             self._card_watcher.pause()
         try:
@@ -552,28 +544,11 @@ class ProgramSIMPanel(ttk.Frame):
                     ok, msg = self._cm.authenticate(
                         adm1, force=True,
                         expected_iccid=expected_iccid)
-        finally:
-            if self._card_watcher:
-                self._card_watcher.resume()
 
-        if ok:
-            self._step = 2
-            self._prog_btn.configure(state=tk.NORMAL)
-            self._set_action_status(msg, "Success.TLabel")
-        else:
-            self._set_action_status(msg, "Error.TLabel")
+            if not ok:
+                self._set_action_status(msg, "Error.TLabel")
+                return
 
-    def _on_program(self):
-        if self._step < 2:
-            return
-        card_data = {k: self._field_vars[k].get().strip()
-                     for k, _, _ in _FORM_FIELDS}
-
-        # Pause the card watcher so its probes don't interfere with
-        # the programming + verification pySim calls.
-        if self._card_watcher:
-            self._card_watcher.pause()
-        try:
             ok, msg = self._cm.program_card(
                 card_data, original_data=self._original_form_data or None)
         finally:

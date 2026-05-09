@@ -1,3 +1,14 @@
+simgui (0.5.32) unstable; urgency=medium
+
+  * ux: remove standalone Authenticate button from Program SIM tab —
+    authentication now runs automatically when operator clicks Program Card,
+    eliminating the manual two-step flow
+  * test: update TestProgramSIMPanelInstantiation — replace _on_authenticate
+    tests with equivalent _on_program tests covering no-card, no-adm1,
+    auth-failure, auth+program-success, and auth+program-failure paths
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Sat, 09 May 2026 12:00:00 +0100
+
 simgui (0.5.31) unstable; urgency=medium
 
   * fix: skip ICCID cross-verification for blank/gialersim cards —
