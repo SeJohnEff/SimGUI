@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Date:** 2026-03-15  
-**Status:** PROPOSAL — awaiting approval
+**Status:** COMPLETED — migration to PyQt6 is done as of v0.5.x
 
 ---
 

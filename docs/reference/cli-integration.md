@@ -54,7 +54,8 @@ card_manager.set_cli_path("/custom/path", backend=CLIBackend.PYSIM)
 All CLI invocations go through `CardManager._run_cli(script, *args)`:
 
 ```python
-cmd = [sys.executable, script_path] + list(args)
+python_exe = self._venv_python or sys.executable
+cmd = [python_exe, script_path] + list(args)
 result = subprocess.run(
     cmd, capture_output=True, text=True, timeout=30,
     cwd=self.cli_path,
@@ -63,7 +64,7 @@ result = subprocess.run(
 
 Key properties:
 
-- **Python interpreter** (`sys.executable`) is always used — never raw shell execution.
+- **Python interpreter:** `_venv_python` (the virtual environment at `/opt/pysim/.venv/bin/python`) is preferred over `sys.executable`. This ensures pySim's dependencies (osmocom, smartcard, etc.) are available. Falls back to `sys.executable` if no venv is found.
 - **Working directory** is set to `cli_path`, matching how the CLI tools expect to be run.
 - **Timeout:** 30 seconds by default. Operations that exceed this return `(False, "", "Command timed out")`.
 - **stdout and stderr captured separately.** Callers receive `(success: bool, stdout: str, stderr: str)`.
@@ -133,6 +134,7 @@ pySim-shell returns exit code 0 even on failures. SimGUI scans stdout/stderr for
 | `not equipped` | File or feature not present on card |
 | `Card error` | General card communication error |
 | `Autodetection failed` | pySim could not identify the card type |
+| `protocolerror` | Transient PCSC lock contention — SimGUI retries once after 1 s |
 
 ---
 

@@ -43,6 +43,19 @@ Common problems, their causes, and how to resolve them.
 
 ---
 
+### "Card communication error — re-seat the SIM"
+
+**Symptom:** SimGUI briefly shows "Card communication error — re-seat the SIM" on first card detection, then succeeds on the next poll cycle.
+
+This is a transient PCSC lock contention error (`protocolerror` in pySim stderr). It occurs when pySim-read tries to open the card while the PCSC daemon is briefly busy from a prior connection. SimGUI retries once after 1 second automatically — no action is needed.
+
+If the error is persistent (not just on first detection), try:
+1. Re-seat the card.
+2. Restart pcscd: `sudo systemctl restart pcscd`
+3. Verify no other process holds the reader: `pcsc_scan`
+
+---
+
 ### Card detected but ICCID not read
 
 **Symptom:** Card watcher fires, but the ICCID field is empty or shows an error.
