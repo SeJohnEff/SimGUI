@@ -1,3 +1,18 @@
+simgui (0.5.35) unstable; urgency=medium
+
+  * fix: debounce blank-card removal in CardWatcher — require two
+    consecutive 'No card in reader' probes before firing on_card_removed()
+    when last_iccid is None; blank gialersim cards cause an intermittent
+    PCSC failure right after pySim-read releases the reader, which was
+    resetting the program panel to 'Insert a SIM card...' despite the
+    card still being present; non-blank cards removed immediately as before
+  * fix: same debounce applied to _check_once_slow path (no pyscard)
+  * test: 6 new tests in TestBlankCardRemovalDebounce covering first-probe
+    no-removal, second-probe fires removal, card-reappear resets debounce,
+    and non-blank card still removed immediately
+
+ -- John Fornehed <john.fornehed@furunomirai.se>  Sat, 09 May 2026 22:00:00 +0100
+
 simgui (0.5.34) unstable; urgency=medium
 
   * feat: auto-detect delimiter (comma, tab, semicolon) in load_csv() —

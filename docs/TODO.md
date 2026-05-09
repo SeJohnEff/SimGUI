@@ -173,6 +173,6 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
 
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
 - [ ] App unresponsive after closing Network Storage dialog (user: "Acceptable")
-- [ ] Right pane says "Insert SIM" even after blank card detected
+- [x] **FIXED v0.5.35: Right pane says "Insert SIM" even after blank card detected** — Root cause: intermittent PCSC 'No card in reader' from the fast probe right after pySim-read releases the reader on blank gialersim cards. Fix: CardWatcher now requires two consecutive absent probes before firing on_card_removed() when last_iccid is None (blank card). Non-blank cards still removed on first absent probe. Debounce applied in both fast-probe (_handle_probe_result) and slow-poll (_check_once_slow) paths.
 - [ ] Card data blanks out when removing/inserting SIM
 - [x] **PARTIALLY FIXED v0.5.21: "Card not in index" after just programming** — Fix 1.4 added `add_iccid()` to update the index after programming. The "add single card" part works (log confirms `ICCID index: added single card`). However, the full "card not in index" dialog may still appear if the auto-read flow triggers a second lookup before the index update propagates. Needs further testing to confirm fully resolved.

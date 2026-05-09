@@ -66,6 +66,12 @@ class CardWatcher:
         self._last_iccid: Optional[str] = None
         self._last_atr: Optional[str] = None
         self._card_present: bool = False
+        # Debounce counter: blank gialersim cards can cause intermittent
+        # "No card in reader" from the PCSC probe after pySim-read releases
+        # the reader.  Require two consecutive absent-probes before declaring
+        # removal for blank cards (last_iccid is None) — this tolerates one
+        # transient PCSC failure without resetting the UI to "Insert SIM".
+        self._no_card_streak: int = 0
         # Whether pyscard fast probe is available
         self._probe_available: Optional[bool] = None
         # ATR → ICCID cache for just-programmed cards.  When we program
@@ -118,6 +124,7 @@ class CardWatcher:
         self._last_iccid = None
         self._last_atr = None
         self._card_present = False
+        self._no_card_streak = 0
         logger.info("CardWatcher stopped")
 
     def pause(self):
@@ -222,7 +229,8 @@ class CardWatcher:
           (False, other error)              → reader error
         """
         if present:
-            # Card is in reader
+            # Card is in reader — reset removal debounce
+            self._no_card_streak = 0
             atr = msg
             if not self._card_present or atr != self._last_atr:
                 self._card_present = True
@@ -234,7 +242,16 @@ class CardWatcher:
         elif msg == 'No card in reader':
             # Reader connected but no card
             if self._card_present:
-                # Card was just removed
+                if self._last_iccid is None:
+                    # Last card was blank (no ICCID) — require two consecutive
+                    # absent probes before declaring removal.  Blank gialersim
+                    # cards can cause a transient "No card" from the PCSC
+                    # probe right after pySim-read releases the reader.
+                    self._no_card_streak += 1
+                    if self._no_card_streak < 2:
+                        return
+                # Card confirmed removed
+                self._no_card_streak = 0
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
@@ -311,6 +328,7 @@ class CardWatcher:
         ok, msg = self._cm.detect_card()
 
         if ok:
+            self._no_card_streak = 0
             iccid = self._cm.read_iccid()
             if iccid and iccid != self._last_iccid:
                 # New card detected (with readable ICCID)
@@ -328,7 +346,13 @@ class CardWatcher:
                         pass
         else:
             if self._card_present:
+                if self._last_iccid is None:
+                    # Blank card — require confirmation before declaring removal
+                    self._no_card_streak += 1
+                    if self._no_card_streak < 2:
+                        return
                 # Card was removed or became unreachable
+                self._no_card_streak = 0
                 self._last_iccid = None
                 self._card_present = False
                 self._atr_iccid_cache.clear()

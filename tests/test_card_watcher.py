@@ -645,3 +645,101 @@ class TestPausedContext:
         time.sleep(0.3)
         assert cm.detect_call_count > count_at_pause
         w.stop()
+
+
+# ---------------------------------------------------------------------------
+# Blank-card removal debounce
+# ---------------------------------------------------------------------------
+
+class TestBlankCardRemovalDebounce:
+    """Blank gialersim cards can cause a transient 'No card' from PCSC right
+    after pySim-read releases the reader.  The watcher requires two consecutive
+    absent probes before declaring removal for blank cards (last_iccid=None).
+    Non-blank cards are removed immediately on the first absent probe.
+    """
+
+    def _make_watcher_with_blank_card(self):
+        """Return a watcher that has already detected a blank card."""
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = None  # blank card
+
+        removed = []
+        unknown = []
+        w = CardWatcher(cm)
+        w.on_card_removed = lambda: removed.append(True)
+        w.on_card_unknown = lambda ic: unknown.append(ic)
+
+        # First check: blank card detected
+        w._check_once()
+        assert len(unknown) == 1
+        assert w._card_present is True
+        assert w._last_iccid is None
+
+        cm.detect_ok = False  # simulate card removal
+        return w, cm, removed
+
+    def test_nonblank_card_removed_immediately(self):
+        """Non-blank card: single 'no card' probe fires on_card_removed."""
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = "8949440000001672706"  # non-blank
+
+        removed = []
+        w = CardWatcher(cm)
+        w.on_card_removed = lambda: removed.append(True)
+        w.on_card_unknown = lambda ic: None
+
+        w._check_once()  # detect card
+        assert w._card_present is True
+
+        cm.detect_ok = False
+        w._check_once()  # remove
+        assert len(removed) == 1, "Non-blank card should fire removal immediately"
+
+    def test_blank_card_first_absent_probe_no_removal(self):
+        """Blank card: first 'no card' probe does NOT fire on_card_removed."""
+        w, cm, removed = self._make_watcher_with_blank_card()
+        w._check_once()  # first absent probe
+        assert len(removed) == 0, "Should not fire removal on first absent probe"
+        assert w._card_present is True, "_card_present should stay True after first absent probe"
+
+    def test_blank_card_second_absent_probe_fires_removal(self):
+        """Blank card: second consecutive 'no card' probe fires on_card_removed."""
+        w, cm, removed = self._make_watcher_with_blank_card()
+        w._check_once()  # first absent probe — debounced
+        w._check_once()  # second absent probe — fires removal
+        assert len(removed) == 1, "Should fire removal on second absent probe"
+        assert w._card_present is False
+
+    def test_blank_card_reappears_resets_debounce(self):
+        """Blank card: one absent probe, card reappears → no removal fired."""
+        w, cm, removed = self._make_watcher_with_blank_card()
+        w._check_once()  # first absent probe — debounced
+        assert len(removed) == 0
+
+        cm.detect_ok = True  # card reappears
+        unknown_extra = []
+        w.on_card_unknown = lambda ic: unknown_extra.append(ic)
+        w._check_once()  # card back — debounce counter reset
+        assert len(removed) == 0, "No removal should fire when card reappears"
+        assert w._no_card_streak == 0
+
+    def test_no_card_streak_resets_on_card_present(self):
+        """_no_card_streak resets to 0 when card is detected again."""
+        w, cm, removed = self._make_watcher_with_blank_card()
+        w._check_once()  # first absent probe → streak=1
+        assert w._no_card_streak == 1
+
+        cm.detect_ok = True  # card back
+        w._check_once()
+        assert w._no_card_streak == 0
+
+    def test_blank_card_removal_clears_card_present(self):
+        """After second absent probe, _card_present is False and state is clean."""
+        w, cm, removed = self._make_watcher_with_blank_card()
+        w._check_once()
+        w._check_once()
+        assert w._card_present is False
+        assert w._last_iccid is None
+        assert w._last_atr is None
