@@ -58,7 +58,7 @@ class TestPysimShellGialersimAuth:
     """Bug 3.1: _run_pysim_shell_impl uses -a ASCII for gialersim."""
 
     def test_gialersim_uses_a_flag_not_A(self, tmp_path):
-        """Gialersim cards pass -t gialersim -a <ascii> to pySim-shell."""
+        """Gialersim cards omit -A from pySim-shell (auth handled by pySim-prog)."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(
@@ -66,16 +66,10 @@ class TestPysimShellGialersimAuth:
             cm._run_pysim_shell('3838383838383838', 'verify_adm')
 
         cmd = mock_run.call_args[0][0]
-        # Must NOT have -A (standard hex auth)
+        # Must NOT have -A (standard hex auth — gialersim auth via pySim-prog)
         assert '-A' not in cmd
-        # Must have -t gialersim
-        assert '-t' in cmd
-        t_idx = cmd.index('-t')
-        assert cmd[t_idx + 1] == 'gialersim'
-        # Must have -a with ASCII ADM1
-        assert '-a' in cmd
-        a_idx = cmd.index('-a')
-        assert cmd[a_idx + 1] == '88888888'  # hex 3838... -> ASCII 88888888
+        # pySim-shell does not support -t flag — must NOT be present
+        assert '-t' not in cmd
 
     def test_sja5_still_uses_A_flag(self, tmp_path):
         """Non-gialersim cards still use -A <hex>."""
@@ -144,9 +138,8 @@ class TestVerifyAfterProgramCardType:
             })
 
         assert ok is True
-        # Check that -t gialersim was passed
-        mock_cli.assert_called_once_with(
-            'pySim-read.py', '-p0', '-t', 'gialersim')
+        # pySim-read auto-detects card type — no -t flag needed or supported
+        mock_cli.assert_called_once_with('pySim-read.py', '-p0')
 
     def test_sja5_verify_no_card_type_flag(self, tmp_path):
         """pySim-read for non-gialersim cards doesn't pass -t."""
@@ -439,8 +432,8 @@ class TestExtraFieldsAfterPysimProg:
 
     def test_program_empty_card_extra_fields_use_gialersim_shell(
             self, tmp_path):
-        """After pySim-prog, extra fields written via pySim-shell with
-        -t gialersim -a ASCII ADM1."""
+        """After pySim-prog, extra fields (outside _PYSIM_PROG_FIELDS) written
+        via pySim-shell without -A (gialersim auth handled by pySim-prog)."""
         cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
 
         card_data = {
@@ -451,6 +444,7 @@ class TestExtraFieldsAfterPysimProg:
             'SPN': 'TestOp',
             'ACC': '0001',
             'FPLMN': '24007;24024',
+            'PIN1': '1234',  # outside _PYSIM_PROG_FIELDS -> goes via shell
         }
 
         shell_calls = []
@@ -467,17 +461,14 @@ class TestExtraFieldsAfterPysimProg:
                     dict(card_data))  # all fields as "changed"
 
         assert ok is True
-        # There should be at least 2 calls: pySim-prog + pySim-shell
+        # At least 2 calls: pySim-prog + pySim-shell for PIN1
         assert len(shell_calls) >= 2
 
-        # The second call (pySim-shell for extra fields) should use
-        # -a (ASCII) not -A (hex)
+        # pySim-shell for gialersim must NOT use -A (auth via pySim-prog)
+        # pySim-shell does not support -t flag
         shell_cmd = shell_calls[1]
-        assert '-a' in shell_cmd
-        assert '-t' in shell_cmd
-        t_idx = shell_cmd.index('-t')
-        assert shell_cmd[t_idx + 1] == 'gialersim'
         assert '-A' not in shell_cmd
+        assert '-t' not in shell_cmd
 
 
 # ===========================================================================
@@ -502,6 +493,10 @@ class TestParsePysimOutputSpn:
     def test_parses_fplmn(self, tmp_path):
         cm = _make_hw_manager(tmp_path)
         cm.card_info = {}
-        cm._parse_pysim_output("FPLMN: 24007\nFPLMN: 24024\n")
+        cm._parse_pysim_output(
+            "FPLMN:\n"
+            "\t42f007 # MCC: 240 MNC: 07\n"
+            "\t42f024 # MCC: 240 MNC: 24\n"
+        )
         assert '24007' in cm.card_info.get('FPLMN', '')
         assert '24024' in cm.card_info.get('FPLMN', '')

@@ -46,6 +46,9 @@ class TestAtrCacheClearedOnRemoval(unittest.TestCase):
         watcher._card_present = True
         watcher._programmed_iccids = set()
         watcher.on_card_removed = None
+        watcher.on_card_detected = None
+        watcher.on_error = None
+        watcher.on_reader_ready = None
         return watcher
 
     def test_cache_cleared_on_card_removal_fast_path(self):

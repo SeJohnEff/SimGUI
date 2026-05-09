@@ -244,10 +244,10 @@ class TestAuthenticateBlankCard:
         mock_shell.assert_not_called()
 
     def test_blank_card_skips_verify_with_none_original(self, tmp_path):
-        """Blank card (None original data): same early-return path."""
+        """Blank card with empty snapshot (no ICCID/IMSI): same early-return path."""
         cm = _make_hw_manager(tmp_path)
         cm.cli_backend = CLIBackend.PYSIM
-        cm._original_card_data = None  # type: ignore[assignment]
+        cm._original_card_data = {}  # empty dict = card detected but blank
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
             ok, msg = cm.authenticate('88888888')

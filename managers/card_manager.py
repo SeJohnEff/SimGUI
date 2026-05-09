@@ -198,7 +198,7 @@ class CardManager:
         self.authenticated: bool = False
         self.card_info: Dict[str, str] = {}
         self._authenticated_adm1_hex: Optional[str] = None
-        self._original_card_data: Dict[str, str] = {}  # snapshot at detect time
+        self._original_card_data: Optional[Dict[str, str]] = None  # None = no card detected yet
         self._simulator = None  # Optional[SimulatorBackend]
         self.card_blocked: bool = False   # True when ADM1 retry counter = 0
         self._adm1_remaining_attempts: Optional[int] = None
@@ -850,9 +850,9 @@ class CardManager:
         #    with their own internal auth sequence.  The standard
         #    verify_adm (CHV 0x0A) will always fail.  pySim-prog
         #    with -t gialersim handles auth correctly.
-        # No card detected at all (both data stores empty and type unknown)
-        if (not self.card_info and not self._original_card_data
-                and self.card_type == CardType.UNKNOWN):
+        # No card has been detected yet — _original_card_data is None until
+        # detect_card() runs and takes a snapshot (even a blank card sets it to {})
+        if self._original_card_data is None and not self.card_info:
             return False, "No SIM card detected. Insert a card and try again."
 
         orig = self._original_card_data or {}
@@ -1520,7 +1520,7 @@ class CardManager:
             self._simulator.disconnect()
         self.authenticated = False
         self._authenticated_adm1_hex = None
-        self._original_card_data = {}
+        self._original_card_data = None
         self.card_type = CardType.UNKNOWN
         self.card_info = {}
         self.card_blocked = False
