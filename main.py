@@ -113,9 +113,6 @@ class SimGUIApp:
         # Mode variable: "hardware" or "simulator"
         self._mode_var = tk.StringVar(value="hardware")
 
-        # Non-blocking dialog for "No reader" warning
-        self._no_reader_dialog: Optional[tk.Toplevel] = None
-
         # Shared state: last card data read from Read SIM tab
         self.last_read_data: dict[str, str] = {}
 
@@ -491,53 +488,16 @@ class SimGUIApp:
         return any(kw in lower for kw in self._READER_ERROR_KEYWORDS)
 
     def _show_no_reader_warning(self, detail: str = ""):
-        """Show a non-blocking banner warning about missing USB smart-card reader.
+        """Show a toast warning about missing USB smart-card reader.
 
-        The dialog auto-dismisses when the reader becomes available.
+        The toast auto-dismisses after a timeout.
         """
-        body = (
-            "No USB smart-card reader detected.\n\n"
-            "Please check:\n"
-            "  \u2022 Reader is plugged in (and passed through to the VM)\n"
-            "  \u2022 PC/SC service is running: sudo systemctl start pcscd\n"
-            "  \u2022 Reader appears in: pcsc_scan\n"
-        )
+        msg = "No USB smart-card reader detected. Check: reader is plugged in, pcscd is running."
         if detail:
-            body += f"\nDetail: {detail}"
-        if self._no_reader_dialog is not None:
-            return
-
-        dlg = tk.Toplevel(self.root)
-        dlg.title("No Card Reader")
-        dlg.resizable(False, False)
-        dlg.geometry("500x200")
-
-        pad_m = ModernTheme.get_padding('medium')
-
-        msg_frame = ttk.Frame(dlg, padding=pad_m)
-        msg_frame.pack(fill=tk.BOTH, expand=True)
-
-        msg_label = ttk.Label(msg_frame, text=body, justify=tk.LEFT)
-        msg_label.pack(fill=tk.BOTH, expand=True)
-
-        btn_frame = ttk.Frame(dlg, padding=pad_m)
-        btn_frame.pack(fill=tk.X)
-        ttk.Button(
-            btn_frame, text="OK",
-            command=self._dismiss_no_reader_dialog
-        ).pack(side=tk.RIGHT)
-
-        dlg.protocol("WM_DELETE_WINDOW", self._dismiss_no_reader_dialog)
-
-        self._no_reader_dialog = dlg
+            msg += f" ({detail})"
+        show_toast(self.root, msg, level="warning", duration=8000)
         self._card_panel.set_status("error", "No card reader detected")
         self._status_var.set("No card reader — check USB connection")
-
-    def _dismiss_no_reader_dialog(self):
-        """Close the non-blocking no-reader warning dialog."""
-        if self._no_reader_dialog is not None:
-            self._no_reader_dialog.destroy()
-            self._no_reader_dialog = None
 
     def _on_card_reading(self):
         """Card ATR detected; about to read card data (runs on main thread)."""
@@ -546,7 +506,6 @@ class SimGUIApp:
 
     def _on_reader_ready(self):
         """Reader became available after being absent."""
-        self._dismiss_no_reader_dialog()
         self._card_panel.set_status("waiting", "Insert a SIM card...")
         self._status_var.set("Insert a SIM card...")
 
