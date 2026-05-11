@@ -18,6 +18,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from managers.card_manager import CardManager
 from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
+from state_manager import StateManager, CardInfo, CardState
 from theme import ModernTheme
 from utils import get_browse_initial_dir
 from widgets.tooltip import add_tooltip
@@ -39,10 +40,12 @@ class ProgramSIMPanel(ttk.Frame):
     """Tab for programming a single SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
+                 state_manager: Optional[StateManager] = None,
                  last_read_data: Optional[dict]= None,
                  ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
+        self.state_manager = state_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
         self._last_browse_dir: Optional[str]= None
@@ -61,6 +64,10 @@ class ProgramSIMPanel(ttk.Frame):
 
         self._build_ui()
         self._on_mode_change()
+
+        if self.state_manager:
+            self.state_manager.card_info_changed.connect(self._on_card_info_changed)
+            self.state_manager.card_state_changed.connect(self._on_card_state_changed)
 
     # ---- UI construction -----------------------------------------------
 
@@ -224,6 +231,15 @@ class ProgramSIMPanel(ttk.Frame):
         "Warning.TLabel": "#e65100",
         "Error.TLabel": "#c62828",
     }
+
+    def _on_card_state_changed(self, card_state: CardState):
+        """Signal handler for card state changes."""
+        if card_state == CardState.NO_CARD:
+            self.on_card_removed()
+
+    def _on_card_info_changed(self, card_info: CardInfo):
+        """Signal handler for card info changes."""
+        pass
 
     def _set_action_status(self, text: str, style: str = "TLabel"):
         """Update the selectable action-status text widget.

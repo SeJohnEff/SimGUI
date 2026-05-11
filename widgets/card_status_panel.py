@@ -8,21 +8,27 @@ by :class:`CardWatcher` — there is no manual "Detect Card" button.
 
 import tkinter as tk
 from tkinter import ttk
+from typing import Optional
 
 from theme import ModernTheme
 from widgets.tooltip import add_tooltip
+from state_manager import StateManager, CardInfo
 
 
 class CardStatusPanel(ttk.LabelFrame):
     """Panel showing card detection and status"""
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, state_manager: Optional[StateManager] = None, **kwargs):
         padding = ModernTheme.get_padding('medium')
         super().__init__(parent, text="Card Status", padding=padding, **kwargs)
+        self.state_manager = state_manager
         self.on_detect_callback = None
         self.on_authenticate_callback = None
         self._create_widgets()
         self.set_status("waiting", "Insert a SIM card...")
+
+        if self.state_manager:
+            self.state_manager.card_info_changed.connect(self._on_card_info_changed)
 
     def _create_widgets(self):
         pad_s = ModernTheme.get_padding('small')
@@ -75,6 +81,20 @@ class CardStatusPanel(ttk.LabelFrame):
         _auth_btn.pack(side=tk.LEFT)
         add_tooltip(_auth_btn, "Enter ADM1 to authenticate")
 
+    def _on_card_info_changed(self, card_info: CardInfo):
+        """Update all labels when CardInfo changes."""
+        self.set_card_info(
+            card_type=card_info.card_type if card_info.card_type else None,
+            imsi=card_info.imsi if card_info.imsi else None,
+            iccid=card_info.iccid if card_info.iccid else None,
+            acc=card_info.acc if card_info.acc else None,
+            spn=card_info.spn if card_info.spn else None,
+            fplmn=card_info.fplmn if card_info.fplmn else None,
+            source_file=card_info.source_file if card_info.source_file else None,
+        )
+        self.set_auth_status(card_info.auth_status)
+        self.set_programmed_indicator(card_info.already_programmed)
+
     def set_status(self, state, message=""):
         colors = {
             'waiting': ModernTheme.get_color('warning'),
@@ -126,7 +146,7 @@ class CardStatusPanel(ttk.LabelFrame):
         """Show or hide the 'CARD BLOCKED' banner."""
         if not hasattr(self, '_blocked_label'):
             self._blocked_label = tk.Label(
-                self, text="\u26d4 CARD BLOCKED \u2014 Cannot be programmed",
+                self, text="⛔ CARD BLOCKED — Cannot be programmed",
                 bg='#CC0000', fg='white',
                 font=('TkDefaultFont', 10, 'bold'),
                 padx=8, pady=4, anchor='w')
@@ -141,7 +161,7 @@ class CardStatusPanel(ttk.LabelFrame):
         """Show or hide the 'already programmed' warning."""
         if already_programmed:
             self._programmed_label.configure(
-                text="\u26a0 Already programmed (artifact exists)")
+                text="⚠ Already programmed (artifact exists)")
             self._programmed_label.grid(
                 row=self._num_info_rows + 3, column=0, columnspan=2,
                 sticky=tk.W, pady=(4, 0))

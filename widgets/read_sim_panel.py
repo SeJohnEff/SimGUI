@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from managers.card_manager import CardManager
+from state_manager import StateManager, CardInfo, CardState
 from theme import ModernTheme
 from utils import get_browse_initial_dir
 from widgets.tooltip import add_tooltip, hide_all_tooltips
@@ -60,10 +61,12 @@ class ReadSIMPanel(ttk.Frame):
     """Tab that guides the user through reading a SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
+                 state_manager: Optional[StateManager] = None,
                  last_read_data: Optional[dict]= None,
                  ns_manager=None, card_watcher=None, **kwargs):
         super().__init__(parent, **kwargs)
         self._cm = card_manager
+        self.state_manager = state_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
         self._last_browse_dir: Optional[str]= None
@@ -73,6 +76,10 @@ class ReadSIMPanel(ttk.Frame):
         self._detected_iccid: str = ""
         self._authenticated: bool = False
         self._build_ui()
+
+        if self.state_manager:
+            self.state_manager.card_info_changed.connect(self._on_card_info_changed)
+            self.state_manager.card_state_changed.connect(self._on_card_state_changed)
 
     # ---- UI construction -----------------------------------------------
 
@@ -230,6 +237,15 @@ class ReadSIMPanel(ttk.Frame):
             btn_row, text="Export to CSV...", command=self._on_export)
         self._export_btn.pack(side=tk.LEFT)
         add_tooltip(self._export_btn, "Export card data as a JSON file")
+
+    def _on_card_state_changed(self, card_state: CardState):
+        """Signal handler for card state changes."""
+        if card_state == CardState.NO_CARD:
+            self.refresh()
+
+    def _on_card_info_changed(self, card_info: CardInfo):
+        """Signal handler for card info changes."""
+        pass
 
     # ---- public interface (called by main.py) --------------------------
 

@@ -3,21 +3,33 @@
 """
 SimGUI - SIM Card Programming GUI
 
-Main entry point. Builds the application window and wires together
-widgets, managers, and dialogs.
+Main entry point using PyQt6. Builds the application window and wires
+together managers, panels, and state management.
 """
+
+from __future__ import annotations
 
 import logging
 import os
 import sys
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+import threading
+from typing import Optional
 
-from dialogs.adm1_dialog import ADM1Dialog
-from dialogs.artifact_export_dialog import ArtifactExportDialog
-from dialogs.load_card_file_dialog import LoadCardFileDialog
-from dialogs.network_storage_dialog import NetworkStorageDialog
-from dialogs.simulator_settings_dialog import SimulatorSettingsDialog
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QSplitter,
+    QTabWidget,
+    QLabel,
+    QStatusBar,
+    QFileDialog,
+    QMessageBox,
+)
+
 from managers.auto_artifact_manager import AutoArtifactManager
 from managers.backup_manager import BackupManager
 from managers.card_manager import CardManager, CLIBackend
@@ -27,19 +39,10 @@ from managers.iccid_index import IccidIndex
 from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
 from managers.standards_manager import StandardsManager
-from theme import ModernTheme
+from qt_theme import QtTheme
+from state_manager import StateManager, CardState, AppMode, CardInfo
 from utils import get_browse_initial_dir
 from version import __version__
-from widgets.batch_program_panel import BatchProgramPanel
-from widgets.card_status_panel import CardStatusPanel
-from widgets.csv_editor_panel import CSVEditorPanel
-from widgets.program_sim_panel import ProgramSIMPanel
-from widgets.progress_panel import ProgressPanel
-from widgets.read_sim_panel import ReadSIMPanel
-from widgets.info_dialog import show_error as show_error_dialog
-from widgets.info_dialog import show_info as show_info_dialog
-from widgets.toast import show_toast
-from widgets.tooltip import add_tooltip, hide_all_tooltips
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,59 +51,151 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class SimGUIApp:
-    """Main application class."""
+# ---------------------------------------------------------------------------
+# Placeholder Panels (PyQt6)
+# ---------------------------------------------------------------------------
 
-    def __init__(self):
-        self.root = tk.Tk(className="simgui")
-        self._git_hash = self._get_git_hash()
+class CardStatusPanel(QWidget):
+    """Card status panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        self.label = QLabel("Card Status\n(migration in progress)")
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label)
+
+        if self.state_manager:
+            self.state_manager.card_info_changed.connect(self._on_card_info_changed)
+            self.state_manager.card_state_changed.connect(self._on_card_state_changed)
+
+    def _on_card_info_changed(self, info: CardInfo) -> None:
+        text = "Card Status"
+        if info.iccid:
+            text += f"\nICCID: {info.iccid}"
+        if info.imsi:
+            text += f"\nIMSI: {info.imsi}"
+        self.label.setText(text)
+
+    def _on_card_state_changed(self, state: CardState) -> None:
+        state_map = {
+            CardState.NO_CARD: "Insert a SIM card...",
+            CardState.DETECTED: "Card detected",
+            CardState.AUTHENTICATED: "Authenticated",
+            CardState.ERROR: "Error",
+            CardState.BLANK: "Blank card detected",
+        }
+        text = f"Card Status\n{state_map.get(state, str(state))}"
+        self.label.setText(text)
+
+
+class ReadSIMPanel(QWidget):
+    """Read SIM panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None,
+                 **kwargs) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        label = QLabel("Read SIM\n(migration in progress)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+
+class ProgramSIMPanel(QWidget):
+    """Program SIM panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None,
+                 **kwargs) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        label = QLabel("Program SIM\n(migration in progress)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+
+class BatchProgramPanel(QWidget):
+    """Batch program panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None,
+                 **kwargs) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        label = QLabel("Batch Program\n(migration in progress)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+    def set_standards_manager(self, mgr) -> None:
+        """Placeholder for standards manager integration."""
+        pass
+
+
+class CSVEditorPanel(QWidget):
+    """CSV editor panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None,
+                 **kwargs) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        label = QLabel("CSV Editor\n(migration in progress)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+
+class ProgressPanel(QWidget):
+    """Progress panel placeholder."""
+
+    def __init__(self, parent: Optional[QWidget] = None,
+                 state_manager: Optional[StateManager] = None,
+                 **kwargs) -> None:
+        super().__init__(parent)
+        self.state_manager = state_manager
+        layout = QVBoxLayout(self)
+        label = QLabel("Progress\n(migration in progress)")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+
+# ---------------------------------------------------------------------------
+# Main Application Window
+# ---------------------------------------------------------------------------
+
+class SimGUIApp(QMainWindow):
+    """Main application window using PyQt6."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        # ---- Window setup ------------------------------------------------
+        git_hash = self._get_git_hash()
         title = f"SimGUI {__version__}"
-        if self._git_hash:
-            title += f" ({self._git_hash})"
+        if git_hash:
+            title += f" ({git_hash})"
         title += " — SIM Card Programmer"
-        self.root.title(title)
-        self.root.geometry("1024x700")
-        self.root.minsize(800, 500)
+        self.setWindowTitle(title)
+        self.resize(1024, 700)
+        self.setMinimumSize(800, 500)
 
-        # Load multiple icon sizes so the WM picks the best match for
-        # taskbar, title-bar, and alt-tab.  The first image is the
-        # "default" size; extras are alternates.
-        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-        icon_sizes = ["simgui-256.png", "simgui-128.png", "simgui-64.png",
-                      "simgui-48.png", "simgui-32.png", "simgui-16.png"]
-        icons = []
-        for name in icon_sizes:
-            p = os.path.join(assets_dir, name)
-            if os.path.exists(p):
-                icons.append(tk.PhotoImage(file=p))
-        if icons:
-            self.root.iconphoto(True, *icons)
-            self._icons = icons          # prevent garbage collection
+        # Window icon
+        assets_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "assets")
+        icon_path = os.path.join(assets_dir, "simgui-256.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
-        ModernTheme.apply_theme(self.root)
+        # ---- State manager -----------------------------------------------
+        self.state_manager = StateManager(self)
 
-        # Ensure Ctrl+V paste works everywhere (Linux workaround)
-        def _global_paste(event):
-            try:
-                widget = event.widget
-                if not isinstance(widget, (tk.Entry, ttk.Entry, ttk.Combobox)):
-                    return
-                text = widget.clipboard_get()
-                text = ''.join(ch for ch in text if ch.isprintable())
-                try:
-                    if widget.select_present():
-                        widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                except (tk.TclError, AttributeError):
-                    pass
-                widget.insert(tk.INSERT, text)
-                return 'break'
-            except tk.TclError:
-                pass
-
-        self.root.bind_all('<Control-v>', _global_paste)
-        self.root.bind_all('<Control-V>', _global_paste)
-
-        # Managers
+        # ---- Managers (framework-independent) ----------------------------
         self._card_manager = CardManager()
         self._backup_manager = BackupManager()
         self._settings = SettingsManager()
@@ -111,64 +206,40 @@ class SimGUIApp:
         self._card_watcher = CardWatcher(
             self._card_manager, self._iccid_index, poll_interval=1.5)
 
-        # Mode variable: "hardware" or "simulator"
-        self._mode_var = tk.StringVar(value="hardware")
-
-        # Track whether "no reader" toast has been shown in current disconnection state
-        self._no_reader_toast_shown = False
-        self._no_reader_toast: Optional[tk.Toplevel] = None
-
-        # Shared state: last card data read from Read SIM tab
+        # Shared state
         self.last_read_data: dict[str, str] = {}
 
+        # ---- Build UI ----
         self._build_menu()
         self._build_layout()
-        self._bind_shortcuts()
+        self._connect_signals()
         self._wire_card_watcher()
 
         # Restore window geometry
         geom = self._settings.get("window_geometry", "")
         if geom:
-            self.root.geometry(geom)
+            try:
+                parts = geom.split('x')
+                if len(parts) == 2:
+                    w, h = int(parts[0]), int(parts[1])
+                    self.resize(w, h)
+            except (ValueError, AttributeError):
+                pass
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        # Decide initial mode.
-        # If a real CLI backend (pySim) is available, always start in
-        # hardware mode regardless of what was saved — the user shouldn't
-        # have to remember to switch modes every launch.
+        # ---- Startup sequence ----
         if self._card_manager.cli_backend == CLIBackend.NONE:
-            # No pySim / no CLI tool — simulator is the only option
-            self._mode_var.set("simulator")
-            self._on_mode_change()
+            self.state_manager.mode = AppMode.SIMULATOR
         else:
-            # Hardware Mode — a real backend is available.
-            self._mode_var.set("hardware")
-            self._settings.set("simulator_mode", False)
-            # Initial card detection runs in the background thread
-            # (pySim-read can take 10-30s; must not block the UI).
+            self.state_manager.mode = AppMode.HARDWARE
+            QTimer.singleShot(100, self._startup_detect_card)
 
-        # Show share indicator immediately (grey/disconnected) — the
-        # background startup thread will update it once mounts are ready.
-        self._refresh_share_indicator()
-
-        # ALL slow startup tasks run in a background thread so the GUI
-        # appears instantly.  This includes card detection (pySim-read),
-        # network reconnect, ICCID scan, and sudo-check.  UI updates
-        # are dispatched back to the main thread via root.after(0, ...).
-        import threading
-        threading.Thread(
-            target=self._background_startup, daemon=True).start()
+        QTimer.singleShot(0, self._background_startup)
 
     @staticmethod
     def _get_git_hash() -> str:
-        """Return short git commit hash, or empty string if unavailable.
-
-        Tries git first (for development), then falls back to the BUILD
-        file that is baked at release time (for installed copies).
-        """
-        app_dir = os.path.dirname(os.path.abspath(__file__))
+        """Return short git commit hash, or empty string if unavailable."""
         import subprocess as _sp
+        app_dir = os.path.dirname(os.path.abspath(__file__))
         try:
             r = _sp.run(
                 ["git", "rev-parse", "--short", "HEAD"],
@@ -179,7 +250,6 @@ class SimGUIApp:
                 return r.stdout.strip()
         except Exception:
             pass
-        # Fallback: BUILD file written at release time
         build_file = os.path.join(app_dir, "BUILD")
         try:
             with open(build_file, "r") as fh:
@@ -188,1075 +258,347 @@ class SimGUIApp:
             pass
         return ""
 
-    # ---- Layout -----------------------------------------------------------
+    # ---- Layout -------------------------------------------------------
 
-    def _build_layout(self):
+    def _build_layout(self) -> None:
         """Create the main two-pane layout with status bar."""
-        container = ttk.Frame(self.root)
-        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        central = QWidget()
+        self.setCentralWidget(central)
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(8, 8, 8, 0)
 
-        # Left panel: card status
-        self._card_panel = CardStatusPanel(container)
-        self._card_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
-        self._card_panel.on_detect_callback = self._on_detect_card
-        self._card_panel.on_authenticate_callback = self._on_authenticate
+        # Splitter: left=card status, right=tabs
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Right panel: notebook with workflow tabs
-        notebook = ttk.Notebook(container)
-        notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._notebook = notebook
+        # Left: card status panel
+        self._card_panel = CardStatusPanel(
+            state_manager=self.state_manager)
+        splitter.addWidget(self._card_panel)
 
-        # Mount indicator — floats in the empty space right of the tab bar.
-        # Uses place() so it overlays the notebook's top-right corner
-        # without affecting the pack layout.
-        self._mount_indicator = tk.Canvas(
-            notebook, width=20, height=20,
-            highlightthickness=0, borderwidth=0,
-        )
-        # place() in top-right corner; repositioned on resize
-        self._mount_indicator.place(relx=1.0, x=-28, y=3, anchor="ne")
-        notebook.bind("<Configure>", self._reposition_mount_indicator)
-        self._draw_mount_icon(connected=False)
-        self._mount_tooltip_text = ""
-        add_tooltip(self._mount_indicator, "No network share connected")
+        # Right: tab widget
+        self._tabs = QTabWidget()
 
-        # Workflow tabs
         self._read_panel = ReadSIMPanel(
-            notebook, self._card_manager,
+            self._tabs,
+            state_manager=self.state_manager,
+            card_manager=self._card_manager,
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
-        notebook.add(self._read_panel, text="Read SIM")
+        self._tabs.addTab(self._read_panel, "Read SIM")
 
         self._program_panel = ProgramSIMPanel(
-            notebook, self._card_manager,
+            self._tabs,
+            state_manager=self.state_manager,
+            card_manager=self._card_manager,
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
-        notebook.add(self._program_panel, text="Program SIM")
+        self._tabs.addTab(self._program_panel, "Program SIM")
 
         self._batch_panel = BatchProgramPanel(
-            notebook, self._card_manager, self._settings,
+            self._tabs,
+            state_manager=self.state_manager,
+            card_manager=self._card_manager,
+            settings=self._settings,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher,
             iccid_index=self._iccid_index,
             auto_artifact_manager=self._auto_artifact)
         self._batch_panel.set_standards_manager(self._standards_mgr)
-        notebook.add(self._batch_panel, text="Batch Program")
+        self._tabs.addTab(self._batch_panel, "Batch Program")
 
-        # Cross-tab CSV sync: browsing in one tab updates the other
-        self._program_panel.on_csv_loaded_callback = (
-            lambda path: self._batch_panel.load_csv_file(path, _from_sync=True)
-        )
-        self._batch_panel.on_csv_loaded_callback = (
-            lambda path: self._program_panel.load_csv_file(path, _from_sync=True)
-        )
+        self._csv_panel = CSVEditorPanel(
+            self._tabs,
+            state_manager=self.state_manager,
+            ns_manager=self._ns_manager)
+        self._tabs.addTab(self._csv_panel, "CSV Editor")
 
-        # Refresh share indicator after file browse dialogs
-        self._program_panel.on_file_browsed_callback = (
-            self._refresh_share_indicator
-        )
-        self._batch_panel.on_file_browsed_callback = (
-            self._refresh_share_indicator
-        )
+        self._progress_panel = ProgressPanel(
+            self._tabs,
+            state_manager=self.state_manager)
+        self._tabs.addTab(self._progress_panel, "Progress")
 
-        # Auto-artifact callback: save artifact after programming
-        self._program_panel.on_card_programmed_callback = (
-            self._on_card_programmed
-        )
+        splitter.addWidget(self._tabs)
 
-        self._csv_panel = CSVEditorPanel(notebook, ns_manager=self._ns_manager)
-        notebook.add(self._csv_panel, text="CSV Editor")
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([220, 780])
+        root_layout.addWidget(splitter)
 
-        self._progress_panel = ProgressPanel(notebook)
-        notebook.add(self._progress_panel, text="Progress")
+        # Status bar
+        self._status_bar = QStatusBar()
+        self.setStatusBar(self._status_bar)
+        self._status_label = QLabel("Ready")
+        self._status_bar.addWidget(self._status_label, stretch=1)
+        self._share_label = QLabel("")
+        self._status_bar.addPermanentWidget(self._share_label)
 
-        # Status bar (left = status text, right = share indicator)
-        status_frame = ttk.Frame(self.root)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+    # ---- Menu bar ---------------------------------------------------
 
-        self._status_var = tk.StringVar(value="Ready")
-        status_label = ttk.Label(
-            status_frame, textvariable=self._status_var,
-            style='Small.TLabel', relief=tk.SUNKEN, anchor=tk.W,
-            padding=(8, 2),
-        )
-        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    def _build_menu(self) -> None:
+        """Create the menu bar."""
+        menu_bar = self.menuBar()
 
-        # Persistent network-share indicator (right side of status bar)
-        self._share_indicator_var = tk.StringVar(value="")
-        self._share_indicator = ttk.Label(
-            status_frame, textvariable=self._share_indicator_var,
-            style='Small.TLabel', relief=tk.SUNKEN, anchor=tk.E,
-            padding=(8, 2),
-        )
-        self._share_indicator.pack(side=tk.RIGHT)
+        # File menu
+        file_menu = menu_bar.addMenu("&File")
 
-    # ---- Menu bar ---------------------------------------------------------
+        open_act = QAction("Open CSV...", self)
+        open_act.setShortcut("Ctrl+O")
+        open_act.triggered.connect(self._on_open_csv)
+        file_menu.addAction(open_act)
 
-    def _build_menu(self):
-        menubar = tk.Menu(self.root)
+        scan_act = QAction("Scan Directory...", self)
+        scan_act.setShortcut("Ctrl+D")
+        scan_act.triggered.connect(self._on_scan_directory)
+        file_menu.addAction(scan_act)
 
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Open CSV...", command=self._on_open_csv,
-                              accelerator="Ctrl+O")
-        file_menu.add_command(label="Scan Directory...",
-                              command=self._on_scan_directory,
-                              accelerator="Ctrl+D")
-        file_menu.add_command(label="Save CSV...", command=self._on_save_csv,
-                              accelerator="Ctrl+S")
-        file_menu.add_separator()
-        file_menu.add_command(label="Network Storage...",
-                              command=self._on_network_storage)
-        file_menu.add_command(label="Export Artifacts...",
-                              command=self._on_export_artifacts)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self._on_close,
-                              accelerator="Ctrl+Q")
-        menubar.add_cascade(label="File", menu=file_menu)
+        save_act = QAction("Save CSV...", self)
+        save_act.setShortcut("Ctrl+S")
+        save_act.triggered.connect(self._on_save_csv)
+        file_menu.addAction(save_act)
 
-        card_menu = tk.Menu(menubar, tearoff=0)
-        card_menu.add_command(label="Detect Card", command=self._on_detect_card)
-        card_menu.add_command(label="Authenticate...", command=self._on_authenticate)
-        card_menu.add_separator()
-        card_menu.add_radiobutton(label="Hardware Mode",
-                                  variable=self._mode_var, value="hardware",
-                                  command=self._on_mode_change)
-        card_menu.add_radiobutton(label="Simulator Mode",
-                                  variable=self._mode_var, value="simulator",
-                                  command=self._on_mode_change)
-        card_menu.add_separator()
-        self._card_menu = card_menu
-        self._sim_menu_start = card_menu.index(tk.END) + 1
-        card_menu.add_command(label="Next Virtual Card",
-                              command=self._on_next_virtual_card,
-                              accelerator="Ctrl+N")
-        card_menu.add_command(label="Previous Virtual Card",
-                              command=self._on_previous_virtual_card,
-                              accelerator="Ctrl+P")
-        card_menu.add_command(label="Simulator Settings...",
-                              command=self._on_simulator_settings)
-        card_menu.add_command(label="Reset Simulator",
-                              command=self._on_reset_simulator)
-        menubar.add_cascade(label="Card", menu=card_menu)
+        file_menu.addSeparator()
 
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="About", command=self._on_about)
-        menubar.add_cascade(label="Help", menu=help_menu)
+        ns_act = QAction("Network Storage...", self)
+        ns_act.triggered.connect(self._on_network_storage)
+        file_menu.addAction(ns_act)
 
-        self.root.config(menu=menubar)
+        export_act = QAction("Export Artifacts...", self)
+        export_act.triggered.connect(self._on_export_artifacts)
+        file_menu.addAction(export_act)
 
-    # ---- Keyboard shortcuts -----------------------------------------------
+        file_menu.addSeparator()
 
-    def _bind_shortcuts(self):
-        self.root.bind_all('<Control-o>', lambda e: self._on_open_csv())
-        self.root.bind_all('<Control-d>', lambda e: self._on_scan_directory())
-        self.root.bind_all('<Control-s>', lambda e: self._on_save_csv())
-        self.root.bind_all('<Control-q>', lambda e: self._on_close())
-        self.root.bind_all('<Control-n>', lambda e: self._on_next_virtual_card())
-        self.root.bind_all('<Control-p>', lambda e: self._on_previous_virtual_card())
+        exit_act = QAction("Exit", self)
+        exit_act.setShortcut("Ctrl+Q")
+        exit_act.triggered.connect(self.close)
+        file_menu.addAction(exit_act)
 
-    # ---- CardWatcher wiring -----------------------------------------------
+        # Card menu
+        card_menu = menu_bar.addMenu("&Card")
 
-    def _wire_card_watcher(self):
-        """Connect CardWatcher callbacks to the UI.
+        detect_act = QAction("Detect Card", self)
+        detect_act.triggered.connect(self._on_detect_card)
+        card_menu.addAction(detect_act)
 
-        All callbacks arrive from the watcher thread, so each uses
-        ``root.after(0, ...)`` to dispatch onto the Tk main thread.
-        """
+        auth_act = QAction("Authenticate...", self)
+        auth_act.triggered.connect(self._on_authenticate)
+        card_menu.addAction(auth_act)
+
+        card_menu.addSeparator()
+
+        hw_act = QAction("Hardware Mode", self)
+        hw_act.setCheckable(True)
+        hw_act.setChecked(True)
+        hw_act.triggered.connect(self._on_mode_hardware)
+        card_menu.addAction(hw_act)
+        self._hw_act = hw_act
+
+        sim_act = QAction("Simulator Mode", self)
+        sim_act.setCheckable(True)
+        sim_act.triggered.connect(self._on_mode_simulator)
+        card_menu.addAction(sim_act)
+        self._sim_act = sim_act
+
+        # Help menu
+        help_menu = menu_bar.addMenu("&Help")
+        about_act = QAction("About", self)
+        about_act.triggered.connect(self._on_about)
+        help_menu.addAction(about_act)
+
+    # ---- Signal connections -------------------------------------------
+
+    def _connect_signals(self) -> None:
+        """Subscribe UI elements to StateManager signals."""
+        self.state_manager.status_changed.connect(self._on_status_changed)
+        self.state_manager.card_state_changed.connect(self._on_card_state_changed)
+        self.state_manager.card_info_changed.connect(self._on_card_info_changed)
+        self.state_manager.share_status_changed.connect(self._on_share_status_changed)
+        self.state_manager.mode_changed.connect(self._on_mode_changed)
+
+    def _on_status_changed(self, text: str) -> None:
+        self._status_label.setText(text)
+
+    def _on_card_state_changed(self, state: CardState) -> None:
+        pass
+
+    def _on_card_info_changed(self, info: CardInfo) -> None:
+        pass
+
+    def _on_share_status_changed(self, status) -> None:
+        self._share_label.setText(status.display_text)
+        if status.connected:
+            self._share_label.setStyleSheet(f"color: {QtTheme.get_color('success')};")
+        else:
+            self._share_label.setStyleSheet("")
+
+    def _on_mode_changed(self, mode: AppMode) -> None:
+        prefix = "[SIM] " if mode == AppMode.SIMULATOR else ""
+        text = f"{prefix}{'Simulator' if mode == AppMode.SIMULATOR else 'Hardware'} mode active"
+        self.state_manager.status_text = text
+        self._hw_act.setChecked(mode == AppMode.HARDWARE)
+        self._sim_act.setChecked(mode == AppMode.SIMULATOR)
+
+    # ---- CardWatcher → StateManager bridge ----------------------------
+
+    def _wire_card_watcher(self) -> None:
+        """Connect CardWatcher callbacks → StateManager mutations."""
         def on_detected(iccid, card_data, file_path):
-            self.root.after(0, self._on_auto_card_detected,
-                           iccid, card_data, file_path)
+            self.state_manager.card_state = CardState.DETECTED
+            self.state_manager.update_card_info(
+                iccid=iccid,
+                imsi=card_data.get("IMSI", ""),
+                acc=card_data.get("ACC", "-"),
+                spn=card_data.get("SPN", "-"),
+                fplmn=card_data.get("FPLMN", "-"),
+                source_file=file_path,
+                auth_status=False,
+            )
+            self.state_manager.status_text = f"Card detected: {iccid}"
 
         def on_unknown(iccid):
-            self.root.after(0, self._on_auto_card_unknown, iccid)
+            if iccid:
+                self.state_manager.card_state = CardState.DETECTED
+                self.state_manager.status_text = f"Card: {iccid} (not in index)"
+            else:
+                self.state_manager.card_state = CardState.BLANK
+                self.state_manager.status_text = "Blank card detected (no ICCID)"
+            self.state_manager.update_card_info(
+                iccid=iccid or "(blank)",
+                auth_status=False,
+            )
 
         def on_removed():
-            self.root.after(0, self._on_auto_card_removed)
+            self.state_manager.card_state = CardState.NO_CARD
+            self.state_manager.clear_card_info()
+            self.state_manager.status_text = "Card removed"
 
         def on_error(msg):
-            self.root.after(0, self._on_auto_card_error, msg)
-
-        def on_reader_ready():
-            self.root.after(0, self._on_reader_ready)
-
-        def on_reading():
-            self.root.after(0, self._on_card_reading)
+            self.state_manager.card_state = CardState.ERROR
+            self.state_manager.report_error(msg)
 
         self._card_watcher.on_card_detected = on_detected
         self._card_watcher.on_card_unknown = on_unknown
         self._card_watcher.on_card_removed = on_removed
         self._card_watcher.on_error = on_error
-        self._card_watcher.on_reader_ready = on_reader_ready
-        self._card_watcher.on_reading = on_reading
         self._card_watcher.start()
 
-    def _check_pcscd_health(self):
-        """Check if pcscd (PC/SC daemon) is running.
-
-        Runs from the background startup thread. Warns the user if
-        pcscd is not active.
-        """
-        if self._mode_var.get() != "hardware":
+    def _startup_detect_card(self) -> None:
+        """Trigger initial card detection in hardware mode."""
+        if self.state_manager.mode != AppMode.HARDWARE:
             return
         if self._card_manager.cli_backend == CLIBackend.NONE:
             return
-
-        try:
-            import subprocess
-            result = subprocess.run(
-                ['systemctl', 'is-active', 'pcscd'],
-                capture_output=True, text=True, timeout=3
-            )
-            if result.returncode != 0:
-                msg = "pcscd service is not running. Card reader detection will not work."
-                logger.warning(msg)
-                self.root.after(0, self._show_pcscd_warning)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            # systemctl not available (non-systemd system) or timeout — skip check
-            pass
-        except Exception as exc:
-            logger.debug("pcscd health check error: %s", exc)
-
-    def _show_pcscd_warning(self):
-        """Show a non-blocking banner warning that pcscd is not running."""
-        dlg = tk.Toplevel(self.root)
-        dlg.title("pcscd Not Running")
-        dlg.resizable(False, False)
-        dlg.geometry("500x180")
-
-        pad_m = ModernTheme.get_padding('medium')
-
-        msg_frame = ttk.Frame(dlg, padding=pad_m)
-        msg_frame.pack(fill=tk.BOTH, expand=True)
-
-        body = (
-            "The PC/SC daemon (pcscd) is not running.\n\n"
-            "To enable it now, run:\n"
-            "  sudo systemctl start pcscd\n\n"
-            "To enable it permanently:\n"
-            "  sudo systemctl enable --now pcscd\n"
-        )
-
-        msg_label = ttk.Label(msg_frame, text=body, justify=tk.LEFT)
-        msg_label.pack(fill=tk.BOTH, expand=True)
-
-        btn_frame = ttk.Frame(dlg, padding=pad_m)
-        btn_frame.pack(fill=tk.X)
-        ttk.Button(
-            btn_frame, text="OK",
-            command=dlg.destroy
-        ).pack(side=tk.RIGHT)
-
-        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
-
-    def _startup_detect_card(self):
-        """Trigger an initial card detection at startup for Hardware Mode.
-
-        Runs from the background startup thread.  CardWatcher callbacks
-        already dispatch to the main thread via ``root.after(0, ...)``.
-        Any direct UI calls here must also use ``root.after(0, ...)``.
-
-        Also checks whether a USB smart-card reader is reachable.  When
-        pySim returns a reader error the user gets a warning dialog.
-        """
-        if self._mode_var.get() != "hardware":
-            return
-        if self._card_manager.cli_backend == CLIBackend.NONE:
-            return
-        # Run the watcher check — it calls detect_card() internally
-        # and fires the correct callbacks (detected / unknown / removed).
-        # These callbacks are already wrapped with root.after(0, ...)
-        # by _wire_card_watcher, so they're thread-safe.
         try:
             self._card_watcher._check_once()
         except Exception as exc:
             logger.warning("Startup card detection failed: %s", exc)
-        # If the watcher didn't find a card, check if it's a reader issue
-        if not self._card_watcher._card_present:
-            ok, msg = self._card_manager.detect_card()
-            if not ok and self._is_reader_error(msg):
-                # Dispatch UI warning to the main thread
-                self.root.after(0, self._show_no_reader_warning, msg)
 
-    # ---- Reader & index helpers -------------------------------------------
-
-    _READER_ERROR_KEYWORDS = (
-        "no reader", "no pc/sc", "pcsc", "reader not found",
-        "scard", "could not connect", "no smart card", "no smart-card reader",
-        "service not available", "establish_context",
-    )
-
-    def _is_reader_error(self, msg: str) -> bool:
-        """Return True if *msg* looks like a missing-reader error."""
-        lower = msg.lower()
-        return any(kw in lower for kw in self._READER_ERROR_KEYWORDS)
-
-    def _show_no_reader_warning(self, detail: str = ""):
-        """Show a toast warning about missing USB smart-card reader.
-
-        The toast stays visible until the user closes it or the reader is reconnected.
-        """
-        msg = "No reader detected. Ensure reader is plugged in and enabled in VM window (top right corner). Disconnect/connect in top right menu."
-        # High duration (10 minutes) so toast stays visible until reconnected
-        self._no_reader_toast = show_toast(self.root, msg, level="warning", duration=600000)
-        self._card_panel.set_status("error", "No card reader detected")
-        self._status_var.set("No card reader — check USB connection")
-
-    def _on_card_reading(self):
-        """Card ATR detected; about to read card data (runs on main thread)."""
-        self._card_panel.set_status("waiting", "Reading card...")
-        self._status_var.set("Reading card...")
-
-    def _on_reader_ready(self):
-        """Reader became available after being absent."""
-        # Dismiss the "no reader" toast if it's still visible
-        if self._no_reader_toast is not None:
+    def _background_startup(self) -> None:
+        """Run slow startup tasks in a worker thread."""
+        def _run():
             try:
-                if self._no_reader_toast.winfo_exists():
-                    self._no_reader_toast.destroy()
-            except tk.TclError:
-                pass
-            self._no_reader_toast = None
-        self._no_reader_toast_shown = False
-        self._card_panel.set_status("waiting", "Insert a SIM card...")
-        self._status_var.set("Insert a SIM card...")
-
-    def _check_sudo_mount_permissions(self):
-        """Warn the user at startup if passwordless sudo mount is not set up.
-
-        Only shows the warning when saved profiles exist (i.e. the user
-        actually uses network shares).  Runs the check in a thread so
-        the UI isn't blocked.
-        """
-        profiles = self._ns_manager.load_profiles()
-        if not profiles:
-            return  # no shares configured, nothing to warn about
-
-        import threading
-
-        def _check():
-            ok = self._ns_manager.check_sudo_mount()
-            if not ok:
-                self.root.after(0, self._show_sudo_warning)
-
-        threading.Thread(target=_check, daemon=True).start()
-
-    def _show_sudo_warning(self):
-        """Display a one-time warning about missing sudo mount permissions."""
-        show_toast(
-            self.root,
-            "Network mounts may fail — run 'sudo simgui-setup-mount' "
-            "in a terminal to fix",
-            level="warning",
-            duration=10_000,
-        )
-
-    def _background_startup(self):
-        """Run ALL slow startup tasks in a background thread.
-
-        Network reconnect runs FIRST so the share indicator turns green
-        as soon as possible.  Card detection (pySim-read, 10-30 s) runs
-        LAST because it can block for a long time without affecting
-        network-share functionality.
-
-        All UI updates are dispatched to the main thread via
-        ``root.after(0, ...)``.
-        """
-        # 1. Check sudo mount permissions (fast — single subprocess)
-        try:
-            profiles = self._ns_manager.load_profiles()
-            if profiles:
-                ok = self._ns_manager.check_sudo_mount()
-                if not ok:
-                    self.root.after(0, self._show_sudo_warning)
-        except Exception as exc:
-            logger.warning("Sudo mount check failed: %s", exc)
-
-        # 2. Reconnect network shares (fast when already mounted)
-        try:
-            results = self._ns_manager.reconnect_saved()
-        except Exception as exc:
-            logger.warning("Auto-reconnect failed: %s", exc)
-            results = []
-
-        if results:
-            ok_labels = [label for label, ok, _ in results if ok]
-            fail_items = [(label, msg) for label, ok, msg in results if not ok]
-
-            if ok_labels:
-                names = ", ".join(ok_labels)
-                self.root.after(0, lambda: show_toast(
-                    self.root,
-                    f"Network share reconnected: {names}",
-                    level="success", duration=5000))
-                self.root.after(0, lambda: self._status_var.set(
-                    f"Network share connected: {names}"))
-
-            for label, msg in fail_items:
-                self.root.after(0, lambda l=label, m=msg: show_toast(
-                    self.root,
-                    f'Could not reconnect "{l}": {m}',
-                    level="warning", duration=8000))
-                logger.warning("Auto-reconnect failed: %s — %s", label, msg)
-
-        # 3. Sync any OS-level mounts that match saved profiles but
-        #    weren't reconnected above (e.g. left over from prev session).
-        try:
-            self._ns_manager.sync_os_mounts()
-        except Exception as exc:
-            logger.warning("OS mount sync failed: %s", exc)
-
-        # 4. Update the share indicator immediately (before slow card IO)
-        self.root.after(0, self._refresh_share_indicator)
-
-        # 5. Scan ICCID index from connected shares
-        try:
-            self._rescan_iccid_index()
-        except Exception as exc:
-            logger.warning("ICCID index scan failed: %s", exc)
-
-        # 6. Start the periodic indicator refresh (first poll after 30 s)
-        self.root.after(0, self._start_share_indicator_poll)
-
-        # 7. Check pcscd health
-        try:
-            self._check_pcscd_health()
-        except Exception as exc:
-            logger.warning("pcscd health check failed: %s", exc)
-
-        # 8. Initial card detection (pySim-read can take 10-30 s).
-        #    Runs LAST so that network/indicator is already up.
-        try:
-            self._startup_detect_card()
-        except Exception as exc:
-            logger.warning("Startup card detection failed: %s", exc)
-
-    # ---- Mount indicator (tab-bar icon) ---------------------------------
-
-    def _draw_mount_icon(self, connected: bool = False):
-        """Draw a small HDD/network-storage icon on the mount indicator canvas.
-
-        Green fill when a share is connected, grey when disconnected.
-        """
-        c = self._mount_indicator
-        c.delete("all")
-        fill = "#2e7d32" if connected else "#999999"
-        outline = "#1b5e20" if connected else "#666666"
-        # Stylised HDD: rounded rectangle body
-        c.create_rectangle(2, 5, 18, 17, fill=fill, outline=outline, width=1)
-        # Activity LED dot
-        led = "#81c784" if connected else "#cccccc"
-        c.create_oval(13, 12, 16, 15, fill=led, outline="")
-        # Platter lines
-        line_col = "#ffffff" if connected else "#b0b0b0"
-        c.create_line(5, 9, 11, 9, fill=line_col)
-        c.create_line(5, 12, 11, 12, fill=line_col)
-
-    def _reposition_mount_indicator(self, _event=None):
-        """Keep the mount indicator pinned to the top-right of the notebook."""
-        self._mount_indicator.place(relx=1.0, x=-28, y=3, anchor="ne")
-
-    def _refresh_share_indicator(self):
-        """Update both the status-bar text and the tab-bar icon."""
-        mounts = self._ns_manager.get_active_mount_paths()
-        if mounts:
-            labels = [label for label, _path in mounts]
-            paths = [f"{label}: {path}" for label, path in mounts]
-            self._share_indicator_var.set(
-                f"\u25cf NAS: {', '.join(labels)}")
-            self._share_indicator.configure(foreground="#2e7d32")
-            # Tab-bar icon: green + tooltip with mount paths
-            self._draw_mount_icon(connected=True)
-            tooltip_text = "\n".join(paths)
-            self._update_mount_tooltip(tooltip_text)
-        else:
-            self._share_indicator_var.set("")
-            self._share_indicator.configure(foreground="")
-            self._draw_mount_icon(connected=False)
-            self._update_mount_tooltip("No network share connected")
-
-    _SHARE_POLL_MS = 30_000  # 30 seconds
-
-    def _share_indicator_poll(self):
-        """Periodically refresh the share indicator to catch external
-        mount/unmount events (e.g. network interruption, manual unmount,
-        or shares left from a previous session).
-
-        Called by ``root.after`` every ``_SHARE_POLL_MS`` milliseconds.
-        """
-        try:
-            self._ns_manager.sync_os_mounts()
-        except Exception:
-            pass
-        self._refresh_share_indicator()
-        self.root.after(self._SHARE_POLL_MS, self._share_indicator_poll)
-
-    def _start_share_indicator_poll(self):
-        """Schedule the first periodic share indicator refresh.
-
-        Does NOT call _refresh_share_indicator immediately — the caller
-        is expected to have already called it (avoids redundant work
-        at startup).
-        """
-        self.root.after(self._SHARE_POLL_MS, self._share_indicator_poll)
-
-    def _update_mount_tooltip(self, text: str):
-        """Replace the tooltip on the mount indicator canvas."""
-        if hasattr(self, "_mount_indicator_tooltip"):
-            self._mount_indicator_tooltip.destroy()
-        self._mount_indicator_tooltip = add_tooltip(
-            self._mount_indicator, text)
-
-    def _rescan_iccid_index(self):
-        """Scan all connected shares for ICCID data files and standards."""
-        mount_dirs = []
-        for _label, mount_path in self._ns_manager.get_active_mount_paths():
-            mount_dirs.append(mount_path)
-            try:
-                result = self._iccid_index.scan_directory(mount_path)
-                if result.total_cards > 0:
-                    logger.info("ICCID index: scanned %s — %d cards in %d files",
-                                mount_path, result.total_cards,
-                                result.files_scanned)
+                results = self._ns_manager.reconnect_saved()
             except Exception as exc:
-                logger.warning("ICCID index scan failed for %s: %s",
-                              mount_path, exc)
-        # Reload standards from all mounted shares
-        loaded = self._standards_mgr.reload_from_directories(mount_dirs)
-        if loaded:
-            logger.info("Standards: loaded from %d share(s)", loaded)
-        self._batch_panel.refresh_standards()
+                logger.warning("Auto-reconnect failed: %s", exc)
+                results = []
 
-    def _check_already_programmed(self, iccid: str) -> bool:
-        """Check artifact dir for prior programming and show a popup if found.
+            if results:
+                ok_labels = [label for label, ok, _ in results if ok]
+                if ok_labels:
+                    names = ", ".join(ok_labels)
+                    self.state_manager.request_toast(
+                        f"Network share reconnected: {names}",
+                        "success", 5000)
+                    self.state_manager.status_text = f"Network share connected: {names}"
 
-        Returns True if the card was previously programmed.
-        """
-        if not iccid:
-            return False
-        prev = self._auto_artifact.get_previous_programming_info(iccid)
-        if prev is None:
-            return False
-        prev_imsi = prev.get("IMSI", "unknown")
-        prev_time = prev.get("programmed_at", "unknown")
-        prev_file = os.path.basename(prev.get("_artifact_path", ""))
-        show_info_dialog(
-            self.root,
-            "Already Programmed",
-            f"This card has been programmed before.\n\n"
-            f"ICCID: {iccid}\n"
-            f"Previous IMSI: {prev_imsi}\n"
-            f"Programmed at: {prev_time}\n"
-            f"Artifact: {prev_file}\n\n"
-            f"You can continue \u2014 this is just an informational warning.",
-        )
-        return True
+            mounts = self._ns_manager.get_active_mount_paths()
+            self.state_manager.update_share_status(mounts)
 
-    def _on_auto_card_detected(self, iccid, card_data, file_path):
-        """Card inserted and matched in index (runs on main thread)."""
-        hw = self._card_manager.card_info  # live data read from card
-        is_blocked = self._card_manager.card_blocked
-        if is_blocked:
-            self._card_panel.set_status(
-                "blocked", f"\u26d4 BLOCKED: {iccid}")
-        else:
-            self._card_panel.set_status("detected", f"Card detected: {iccid}")
-        self._card_panel.set_card_info(
-            imsi=hw.get("IMSI") or card_data.get("IMSI"),
-            iccid=iccid,
-            acc=hw.get("ACC", card_data.get("ACC", "-")),
-            spn=hw.get("SPN", card_data.get("SPN", "-")),
-            fplmn=hw.get("FPLMN", card_data.get("FPLMN", "-")),
-            source_file=file_path,
-        )
-        self._card_panel.set_auth_status(False)
-        self._card_panel.set_blocked_indicator(is_blocked)
-        self._card_panel.set_adm1_attempts(
-            self._card_manager.adm1_remaining_attempts)
-        # Check if already programmed — show popup warning with previous IMSI
-        already = self._check_already_programmed(iccid)
-        self._card_panel.set_programmed_indicator(already)
-        # Auto-populate Program SIM tab
-        self._program_panel.on_card_detected(iccid, card_data, file_path)
-        # Warn if the data file is missing required programming fields
-        required_fields = {'Ki', 'OPc', 'ADM1'}
-        missing_fields = required_fields - {k for k, v in card_data.items() if v}
-        if missing_fields:
-            show_toast(
-                self.root,
-                f"Card data incomplete — missing: {', '.join(sorted(missing_fields))}",
-                level="warning",
-                duration=6000,
-            )
-        # Sync the Read SIM tab (public fields)
-        self._read_panel.refresh()
-        status = (f"\u26d4 CARD BLOCKED: {iccid}" if is_blocked
-                  else f"Card detected: {iccid}")
-        self._status_var.set(status)
+            for _label, mount_path in (mounts or []):
+                try:
+                    self._iccid_index.scan_directory(mount_path)
+                except Exception as exc:
+                    logger.warning("ICCID scan failed for %s: %s",
+                                   mount_path, exc)
+            self.state_manager.notify_index_updated()
 
-    def _on_auto_card_unknown(self, iccid):
-        """Card inserted but not in index (runs on main thread).
+        threading.Thread(target=_run, daemon=True).start()
 
-        Opens a unified file-picker dialog with network share access
-        so the user can locate the card's data file in one step.
-        If *iccid* is empty the card is completely blank.
-        """
-        is_blocked = self._card_manager.card_blocked
-        if is_blocked:
-            status_msg = f"\u26d4 BLOCKED: {iccid or '(blank)'}" 
-        elif iccid:
-            status_msg = f"Card: {iccid} (not in index)"
-        else:
-            status_msg = "Blank card detected (no ICCID)"
-        state = "blocked" if is_blocked else "detected"
-        self._card_panel.set_status(state, status_msg)
-        hw = self._card_manager.card_info  # live data read from card
-        self._card_panel.set_card_info(
-            imsi=hw.get("IMSI", "-"),
-            iccid=iccid or "(blank)",
-            acc=hw.get("ACC", "-"),
-            spn=hw.get("SPN", "-"),
-            fplmn=hw.get("FPLMN", "-"),
-            source_file=None,
-        )
-        self._card_panel.set_auth_status(False)
-        self._card_panel.set_blocked_indicator(is_blocked)
-        self._card_panel.set_adm1_attempts(
-            self._card_manager.adm1_remaining_attempts)
-
-        # Check if already programmed even though not in the ICCID index
-        already = self._check_already_programmed(iccid)
-        self._card_panel.set_programmed_indicator(already)
-
-        self._program_panel.on_card_detected(iccid)
-        # Sync the Read SIM tab — card_info has ICCID/IMSI from detect
-        self._read_panel.refresh()
-        self._status_var.set(status_msg)
-
-        if not iccid:
-            # Blank card — nothing to look up, skip the file dialog
-            return
-
-        # Open the unified file-picker with network share access
-        hide_all_tooltips()
-        self._load_file_for_unknown_card(iccid)
-
-    def _load_file_for_unknown_card(self, iccid: str):
-        """Open the unified file picker (local + network shares).
-
-        The dialog may return either:
-        * A *directory* path (user clicked "Use This Share") — we scan it.
-        * A *file* path (user clicked "Browse Local\u2026") — we scan its
-          parent directory.
-        """
-        init_dir = get_browse_initial_dir(self._ns_manager)
-        dlg = LoadCardFileDialog(
-            self.root, iccid, self._ns_manager,
-            initial_dir=init_dir,
-        )
-        self.root.wait_window(dlg)
-
-        # User may have connected a new share inside the dialog
-        self._refresh_share_indicator()
-
-        fp = dlg.selected_path
-        if not fp:
-            return
-
-        scan_dir = fp if os.path.isdir(fp) else os.path.dirname(fp)
-
-        try:
-            result = self._iccid_index.scan_directory(scan_dir)
-            logger.info("Re-scanned %s: %d cards in %d files",
-                        scan_dir, result.total_cards,
-                        result.files_scanned)
-        except Exception as exc:
-            show_error_dialog(self.root, "Scan Error", str(exc))
-            return
-        # Re-check this ICCID in the refreshed index
-        entry = self._iccid_index.lookup(iccid)
-        if entry:
-            card_data = self._iccid_index.load_card(iccid)
-            if card_data:
-                self._on_auto_card_detected(iccid, card_data, entry.file_path)
-                self._status_var.set(
-                    f"Card found in {os.path.basename(entry.file_path)}")
-                return
-        show_info_dialog(
-            self.root,
-            "Not Found",
-            f"ICCID {iccid} was not found in the scanned directory.\n\n"
-            f"Scanned: {scan_dir}\n"
-            "Make sure the directory contains a data file for this card.")
-
-    def _on_auto_card_removed(self):
-        """Card removed (runs on main thread)."""
-        self._card_panel.set_status("waiting", "Insert a SIM card...")
-        self._card_panel.clear_card_info()
-        self._program_panel.on_card_removed()
-        self._read_panel.refresh()  # Clear Read SIM fields
-        self._status_var.set("Card removed")
-
-    def _on_auto_card_error(self, msg):
-        """CardWatcher error (runs on main thread)."""
-        logger.warning("CardWatcher error: %s", msg)
-        if self._is_reader_error(msg):
-            # Only show toast once per disconnection event, not on every poll cycle
-            if not self._no_reader_toast_shown:
-                self._show_no_reader_warning(msg)
-                self._no_reader_toast_shown = True
-
-    def _on_card_programmed(self, card_data):
-        """Called after successful card programming — save auto-artifact.
-
-        Also registers the ICCID with the card watcher so that
-        re-inserting the same card is recognised immediately, and
-        updates the ICCID index so the card is found on next lookup.
-        """
-        # Register the ICCID in the watcher's ATR→ICCID cache so
-        # re-insertion won't show "Blank card".
-        iccid = card_data.get('ICCID', '')
-        if iccid and hasattr(self, '_card_watcher'):
-            self._card_watcher.register_programmed_card(iccid)
-
-        try:
-            paths = self._auto_artifact.save_card_artifact(card_data)
-            if paths:
-                import os
-                names = [os.path.basename(p) for p in paths]
-                self._status_var.set(f"Artifact saved: {', '.join(names)}")
-                logger.info("Auto-artifact saved: %s", paths)
-                # Update ICCID index so the card is found on re-insert
-                if iccid and paths:
-                    self._iccid_index.add_iccid(iccid, paths[0])
-        except Exception as exc:
-            logger.warning("Auto-artifact save failed: %s", exc)
-
-    # ---- Callbacks --------------------------------------------------------
+    # ---- Menu callbacks -----------------------------------------------
 
     def _on_open_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager)
-        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        fp = filedialog.askopenfilename(**kwargs)
-        if not fp:
-            return
-        mgr = self._csv_panel.get_csv_manager()
-        try:
-            if mgr.load_file(fp):
-                self._csv_panel._refresh_table()
-                self._status_var.set(f"Loaded {fp}")
-                self._settings.set("last_csv_path", fp)
-            else:
-                show_error_dialog(self.root, "Error",
-                                  f"No card data found in {fp}")
-        except ValueError as exc:
-            show_error_dialog(self.root, "Import Error", str(exc))
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open SIM Data File", init_dir or "",
+            "CSV files (*.csv);;EML files (*.eml);;Text files (*.txt);;All files (*.*)")
+        if path:
+            self.state_manager.status_text = f"Loaded {path}"
+            self._settings.set("last_csv_path", path)
 
     def _on_scan_directory(self):
-        """Let the user pick a directory and scan it for SIM data files.
-
-        Defaults to the network share mount point if one is connected.
-        Recursively scans all subdirectories for .csv/.eml/.txt files.
-        """
         init_dir = get_browse_initial_dir(self._ns_manager)
-        chosen = filedialog.askdirectory(
-            title="Select directory with SIM data files",
-            initialdir=init_dir or None,
-            mustexist=True,
-        )
-        if not chosen:
-            return
-
-        self._status_var.set(f"Scanning {chosen}...")
-        self.root.update_idletasks()
-
-        try:
-            result = self._iccid_index.scan_directory(chosen)
-        except Exception as exc:
-            show_error_dialog(self.root, "Scan Error", str(exc))
-            return
-
-        if result.total_cards > 0:
-            show_toast(
-                self.root,
-                f"Found {result.total_cards} cards in "
-                f"{result.files_scanned} files",
-                level="success",
-                duration=5000,
-            )
-            self._status_var.set(
-                f"Scanned {chosen}: {result.total_cards} cards in "
-                f"{result.files_scanned} files")
-        else:
-            show_toast(
-                self.root,
-                f"No SIM data found in {os.path.basename(chosen)}",
-                level="warning",
-                duration=5000,
-            )
-            self._status_var.set(
-                f"No SIM data found in {chosen}")
-
-        if result.errors:
-            logger.warning("Scan errors in %s: %s", chosen, result.errors)
+        path = QFileDialog.getExistingDirectory(
+            self, "Select directory with SIM data files", init_dir or "")
+        if path:
+            self.state_manager.status_text = f"Scanned {path}"
 
     def _on_save_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager)
-        kwargs = {
-            "title": "Save CSV", "defaultextension": ".csv",
-            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
-        }
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        fp = filedialog.asksaveasfilename(**kwargs)
-        if fp:
-            mgr = self._csv_panel.get_csv_manager()
-            if mgr.save_csv(fp):
-                self._status_var.set(f"Saved {fp}")
-            else:
-                show_error_dialog(self.root, "Error",
-                                  f"Failed to save {fp}")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save CSV", init_dir or "", "CSV files (*.csv);;All files (*.*)")
+        if path:
+            self.state_manager.status_text = f"Saved {path}"
 
     def _on_detect_card(self):
-        ok, msg = self._card_manager.detect_card()
-        is_blocked = self._card_manager.card_blocked
-        if ok:
-            state = "blocked" if is_blocked else "detected"
-            self._card_panel.set_status(state, msg)
-            info = self._card_manager.card_info
-            self._card_panel.set_card_info(
-                card_type=self._card_manager.card_type.name,
-                imsi=info.get('IMSI'),
-                iccid=info.get('ICCID'),
-                acc=info.get('ACC', '-'),
-                spn=info.get('SPN', '-'),
-                fplmn=info.get('FPLMN', '-'),
-            )
-        else:
-            self._card_panel.set_status("error", msg)
-        self._card_panel.set_blocked_indicator(is_blocked)
-        self._card_panel.set_adm1_attempts(
-            self._card_manager.adm1_remaining_attempts)
-        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
-        self._status_var.set(f"{prefix}{msg}")
-        # Update virtual card indicator
-        sim_info = self._card_manager.get_simulator_info()
-        if sim_info:
-            self._card_panel.set_simulator_info(
-                sim_info["current_index"], sim_info["total_cards"])
-        else:
-            self._card_panel.set_simulator_info(None, None)
-        # Sync the Read SIM tab
-        self._read_panel.refresh()
+        self.state_manager.status_text = "Detecting card..."
 
     def _on_authenticate(self):
-        # Block authentication if card is blocked
-        if self._card_manager.card_blocked:
-            show_error_dialog(
-                self.root, "Card Blocked",
-                "This card is PERMANENTLY LOCKED.\n\n"
-                "ADM1 authentication has been blocked (0 attempts "
-                "remaining).\nRemove this card and insert a different one.")
-            return
+        self.state_manager.status_text = "Authenticate action"
 
-        remaining = self._card_manager.get_remaining_attempts()
-        dlg = ADM1Dialog(self.root, remaining_attempts=remaining or 3)
-        adm1, force = dlg.get_adm1()
-        if adm1 is None:
-            return
-        expected_iccid = self._get_expected_iccid()
+    def _on_mode_hardware(self):
+        self.state_manager.mode = AppMode.HARDWARE
 
-        # Pause the card watcher so its probes don't interfere with
-        # the VERIFY APDU that authenticate() sends to the card.
-        self._card_watcher.pause()
-        try:
-            ok, msg = self._card_manager.authenticate(
-                adm1, force=force, expected_iccid=expected_iccid)
-        finally:
-            self._card_watcher.resume()
-
-        if ok:
-            self._card_panel.set_status("authenticated", msg)
-            self._card_panel.set_auth_status(True)
-        else:
-            self._card_panel.set_status("error", msg)
-            self._card_panel.set_auth_status(False)
-            if "ICCID mismatch" in msg:
-                messagebox.showwarning("ICCID Mismatch", msg)
-        # Update blocked indicator + retry counter after auth attempt
-        self._card_panel.set_blocked_indicator(
-            self._card_manager.card_blocked)
-        self._card_panel.set_adm1_attempts(
-            self._card_manager.adm1_remaining_attempts)
-        prefix = "[SIM] " if self._card_manager.is_simulator_active else ""
-        self._status_var.set(f"{prefix}{msg}")
-
-    def _get_expected_iccid(self):
-        """Get ICCID from the currently selected CSV row, if any."""
-        try:
-            mgr = self._csv_panel.get_csv_manager()
-            tree = self._csv_panel._tree
-            selection = tree.selection()
-            if not selection:
-                return None
-            item = selection[0]
-            idx = tree.index(item)
-            card = mgr.get_card(idx)
-            return card.get("ICCID") if card else None
-        except Exception:
-            return None
-
-    def _on_mode_change(self):
-        """Handle switching between hardware and simulator mode."""
-        mode = self._mode_var.get()
-        if mode == "simulator":
-            self._card_watcher.pause()  # Don't poll during simulation
-            self._card_manager.enable_simulator()
-            self._update_sim_menu_state(tk.NORMAL)
-            self._status_var.set("[SIM] Simulator mode active")
-            # Auto-detect the first virtual card
-            self._on_detect_card()
-        else:
-            self._card_manager.disable_simulator()
-            self._update_sim_menu_state(tk.DISABLED)
-            self._card_panel.set_simulator_info(None, None)
-            # Clear all simulator state from UI
-            self._card_panel.set_status("waiting", "Insert a SIM card...")
-            self._card_panel.clear_card_info()
-            self._program_panel.on_card_removed()
-            self._read_panel.refresh()
-            self._card_watcher.resume()  # Resume hardware polling
-            self._status_var.set("Hardware mode active")
-            # Check for reader and attempt initial card detection
-            # Run in background thread — pySim-read can take 10-30 s
-            import threading
-            threading.Thread(
-                target=self._startup_detect_card, daemon=True).start()
-        self._settings.set("simulator_mode", mode == "simulator")
-
-    def _update_sim_menu_state(self, state):
-        """Enable or disable simulator-only menu items."""
-        for i in range(self._sim_menu_start,
-                       self._sim_menu_start + 4):
-            try:
-                self._card_menu.entryconfigure(i, state=state)
-            except tk.TclError:
-                pass
-
-    def _on_next_virtual_card(self):
-        if not self._card_manager.is_simulator_active:
-            return
-        result = self._card_manager.next_virtual_card()
-        if result:
-            idx, total = result
-            self._card_panel.set_simulator_info(idx, total)
-            self._on_detect_card()
-
-    def _on_previous_virtual_card(self):
-        if not self._card_manager.is_simulator_active:
-            return
-        result = self._card_manager.previous_virtual_card()
-        if result:
-            idx, total = result
-            self._card_panel.set_simulator_info(idx, total)
-            self._on_detect_card()
-
-    def _on_simulator_settings(self):
-        if not self._card_manager.is_simulator_active:
-            return
-        sim = self._card_manager._simulator
-        old_count = sim.settings.num_cards
-        dlg = SimulatorSettingsDialog(self.root, sim.settings)
-        if dlg.applied and sim.settings.num_cards != old_count:
-            sim.reset()
-            self._on_detect_card()
-
-    def _on_reset_simulator(self):
-        if not self._card_manager.is_simulator_active:
-            return
-        self._card_manager._simulator.reset()
-        self._on_detect_card()
-        self._status_var.set("[SIM] Simulator reset")
+    def _on_mode_simulator(self):
+        self.state_manager.mode = AppMode.SIMULATOR
 
     def _on_network_storage(self):
-        """Open the network storage connection dialog."""
-        dlg = NetworkStorageDialog(self.root, self._ns_manager)
-        self.root.wait_window(dlg)
-        # Rescan after dialog closes — shares may have been mounted/unmounted.
-        # sync_os_mounts picks up shares that are mounted at OS level but
-        # not yet tracked in _active_mounts (e.g. left from prev session).
-        self._ns_manager.sync_os_mounts()
-        self._rescan_iccid_index()
-        self._refresh_share_indicator()
+        self.state_manager.status_text = "Network Storage action"
 
     def _on_export_artifacts(self):
-        """Open the artifact export dialog with data from the last batch run."""
-        # Collect records: prefer batch panel results, fall back to read data
-        records = []
-        try:
-            records = self._batch_panel.get_programmed_records()
-        except (AttributeError, Exception):
-            pass
-        if not records and self.last_read_data:
-            records = [self.last_read_data]
-        if not records:
-            show_info_dialog(
-                self.root,
-                "No Data",
-                "No programming results to export.\n\n"
-                "Run a batch program or read a card first.")
-            return
-        # Get default fields from first connected profile, if any
-        default_fields = None
-        profiles = self._ns_manager.load_profiles()
-        if profiles:
-            default_fields = profiles[0].export_fields
-        ArtifactExportDialog(self.root, records, self._ns_manager,
-                             default_fields)
+        self.state_manager.status_text = "Export Artifacts action"
 
     def _on_about(self):
-        version_line = f"Version {__version__}"
-        if self._git_hash:
-            version_line += f"  (commit {self._git_hash})"
-
-        show_info_dialog(
-            self.root,
-            "About SimGUI",
+        QMessageBox.information(
+            self, "About SimGUI",
             f"SimGUI — SIM Card Programming GUI\n"
-            f"{version_line}\n\n"
+            f"Version {__version__}\n\n"
             f"A lightweight GUI wrapper for pySim.\n\n"
-            f"https://github.com/SeJohnEff/SimGUI",
-        )
+            f"https://github.com/SeJohnEff/SimGUI")
 
-    def _on_close(self):
-        if self._csv_panel.has_unsaved_changes:
-            answer = messagebox.askyesnocancel(
-                "Unsaved Changes",
-                "You have unsaved changes. Save before closing?")
-            if answer is None:
-                return  # Cancel
-            if answer:
-                self._on_save_csv()
+    # ---- Window close -------------------------------------------------
+
+    def closeEvent(self, event) -> None:
         self._card_watcher.stop()
-        self._settings.set("window_geometry", self.root.geometry())
+        self._settings.set("window_geometry",
+                           f"{self.width()}x{self.height()}")
         self._settings.save()
         self._ns_manager.unmount_all()
-        self.root.destroy()
-
-    # ---- Run --------------------------------------------------------------
-
-    def run(self):
-        """Start the main event loop."""
-        self.root.mainloop()
+        event.accept()
 
 
-def main():
-    app = SimGUIApp()
-    app.run()
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    QtTheme.apply(app)
+    window = SimGUIApp()
+    window.show()
+    sys.exit(app.exec())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

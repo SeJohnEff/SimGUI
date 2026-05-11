@@ -6,6 +6,7 @@
 # PyQt6 is required for the upcoming Qt-based UI (qt_main.py).
 # The tkinter UI (main.py) still works without PyQt6.
 PyQt6>=6.6        # Qt6 bindings for the new UI
+Pillow>=10.0      # Image support for tkinter (required for PNG icons in PyInstaller bundle)
 #
 # The following are only needed for card-reader hardware features.
 # They can be omitted for CSV-only / offline usage.
