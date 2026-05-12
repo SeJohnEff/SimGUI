@@ -40,6 +40,12 @@ from qt_theme import QtTheme
 from state_manager import StateManager, CardState, AppMode, CardInfo
 from utils import get_browse_initial_dir
 from version import __version__
+from widgets.card_status_panel import CardStatusPanel
+from widgets.read_sim_panel import ReadSIMPanel
+from widgets.program_sim_panel import ProgramSIMPanel
+from widgets.batch_program_panel import BatchProgramPanel
+from widgets.csv_editor_panel import CSVEditorPanel
+from widgets.progress_panel import ProgressPanel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,120 +102,6 @@ class BackgroundStartupWorker(QObject):
 
         self.index_updated.emit()
         self.finished.emit()
-
-
-# ---------------------------------------------------------------------------
-# Placeholder Panels (PyQt6)
-# ---------------------------------------------------------------------------
-
-class CardStatusPanel(QWidget):
-    """Card status panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        self.label = QLabel("Card Status\n(migration in progress)")
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.label)
-
-        if self.state_manager:
-            self.state_manager.card_info_changed.connect(self._on_card_info_changed)
-            self.state_manager.card_state_changed.connect(self._on_card_state_changed)
-
-    def _on_card_info_changed(self, info: CardInfo) -> None:
-        text = "Card Status"
-        if info.iccid:
-            text += f"\nICCID: {info.iccid}"
-        if info.imsi:
-            text += f"\nIMSI: {info.imsi}"
-        self.label.setText(text)
-
-    def _on_card_state_changed(self, state: CardState) -> None:
-        state_map = {
-            CardState.NO_CARD: "Insert a SIM card...",
-            CardState.DETECTED: "Card detected",
-            CardState.AUTHENTICATED: "Authenticated",
-            CardState.ERROR: "Error",
-            CardState.BLANK: "Blank card detected",
-        }
-        text = f"Card Status\n{state_map.get(state, str(state))}"
-        self.label.setText(text)
-
-
-class ReadSIMPanel(QWidget):
-    """Read SIM panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None,
-                 **kwargs) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        label = QLabel("Read SIM\n(migration in progress)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
-
-
-class ProgramSIMPanel(QWidget):
-    """Program SIM panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None,
-                 **kwargs) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        label = QLabel("Program SIM\n(migration in progress)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
-
-
-class BatchProgramPanel(QWidget):
-    """Batch program panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None,
-                 **kwargs) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        label = QLabel("Batch Program\n(migration in progress)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
-
-    def set_standards_manager(self, mgr) -> None:
-        """Placeholder for standards manager integration."""
-        pass
-
-
-class CSVEditorPanel(QWidget):
-    """CSV editor panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None,
-                 **kwargs) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        label = QLabel("CSV Editor\n(migration in progress)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
-
-
-class ProgressPanel(QWidget):
-    """Progress panel placeholder."""
-
-    def __init__(self, parent: Optional[QWidget] = None,
-                 state_manager: Optional[StateManager] = None,
-                 **kwargs) -> None:
-        super().__init__(parent)
-        self.state_manager = state_manager
-        layout = QVBoxLayout(self)
-        label = QLabel("Progress\n(migration in progress)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +219,8 @@ class SimGUIApp(QMainWindow):
 
         self._read_panel = ReadSIMPanel(
             self._tabs,
-            state_manager=self.state_manager,
             card_manager=self._card_manager,
+            state_manager=self.state_manager,
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
@@ -336,8 +228,8 @@ class SimGUIApp(QMainWindow):
 
         self._program_panel = ProgramSIMPanel(
             self._tabs,
-            state_manager=self.state_manager,
             card_manager=self._card_manager,
+            state_manager=self.state_manager,
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
@@ -345,8 +237,8 @@ class SimGUIApp(QMainWindow):
 
         self._batch_panel = BatchProgramPanel(
             self._tabs,
-            state_manager=self.state_manager,
             card_manager=self._card_manager,
+            state_manager=self.state_manager,
             settings=self._settings,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher,
