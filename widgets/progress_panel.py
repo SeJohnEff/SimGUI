@@ -78,111 +78,48 @@ class ProgressPanel(QWidget):
 
     def set_progress(self, value, maximum=100, label=None):
         """Update the progress bar value and optional label (thread-safe)."""
-        if hasattr(self, '_exists') and not self._exists:
-            return
-        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
-            return
         def _do():
-            if hasattr(self._progress_bar, '_cfg'):
-                self._progress_bar._cfg['maximum'] = maximum
-                self._progress_bar._cfg['value'] = value
-            elif hasattr(self._progress_bar, 'setValue'):
-                self._progress_bar.setMaximum(maximum)
-                self._progress_bar.setValue(value)
+            self._progress_bar.setMaximum(maximum)
+            self._progress_bar.setValue(value)
             pct = int((value / maximum) * 100) if maximum > 0 else 0
-            if hasattr(self._percent_label, '_cfg'):
-                self._percent_label._cfg['text'] = f"{pct}%"
-            elif hasattr(self._percent_label, 'setText'):
-                self._percent_label.setText(f"{pct}%")
+            self._percent_label.setText(f"{pct}%")
             if label:
-                if hasattr(self._progress_label, '_cfg'):
-                    self._progress_label._cfg['text'] = label
-                elif hasattr(self._progress_label, 'setText'):
-                    self._progress_label.setText(label)
-        if hasattr(self._progress_bar, '_cfg'):
-            _do()
-        else:
-            QTimer.singleShot(0, _do)
+                self._progress_label.setText(label)
+        QTimer.singleShot(0, _do)
 
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
-        if hasattr(self, '_exists') and not self._exists:
-            return
-        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
-            return
         def _do():
-            if hasattr(self._progress_bar, '_cfg'):
-                if running:
-                    self._progress_bar._cfg['mode'] = 'indeterminate'
-                else:
-                    self._progress_bar._cfg['mode'] = 'determinate'
+            if running:
+                self._progress_bar.setMaximum(0)
             else:
-                if running:
-                    self._progress_bar.setMaximum(0)
-                else:
-                    self._progress_bar.setMaximum(100)
-                    self._progress_bar.setValue(0)
-        if hasattr(self._progress_bar, '_cfg'):
-            _do()
-        else:
-            QTimer.singleShot(0, _do)
+                self._progress_bar.setMaximum(100)
+                self._progress_bar.setValue(0)
+        QTimer.singleShot(0, _do)
 
     def log(self, message):
         """Append a timestamped message to the log output (thread-safe)."""
-        if hasattr(self, '_exists') and not self._exists:
-            return
-        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
-            return
         ts = datetime.now().strftime('%H:%M:%S')
         msg = f"[{ts}] {message}"
         def _do():
-            if hasattr(self._log_text, '_content'):
-                self._log_text._content += msg + '\n'
-            else:
-                self._log_text.appendPlainText(msg)
-        if hasattr(self._log_text, '_content'):
-            _do()
-        else:
-            QTimer.singleShot(0, _do)
+            self._log_text.appendPlainText(msg)
+        QTimer.singleShot(0, _do)
 
     def clear_log(self):
         """Clear the log output (thread-safe)."""
-        if hasattr(self, '_exists') and not self._exists:
-            return
-        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
-            return
         def _do():
-            if hasattr(self._log_text, '_content'):
-                self._log_text._content = ""
-            else:
-                self._log_text.clear()
-        if hasattr(self._log_text, '_content'):
-            _do()
-        else:
-            QTimer.singleShot(0, _do)
+            self._log_text.clear()
+        QTimer.singleShot(0, _do)
 
     def reset(self):
         """Reset progress and label to idle state (thread-safe)."""
         self._cancel_event.clear()
         def _do():
-            if hasattr(self._progress_bar, '_cfg'):
-                self._progress_bar._cfg['maximum'] = 100
-                self._progress_bar._cfg['value'] = 0
-            else:
-                self._progress_bar.setMaximum(100)
-                self._progress_bar.setValue(0)
-            if hasattr(self._progress_label, '_cfg'):
-                self._progress_label._cfg['text'] = "Idle"
-            elif hasattr(self._progress_label, 'setText'):
-                self._progress_label.setText("Idle")
-            if hasattr(self._percent_label, '_cfg'):
-                self._percent_label._cfg['text'] = "0%"
-            elif hasattr(self._percent_label, 'setText'):
-                self._percent_label.setText("0%")
-        if hasattr(self._progress_bar, '_cfg'):
-            _do()
-        else:
-            QTimer.singleShot(0, _do)
+            self._progress_bar.setMaximum(100)
+            self._progress_bar.setValue(0)
+            self._progress_label.setText("Idle")
+            self._percent_label.setText("0%")
+        QTimer.singleShot(0, _do)
 
     def cancel(self):
         """Signal cancellation to any running operation."""
