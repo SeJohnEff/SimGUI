@@ -129,6 +129,10 @@ class ProgressPanel(QWidget):
 
     def log(self, message):
         """Append a timestamped message to the log output (thread-safe)."""
+        if hasattr(self, '_exists') and not self._exists:
+            return
+        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
+            return
         ts = datetime.now().strftime('%H:%M:%S')
         msg = f"[{ts}] {message}"
         def _do():
