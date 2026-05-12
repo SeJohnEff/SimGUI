@@ -1,7 +1,11 @@
 .PHONY: test lint lint-fix coverage check clean release
 
-test:
-	python3 -m pytest tests/ -v
+.venv:
+	python3 -m venv .venv
+
+test: .venv
+	.venv/bin/python -m pip install -r requirements-dev.txt
+	.venv/bin/python -m pytest -x -q
 
 lint:
 	python3 -m ruff check .
