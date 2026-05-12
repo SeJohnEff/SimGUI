@@ -1,73 +1,83 @@
-from typing import Optional, Union
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""CSV Editor Panel Widget - Treeview-based CSV table editor"""
+"""CSV Editor Panel Widget - Table-based CSV editor"""
 
 import logging
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+import os
+from typing import Optional
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QFileDialog,
+    QMessageBox,
+)
 
 from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
-from theme import ModernTheme
 from utils import get_browse_initial_dir
-from widgets.tooltip import add_tooltip
 
 logger = logging.getLogger(__name__)
 
 
-class CSVEditorPanel(ttk.Frame):
+class CSVEditorPanel(QWidget):
     """Panel for editing CSV card configurations"""
 
-    def __init__(self, parent, *, ns_manager=None, **kwargs):
-        super().__init__(parent, **kwargs)
+    def __init__(self, parent=None, *, state_manager=None, ns_manager=None, **kwargs):
+        super().__init__(parent)
         self._csv_manager = CSVManager()
         self._ns_manager = ns_manager
-        self._last_browse_dir: Optional[str]= None
+        self.state_manager = state_manager
+        self._last_browse_dir: Optional[str] = None
         self._unsaved_changes = False
         self._create_widgets()
 
     def _create_widgets(self):
-        pad = ModernTheme.get_padding('small')
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
 
         # Toolbar
-        toolbar = ttk.Frame(self)
-        toolbar.pack(fill=tk.X, pady=(0, pad))
-        _load_btn = ttk.Button(toolbar, text="Load CSV", command=self._on_load_csv)
-        _load_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(_load_btn, "Open a CSV or EML file with SIM card data")
-        _save_btn = ttk.Button(toolbar, text="Save CSV", command=self._on_save_csv)
-        _save_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(_save_btn, "Save the current card data to a CSV file")
-        _add_btn = ttk.Button(toolbar, text="Add Row", command=self._on_add_row)
-        _add_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(_add_btn, "Add a new blank card row to the table")
-        _del_btn = ttk.Button(toolbar, text="Delete Row", command=self._on_delete_row)
-        _del_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(_del_btn, "Remove the selected card row")
-        _val_btn = ttk.Button(toolbar, text="Validate", command=self._on_validate)
-        _val_btn.pack(side=tk.LEFT)
-        add_tooltip(_val_btn, "Check all rows for data errors")
+        toolbar_layout = QHBoxLayout()
 
-        self.count_label = ttk.Label(toolbar, text="0 cards", style='Small.TLabel')
-        self.count_label.pack(side=tk.RIGHT)
+        load_btn = QPushButton("Load CSV")
+        load_btn.clicked.connect(self._on_load_csv)
+        toolbar_layout.addWidget(load_btn)
 
-        # Treeview
-        tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
+        save_btn = QPushButton("Save CSV")
+        save_btn.clicked.connect(self._on_save_csv)
+        toolbar_layout.addWidget(save_btn)
 
-        self.tree = ttk.Treeview(tree_frame, show='headings', selectmode='browse')
-        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        add_btn = QPushButton("Add Row")
+        add_btn.clicked.connect(self._on_add_row)
+        toolbar_layout.addWidget(add_btn)
 
-        self.tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        del_btn = QPushButton("Delete Row")
+        del_btn.clicked.connect(self._on_delete_row)
+        toolbar_layout.addWidget(del_btn)
 
-        self.tree.bind('<Double-1>', self._on_cell_edit)
+        val_btn = QPushButton("Validate")
+        val_btn.clicked.connect(self._on_validate)
+        toolbar_layout.addWidget(val_btn)
+
+        toolbar_layout.addStretch()
+
+        self.count_label = QLabel("0 cards")
+        toolbar_layout.addWidget(self.count_label)
+
+        main_layout.addLayout(toolbar_layout)
+
+        # Table widget
+        self.table = QTableWidget()
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setColumnCount(0)
+        self.table.setRowCount(0)
+        self.table.itemDoubleClicked.connect(self._on_cell_edited)
+        main_layout.addWidget(self.table)
 
         self._refresh_table()
 
@@ -79,55 +89,63 @@ class CSVEditorPanel(ttk.Frame):
         return self._csv_manager
 
     def _refresh_table(self):
-        self.tree.delete(*self.tree.get_children())
         cols = self._csv_manager.columns
-        self.tree['columns'] = cols
-        for col in cols:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=100, minwidth=60)
-        for i, card in enumerate(self._csv_manager.cards):
-            values = [card.get(c, '') for c in cols]
-            self.tree.insert('', tk.END, iid=str(i), values=values)
-        self.count_label.configure(text=f"{self._csv_manager.get_card_count()} cards")
+        self.table.setColumnCount(len(cols))
+        self.table.setHorizontalHeaderLabels(cols)
+        self.table.setRowCount(len(self._csv_manager.cards))
+
+        for row, card in enumerate(self._csv_manager.cards):
+            for col, col_name in enumerate(cols):
+                value = card.get(col_name, '')
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, col, item)
+
+        self.count_label.setText(f"{self._csv_manager.get_card_count()} cards")
 
     def _on_load_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        kwargs = {"title": "Load SIM Data File", "filetypes": SIM_DATA_FILETYPES}
+        kwargs = {"title": "Load SIM Data File"}
         if init_dir:
-            kwargs["initialdir"] = init_dir
-        fp = filedialog.askopenfilename(**kwargs)
+            kwargs["directory"] = init_dir
+        fp, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load SIM Data File",
+            init_dir or "",
+            ";;".join(f"{desc} ({pattern})" for desc, pattern in SIM_DATA_FILETYPES)
+        )
         if not fp:
             return
-        import os
         self._last_browse_dir = os.path.dirname(fp)
         try:
             if self._csv_manager.load_file(fp):
                 self._refresh_table()
                 self._unsaved_changes = False
                 if self._csv_manager.load_warnings:
-                    messagebox.showwarning("Missing Fields",
-                                           "\n".join(self._csv_manager.load_warnings))
+                    QMessageBox.warning(
+                        self, "Missing Fields",
+                        "\n".join(self._csv_manager.load_warnings))
             else:
-                messagebox.showerror("Load Error",
-                                     f"No card data found in {fp}")
+                QMessageBox.critical(
+                    self, "Load Error",
+                    f"No card data found in {fp}")
         except ValueError as exc:
-            messagebox.showerror("Import Error", str(exc))
+            QMessageBox.critical(self, "Import Error", str(exc))
 
     def _on_save_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        kwargs = {
-            "title": "Save CSV", "defaultextension": ".csv",
-            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
-        }
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        fp = filedialog.asksaveasfilename(**kwargs)
+        fp, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save CSV",
+            init_dir or "",
+            "CSV files (*.csv);;All files (*.*)"
+        )
         if fp:
             if self._csv_manager.save_csv(fp):
                 self._unsaved_changes = False
-                messagebox.showinfo("Save", f"CSV saved to {fp}")
+                QMessageBox.information(self, "Save", f"CSV saved to {fp}")
             else:
-                messagebox.showerror("Save Error", "Failed to save CSV file.")
+                QMessageBox.critical(self, "Save Error", "Failed to save CSV file.")
 
     def _on_add_row(self):
         self._csv_manager.add_card()
@@ -135,9 +153,8 @@ class CSVEditorPanel(ttk.Frame):
         self._unsaved_changes = True
 
     def _on_delete_row(self):
-        sel = self.tree.selection()
-        if sel:
-            idx = int(sel[0])
+        if self.table.currentRow() >= 0:
+            idx = self.table.currentRow()
             self._csv_manager.remove_card(idx)
             self._refresh_table()
             self._unsaved_changes = True
@@ -145,39 +162,16 @@ class CSVEditorPanel(ttk.Frame):
     def _on_validate(self):
         errors = self._csv_manager.validate_all()
         if errors:
-            messagebox.showwarning("Validation", "\n".join(errors))
+            QMessageBox.warning(self, "Validation", "\n".join(errors))
         else:
-            messagebox.showinfo("Validation", "All rows valid!")
+            QMessageBox.information(self, "Validation", "All rows valid!")
 
-    def _on_cell_edit(self, event):
-        item = self.tree.identify_row(event.y)
-        col_id = self.tree.identify_column(event.x)
-        if not item or not col_id:
+    def _on_cell_edited(self, item):
+        col = item.column()
+        row = item.row()
+        if row < 0 or col < 0:
             return
-        col_idx = int(col_id.replace('#', '')) - 1
-        col_name = self._csv_manager.columns[col_idx]
-        old_val = self._csv_manager.cards[int(item)].get(col_name, '')
-
-        # Guard bbox() for non-visible items
-        bbox = self.tree.bbox(item, col_id)
-        if not bbox:
-            return
-        x, y, w, h = bbox
-
-        entry = ttk.Entry(self.tree)
-        entry.place(x=x, y=y, width=w, height=h)
-        entry.insert(0, old_val)
-        entry.select_range(0, tk.END)
-        entry.focus_set()
-
-        def _save(e=None):
-            if not entry.winfo_exists():
-                return
-            self._csv_manager.update_card(int(item), col_name, entry.get())
-            entry.destroy()
-            self._refresh_table()
-            self._unsaved_changes = True
-
-        entry.bind('<Return>', _save)
-        entry.bind('<FocusOut>', _save)
-        entry.bind('<Escape>', lambda e: entry.destroy())
+        col_name = self._csv_manager.columns[col]
+        new_val = item.text()
+        self._csv_manager.update_card(row, col_name, new_val)
+        self._unsaved_changes = True

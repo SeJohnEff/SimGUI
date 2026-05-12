@@ -3,122 +3,122 @@ Progress Panel Widget - Shows progress for batch operations.
 """
 
 import threading
-import tkinter as tk
 from datetime import datetime
-from tkinter import ttk
 
-from widgets.tooltip import add_tooltip
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGroupBox,
+    QLabel,
+    QProgressBar,
+    QPlainTextEdit,
+    QPushButton,
+)
 
 
-class ProgressPanel(ttk.Frame):
+class ProgressPanel(QWidget):
     """Panel that displays progress bars and log output for long-running operations."""
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
+    def __init__(self, parent=None, *, state_manager=None, **kwargs):
+        super().__init__(parent)
         self._cancel_event = threading.Event()
+        self.state_manager = state_manager
         self._build_ui()
 
     def _build_ui(self):
-        # Main progress bar
-        prog_frame = ttk.LabelFrame(self, text="Operation Progress")
-        prog_frame.pack(fill=tk.X, padx=5, pady=5)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
 
-        self._progress_label = ttk.Label(prog_frame, text="Idle")
-        self._progress_label.pack(anchor=tk.W, padx=5, pady=(5, 0))
+        # Progress section
+        prog_group = QGroupBox("Operation Progress")
+        prog_layout = QVBoxLayout(prog_group)
 
-        self._progress_bar = ttk.Progressbar(
-            prog_frame, orient=tk.HORIZONTAL, mode='determinate'
-        )
-        self._progress_bar.pack(fill=tk.X, padx=5, pady=5)
+        self._progress_label = QLabel("Idle")
+        prog_layout.addWidget(self._progress_label)
 
-        self._percent_label = ttk.Label(prog_frame, text="0%")
-        self._percent_label.pack(anchor=tk.E, padx=5)
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMinimum(0)
+        self._progress_bar.setMaximum(100)
+        self._progress_bar.setValue(0)
+        prog_layout.addWidget(self._progress_bar)
 
-        # Log output
-        log_frame = ttk.LabelFrame(self, text="Log Output")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self._percent_label = QLabel("0%")
+        self._percent_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        prog_layout.addWidget(self._percent_label)
 
-        self._log_text = tk.Text(log_frame, height=8, state=tk.DISABLED, wrap=tk.WORD)
-        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self._log_text.yview)
-        self._log_text.configure(yscrollcommand=scrollbar.set)
+        main_layout.addWidget(prog_group)
 
-        self._log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0), pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 5), pady=5)
+        # Log section
+        log_group = QGroupBox("Log Output")
+        log_layout = QVBoxLayout(log_group)
+
+        self._log_text = QPlainTextEdit()
+        self._log_text.setReadOnly(True)
+        self._log_text.setMaximumHeight(200)
+        log_layout.addWidget(self._log_text)
+
+        main_layout.addWidget(log_group)
 
         # Control buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
 
-        self._cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self.cancel)
-        self._cancel_btn.pack(side=tk.RIGHT, padx=(4, 0))
-        add_tooltip(self._cancel_btn, "Stop the current operation")
-        self._clear_btn = ttk.Button(btn_frame, text="Clear Log", command=self.clear_log)
-        self._clear_btn.pack(side=tk.RIGHT)
-        add_tooltip(self._clear_btn, "Remove all log entries")
+        self._clear_btn = QPushButton("Clear Log")
+        self._clear_btn.clicked.connect(self.clear_log)
+        btn_layout.addWidget(self._clear_btn)
 
-    # ---- Thread-safe public API ----------------------------------------
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.clicked.connect(self.cancel)
+        btn_layout.addWidget(self._cancel_btn)
+
+        main_layout.addLayout(btn_layout)
 
     def set_progress(self, value, maximum=100, label=None):
         """Update the progress bar value and optional label (thread-safe)."""
         def _do():
-            if not self.winfo_exists():
-                return
-            self._progress_bar['maximum'] = maximum
-            self._progress_bar['value'] = value
+            self._progress_bar.setMaximum(maximum)
+            self._progress_bar.setValue(value)
             pct = int((value / maximum) * 100) if maximum > 0 else 0
-            self._percent_label.configure(text=f"{pct}%")
+            self._percent_label.setText(f"{pct}%")
             if label:
-                self._progress_label.configure(text=label)
-        self.after(0, _do)
+                self._progress_label.setText(label)
+        QTimer.singleShot(0, _do)
 
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
         def _do():
-            if not self.winfo_exists():
-                return
             if running:
-                self._progress_bar.configure(mode='indeterminate')
-                self._progress_bar.start(10)
+                self._progress_bar.setMaximum(0)
             else:
-                self._progress_bar.stop()
-                self._progress_bar.configure(mode='determinate')
-        self.after(0, _do)
+                self._progress_bar.setMaximum(100)
+                self._progress_bar.setValue(0)
+        QTimer.singleShot(0, _do)
 
     def log(self, message):
         """Append a timestamped message to the log output (thread-safe)."""
         ts = datetime.now().strftime('%H:%M:%S')
         def _do():
-            if not self.winfo_exists():
-                return
-            self._log_text.configure(state=tk.NORMAL)
-            self._log_text.insert(tk.END, f"[{ts}] {message}\n")
-            self._log_text.see(tk.END)
-            self._log_text.configure(state=tk.DISABLED)
-        self.after(0, _do)
+            self._log_text.appendPlainText(f"[{ts}] {message}")
+        QTimer.singleShot(0, _do)
 
     def clear_log(self):
         """Clear the log output (thread-safe)."""
         def _do():
-            if not self.winfo_exists():
-                return
-            self._log_text.configure(state=tk.NORMAL)
-            self._log_text.delete("1.0", tk.END)
-            self._log_text.configure(state=tk.DISABLED)
-        self.after(0, _do)
+            self._log_text.clear()
+        QTimer.singleShot(0, _do)
 
     def reset(self):
         """Reset progress and label to idle state (thread-safe)."""
         self._cancel_event.clear()
         def _do():
-            if not self.winfo_exists():
-                return
-            self._progress_bar.stop()
-            self._progress_bar.configure(mode='determinate', value=0)
-            self._progress_label.configure(text="Idle")
-            self._percent_label.configure(text="0%")
-        self.after(0, _do)
-
-    # ---- Cancel support ------------------------------------------------
+            self._progress_bar.setMaximum(100)
+            self._progress_bar.setValue(0)
+            self._progress_label.setText("Idle")
+            self._percent_label.setText("0%")
+        QTimer.singleShot(0, _do)
 
     def cancel(self):
         """Signal cancellation to any running operation."""

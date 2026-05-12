@@ -2,28 +2,41 @@
 Program SIM Panel — Workflow 2.
 
 Program a single SIM card. Data comes from manual entry or CSV selection.
-Card detection is automatic via CardWatcher.  When a card is inserted,
+Card detection is automatic via CardWatcher. When a card is inserted,
 fields are auto-populated from the IccidIndex if the card's ICCID is
-found in a loaded data file.  Authentication runs automatically when
-the operator clicks Program.
-
-Layout uses a vertical PanedWindow so the operator can drag the divider
-to give more space to the card-data fields or the CSV table.
+found in a loaded data file.
 """
 
-from typing import Optional, Union
+import logging
+import os
+from typing import Optional
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QRadioButton,
+    QGroupBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QPlainTextEdit,
+    QSplitter,
+    QFileDialog,
+    QMessageBox,
+)
 
 from managers.card_manager import CardManager
-from managers.csv_manager import SIM_DATA_FILETYPES, CSVManager
+from managers.csv_manager import CSVManager, SIM_DATA_FILETYPES
 from state_manager import StateManager, CardInfo, CardState
-from theme import ModernTheme
 from utils import get_browse_initial_dir
-from widgets.tooltip import add_tooltip
 
-# Fields shown in the form.  Tuple: (key, label, editable_when_csv)
+logger = logging.getLogger(__name__)
+
 _FORM_FIELDS = [
     ("ICCID", "ICCID", False),
     ("IMSI", "IMSI", True),
@@ -36,538 +49,347 @@ _FORM_FIELDS = [
 ]
 
 
-class ProgramSIMPanel(ttk.Frame):
+class ProgramSIMPanel(QWidget):
     """Tab for programming a single SIM card."""
 
-    def __init__(self, parent, card_manager: CardManager, *,
+    def __init__(self, parent=None, card_manager: CardManager = None, *,
                  state_manager: Optional[StateManager] = None,
-                 last_read_data: Optional[dict]= None,
+                 last_read_data: Optional[dict] = None,
                  ns_manager=None, card_watcher=None, **kwargs):
-        super().__init__(parent, **kwargs)
+        super().__init__(parent)
         self._cm = card_manager
         self.state_manager = state_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
-        self._last_browse_dir: Optional[str]= None
+        self._last_browse_dir: Optional[str] = None
         self._csv = CSVManager()
         self._last_read_data = last_read_data if last_read_data is not None else {}
-        self._mode_var = tk.StringVar(value="manual")
-        self._field_vars: dict[str, tk.StringVar] = {}
-        self._field_entries: dict[str, ttk.Entry] = {}
-        self._step = 0  # 0=no card, 1=detected+ready
-        self._original_form_data: dict[str, str] = {}  # baseline for change tracking
-        self._detected_non_empty: bool = False  # True when a card with ICCID is detected
+        self._mode_var = "manual"
+        self._field_vars: dict[str, str] = {}
+        self._field_entries: dict[str, QLineEdit] = {}
+        self._step = 0
+        self._original_form_data: dict[str, str] = {}
+        self._detected_non_empty: bool = False
 
-        # Callbacks set by main.py
         self.on_csv_loaded_callback = None
-        self.on_file_browsed_callback = None  # Called after any file browse dialog closes
+        self.on_file_browsed_callback = None
+        self.on_card_programmed_callback = None
 
         self._build_ui()
-        self._on_mode_change()
 
         if self.state_manager:
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.card_state_changed.connect(self._on_card_state_changed)
 
-    # ---- UI construction -----------------------------------------------
-
     def _build_ui(self):
-        pad = ModernTheme.get_padding("medium")
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
 
-        # Data source toggle — always visible at top
-        src = ttk.Frame(self)
-        src.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
-        ttk.Label(src, text="Data Source:").pack(side=tk.LEFT)
-        _manual_rb = ttk.Radiobutton(src, text="Manual Entry", variable=self._mode_var,
-                        value="manual", command=self._on_mode_change)
-        _manual_rb.pack(side=tk.LEFT, padx=(pad, 0))
-        add_tooltip(_manual_rb, "Enter card data by hand")
-        _csv_rb = ttk.Radiobutton(src, text="From CSV", variable=self._mode_var,
-                        value="csv", command=self._on_mode_change)
-        _csv_rb.pack(side=tk.LEFT, padx=(pad, 0))
-        add_tooltip(_csv_rb, "Load from file")
-        _read_card_rb = ttk.Radiobutton(src, text="From Read Card", variable=self._mode_var,
-                        value="read_card", command=self._on_mode_change)
-        _read_card_rb.pack(side=tk.LEFT, padx=(pad, 0))
-        add_tooltip(_read_card_rb, "Use data from last card read")
+        # Mode selection
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("Data Source:")
+        mode_layout.addWidget(mode_label)
 
-        # --- PanedWindow: top = Card Data + Actions, bottom = CSV table ---
-        self._paned = tk.PanedWindow(
-            self, orient=tk.VERTICAL, sashwidth=6, sashrelief=tk.RAISED,
-            bg=ModernTheme.get_color("border"))
-        self._paned.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(0, pad))
+        for mode_name in ["Manual Entry", "From CSV", "From Read Card"]:
+            radio = QRadioButton(mode_name)
+            mode_layout.addWidget(radio)
+            if mode_name == "Manual Entry":
+                radio.setChecked(True)
+                radio.toggled.connect(lambda checked: self._on_mode_change() if checked else None)
+            else:
+                radio.toggled.connect(lambda checked: self._on_mode_change() if checked else None)
 
-        # --- Top pane: Card Data + Actions ---
-        top_pane = ttk.Frame(self._paned)
+        mode_layout.addStretch()
+        main_layout.addLayout(mode_layout)
 
-        # Form
-        form_frame = ttk.LabelFrame(top_pane, text="Card Data")
-        form_frame.pack(fill=tk.X, padx=0, pady=(0, pad // 2))
+        # Splitter: top = form, bottom = CSV table
+        splitter = QSplitter(Qt.Orientation.Vertical)
 
-        _FIELD_TOOLTIPS = {
-            "ICCID": "Integrated Circuit Card Identifier.\n19-20 digits. Example: 89999880000003010011",
-            "IMSI": "International Mobile Subscriber Identity.\n6-15 digits. Example: 99988000301001",
-            "Ki": "Authentication key (hex).\n32 hex characters. Example: E049AF7D...C03FD919",
-            "OPc": "Operator key (hex).\n32 hex characters. Example: 9EB1A951...D4053A0E",
-            "ADM1": "Admin key for card access.\n8 ASCII chars (e.g. 88888888) or 16 hex chars (e.g. 3838383838383838).\n\u26a0 3 wrong attempts = permanent lock!",
-            "ACC": "Access Control Class.\n4 hex digits. Example: 0001",
-            "SPN": "Service Provider Name.\nExample: BOLIDEN",
-            "FPLMN": "Forbidden PLMNs, semicolon-separated.\nExample: 24007;24024;24001;24008;24002",
-        }
+        # Top pane
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Card Data group
+        data_group = QGroupBox("Card Data")
+        data_layout = QGridLayout(data_group)
+        data_layout.setSpacing(6)
 
         for i, (key, label, _) in enumerate(_FORM_FIELDS):
-            lbl = ttk.Label(form_frame, text=f"{label}:")
-            lbl.grid(row=i, column=0, sticky=tk.W, padx=pad, pady=2)
-            var = tk.StringVar()
-            entry = ttk.Entry(form_frame, textvariable=var, width=40)
-            entry.grid(row=i, column=1, sticky=(tk.W, tk.E), padx=pad, pady=2)
-            self._field_vars[key] = var
+            label_widget = QLabel(f"{label}:")
+            entry = QLineEdit()
+            entry.setText("")
+            data_layout.addWidget(label_widget, i, 0)
+            data_layout.addWidget(entry, i, 1)
+            self._field_vars[key] = ""
             self._field_entries[key] = entry
-            if key in _FIELD_TOOLTIPS:
-                add_tooltip(lbl, _FIELD_TOOLTIPS[key])
-                add_tooltip(entry, _FIELD_TOOLTIPS[key])
-        form_frame.columnconfigure(1, weight=1)
 
-        # Action buttons
-        act = ttk.LabelFrame(top_pane, text="Actions")
-        act.pack(fill=tk.X, padx=0, pady=pad // 2)
+        data_layout.setColumnStretch(1, 1)
+        top_layout.addWidget(data_group)
 
-        btn_row = ttk.Frame(act)
-        btn_row.pack(fill=tk.X, padx=pad, pady=pad)
-        self._prog_btn = ttk.Button(
-            btn_row, text="Program Card", command=self._on_program,
-            state=tk.DISABLED, style="Accent.TButton")
-        self._prog_btn.pack(side=tk.LEFT)
-        add_tooltip(self._prog_btn,
-                    "Authenticate with ADM1 and write all field values to the inserted SIM card")
+        # Actions group
+        actions_group = QGroupBox("Actions")
+        actions_layout = QVBoxLayout(actions_group)
 
-        # Selectable text widget for action status (not a Label — must be
-        # copyable per user requirement).  Read-only tk.Text that looks
-        # like a label but allows select + Ctrl-C.
-        self._action_status = tk.Text(
-            act, height=1, wrap=tk.NONE, relief=tk.FLAT,
-            borderwidth=0, highlightthickness=0,
-            font=("TkDefaultFont",), padx=4, pady=2,
-            cursor="arrow",
-        )
-        self._action_status.insert("1.0", "Insert a SIM card...")
-        self._action_status.configure(state=tk.DISABLED)
-        # Save the default foreground so we can restore it later
-        # (tk.Text rejects foreground="" — unlike ttk widgets).
-        try:
-            self._default_fg = self._action_status.cget("foreground")
-        except (tk.TclError, AttributeError):
-            self._default_fg = "black"
-        # Match background to parent frame
-        try:
-            bg = act.winfo_toplevel().cget("bg")
-            self._action_status.configure(background=bg)
-        except (tk.TclError, AttributeError):
-            pass
-        self._action_status.pack(anchor=tk.W, fill=tk.X, padx=pad, pady=(0, pad))
-        # Right-click context menu for copy
-        self._action_status_menu = tk.Menu(self._action_status, tearoff=0)
-        self._action_status_menu.add_command(
-            label="Copy All",
-            command=self._copy_action_status)
-        self._action_status.bind("<Button-3>",
-            lambda e: self._action_status_menu.tk_popup(e.x_root, e.y_root))
+        self._prog_btn = QPushButton("Program Card")
+        self._prog_btn.clicked.connect(self._on_program)
+        self._prog_btn.setEnabled(False)
+        actions_layout.addWidget(self._prog_btn)
 
-        self._paned.add(top_pane, minsize=200)
+        self._action_status = QPlainTextEdit()
+        self._action_status.setPlainText("Insert a SIM card...")
+        self._action_status.setReadOnly(True)
+        self._action_status.setMaximumHeight(60)
+        actions_layout.addWidget(self._action_status)
 
-        # --- Bottom pane: CSV Selection ---
-        self._csv_pane = ttk.Frame(self._paned)
+        top_layout.addWidget(actions_group)
 
-        self._csv_frame = ttk.LabelFrame(self._csv_pane, text="CSV Selection")
-        self._csv_frame.pack(fill=tk.BOTH, expand=True)
+        splitter.addWidget(top_widget)
 
-        csv_bar = ttk.Frame(self._csv_frame)
-        csv_bar.pack(fill=tk.X, padx=pad, pady=(pad, 0))
-        self._csv_path_var = tk.StringVar()
-        ttk.Entry(csv_bar, textvariable=self._csv_path_var,
-                  state="readonly", width=40).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        _browse_csv_btn = ttk.Button(csv_bar, text="Browse...",
-                   command=self._on_browse_csv)
-        _browse_csv_btn.pack(side=tk.LEFT, padx=(pad, 0))
-        add_tooltip(_browse_csv_btn, "Open a CSV or EML file with SIM card data")
-        self._csv_count_lbl = ttk.Label(csv_bar, text="")
-        self._csv_count_lbl.pack(side=tk.LEFT, padx=(pad, 0))
+        # Bottom pane: CSV table
+        csv_widget = QWidget()
+        csv_layout = QVBoxLayout(csv_widget)
+        csv_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Filename label
-        self._csv_filename_lbl = ttk.Label(self._csv_frame, text="",
-                                           style="Small.TLabel")
-        self._csv_filename_lbl.pack(anchor=tk.W, padx=pad, pady=(2, 0))
+        csv_group = QGroupBox("CSV Selection")
+        csv_group_layout = QVBoxLayout(csv_group)
 
-        # Tree + scrollbar in a container
-        tree_container = ttk.Frame(self._csv_frame)
-        tree_container.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad)
+        # CSV path bar
+        csv_bar = QHBoxLayout()
+        self._csv_path_entry = QLineEdit()
+        self._csv_path_entry.setReadOnly(True)
+        csv_bar.addWidget(self._csv_path_entry)
 
-        self._card_tree = ttk.Treeview(
-            tree_container, columns=("iccid", "imsi", "adm1"),
-            show="headings", height=5)
-        self._card_tree.heading("iccid", text="ICCID")
-        self._card_tree.heading("imsi", text="IMSI")
-        self._card_tree.heading("adm1", text="ADM1")
-        self._card_tree.column("iccid", width=180)
-        self._card_tree.column("imsi", width=150)
-        self._card_tree.column("adm1", width=100)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_csv)
+        csv_bar.addWidget(browse_btn)
 
-        tree_sb = ttk.Scrollbar(tree_container, orient=tk.VERTICAL,
-                                command=self._card_tree.yview)
-        self._card_tree.configure(yscrollcommand=tree_sb.set)
-        self._card_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._csv_count_lbl = QLabel("")
+        csv_bar.addWidget(self._csv_count_lbl)
 
-        self._card_tree.bind("<<TreeviewSelect>>", self._on_card_select)
+        csv_group_layout.addLayout(csv_bar)
 
-        self._paned.add(self._csv_pane, minsize=100)
+        # CSV table
+        self._card_table = QTableWidget()
+        self._card_table.setColumnCount(3)
+        self._card_table.setHorizontalHeaderLabels(["ICCID", "IMSI", "ADM1"])
+        self._card_table.itemClicked.connect(self._on_card_select)
+        csv_group_layout.addWidget(self._card_table)
 
-    # ---- Action status helpers ------------------------------------------
+        csv_layout.addWidget(csv_group)
+        splitter.addWidget(csv_widget)
 
-    # Map ttk style names to tk.Text foreground colours
-    _STATUS_COLOURS = {
-        "TLabel": None,  # default (inherit)
-        "Success.TLabel": "#2e7d32",
-        "Warning.TLabel": "#e65100",
-        "Error.TLabel": "#c62828",
-    }
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([300, 200])
+
+        main_layout.addWidget(splitter)
 
     def _on_card_state_changed(self, card_state: CardState):
-        """Signal handler for card state changes."""
         if card_state == CardState.NO_CARD:
             self.on_card_removed()
 
     def _on_card_info_changed(self, card_info: CardInfo):
-        """Signal handler for card info changes."""
         pass
 
-    def _set_action_status(self, text: str, style: str = "TLabel"):
-        """Update the selectable action-status text widget.
-
-        Because ``tk.Text`` is set to DISABLED (read-only), we must
-        temporarily enable it, replace the content, then disable again.
-        """
-        w = self._action_status
-        w.configure(state=tk.NORMAL)
-        w.delete("1.0", tk.END)
-        w.insert("1.0", text)
-        w.configure(state=tk.DISABLED)
-        fg = self._STATUS_COLOURS.get(style)
-        if fg:
-            w.configure(foreground=fg)
+    def _set_action_status(self, text: str, style: str = "normal"):
+        self._action_status.setPlainText(text)
+        # Color codes for status
+        if style == "success":
+            self._action_status.setStyleSheet("color: #2e7d32;")
+        elif style == "warning":
+            self._action_status.setStyleSheet("color: #e65100;")
+        elif style == "error":
+            self._action_status.setStyleSheet("color: #c62828;")
         else:
-            # Reset to default foreground
-            w.configure(foreground=self._default_fg)
-
-    def _copy_action_status(self):
-        """Copy full action-status text to the system clipboard."""
-        text = self._action_status.get("1.0", tk.END).strip()
-        if text:
-            self._action_status.clipboard_clear()
-            self._action_status.clipboard_append(text)
-
-    # ---- mode switching ------------------------------------------------
+            self._action_status.setStyleSheet("")
 
     def _on_mode_change(self):
-        mode = self._mode_var.get()
+        mode = self._mode_var
         is_csv = mode == "csv"
-        is_read_card = mode == "read_card"
-
-        # Show/hide the CSV pane in the PanedWindow
-        if is_csv:
-            if self._csv_pane not in [self._paned.panes()]:
-                try:
-                    self._paned.add(self._csv_pane, minsize=100)
-                except tk.TclError:
-                    pass  # already added
-        else:
-            try:
-                self._paned.forget(self._csv_pane)
-            except tk.TclError:
-                pass  # already removed
-
-        # All fields editable for manual and read_card modes
-        for key, _, editable_csv in _FORM_FIELDS:
-            if key == "ICCID" and self._detected_non_empty:
-                # ICCID is always read-only for non-empty cards
-                state = "readonly"
-            else:
-                state = "normal" if (not is_csv or editable_csv) else "readonly"
-            self._field_entries[key].configure(state=state)
-
-        if is_read_card:
-            self._populate_from_read_card()
-
+        # TODO: implement mode switching logic
         self._reset_step()
 
-    # ---- Read Card population ------------------------------------------
-
-    # Map from lowercase read-data keys to form field keys
-    _READ_KEY_MAP = {
-        "iccid": "ICCID",
-        "imsi": "IMSI",
-        "ki": "Ki",
-        "opc": "OPc",
-        "adm1": "ADM1",
-        "acc": "ACC",
-        "spn": "SPN",
-        "fplmn": "FPLMN",
-    }
-
-    def _populate_from_read_card(self):
-        """Fill form fields from the shared last-read card data."""
-        if not self._last_read_data:
-            self._set_action_status(
-                "No card data available \u2014 read a card first on the Read SIM tab",
-                "Warning.TLabel")
-            return
-        for read_key, form_key in self._READ_KEY_MAP.items():
-            if form_key in self._field_vars:
-                self._field_vars[form_key].set(
-                    self._last_read_data.get(read_key, ""))
-        self._set_action_status(
-            "Fields populated from last read card",
-            "Success.TLabel")
-
-    # ---- CSV -----------------------------------------------------------
-
-    def _on_browse_csv(self):
-        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        kwargs = {"title": "Open SIM Data File", "filetypes": SIM_DATA_FILETYPES}
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        path = filedialog.askopenfilename(**kwargs)
-        # Notify main.py that a file dialog has closed — share indicator
-        # may need refreshing (the OS file dialog can reveal mount state
-        # changes that the app hasn't noticed yet).
-        if callable(self.on_file_browsed_callback):
-            self.on_file_browsed_callback()
-        if not path:
-            return
-        import os
-        self._last_browse_dir = os.path.dirname(path)
-        self.load_csv_file(path)
-
-    def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
-        """Load a CSV or EML file and refresh the card tree.
-
-        Called by Browse button or by cross-tab sync from BatchProgramPanel.
-        *_from_sync* prevents infinite callback loops.
-        """
-        try:
-            if not self._csv.load_file(path):
-                if not _from_sync:
-                    messagebox.showerror("Error", f"No card data found in {path}")
-                return False
-        except ValueError as exc:
-            if not _from_sync:
-                messagebox.showerror("Import Error", str(exc))
-            return False
-        self._csv_path_var.set(path)
-        import os
-        self._csv_filename_lbl.configure(text=os.path.basename(path))
-        self._csv_count_lbl.configure(
-            text=f"({self._csv.get_card_count()} cards)")
-        self._refresh_card_tree()
-        if not _from_sync and self._csv.load_warnings:
-            messagebox.showwarning("Missing Fields",
-                                   "\n".join(self._csv.load_warnings))
-        # Cross-tab sync
-        if not _from_sync and callable(self.on_csv_loaded_callback):
-            self.on_csv_loaded_callback(path)
-        return True
-
-    def _refresh_card_tree(self):
-        self._card_tree.delete(*self._card_tree.get_children())
-        for i in range(self._csv.get_card_count()):
-            card = self._csv.get_card(i)
-            if card:
-                self._card_tree.insert("", tk.END, iid=str(i), values=(
-                    card.get("ICCID", ""),
-                    card.get("IMSI", ""),
-                    card.get("ADM1", ""),
-                ))
-
-    def _on_card_select(self, _event=None):
-        sel = self._card_tree.selection()
-        if not sel:
-            return
-        idx = int(sel[0])
-        card = self._csv.get_card(idx)
-        if not card:
-            return
-        for key, _, _ in _FORM_FIELDS:
-            val = card.get(key, card.get(key.upper(), ""))
-            # Also try OPC → OPc mapping
-            if key == "OPc" and not val:
-                val = card.get("OPC", "")
-            self._field_vars[key].set(val)
-        # If a card is already inserted (step >= 1), keep that state
-        # so the user can authenticate.  Only reset if no card is present.
-        if self._step >= 1:
-            # Card is present — data changed, stay ready to program
-            self._set_action_status(
-                "CSV row selected \u2014 ready to program",
-                "Success.TLabel")
-        else:
-            self._reset_step()
-
-    # ---- Workflow step helpers -----------------------------------------
-
     def _reset_step(self):
-        """Reset the workflow step.
-
-        If a card is currently detected (step >= 1), keep step 1 (ready)
-        instead of resetting to step 0 (no card).  This prevents the panel
-        from showing 'Insert a SIM card' when a card is already inserted.
-        """
         if self._detected_non_empty or self._step >= 1:
-            # Card is present — ready to program
             self._step = 1
-            self._prog_btn.configure(state=tk.NORMAL)
-            iccid = self._field_vars["ICCID"].get().strip()
+            self._prog_btn.setEnabled(True)
+            iccid = self._field_entries["ICCID"].text().strip()
             if iccid:
                 self._set_action_status(
-                    f"Card detected (ICCID {iccid}) \u2014 click Program to continue")
+                    f"Card detected (ICCID {iccid}) — click Program to continue",
+                    "success")
             else:
                 self._set_action_status(
-                    "Blank card detected \u2014 click Program to continue")
+                    "Blank card detected — click Program to continue",
+                    "success")
         else:
-            # No card present
             self._step = 0
-            self._prog_btn.configure(state=tk.DISABLED)
+            self._prog_btn.setEnabled(False)
             self._set_action_status("Insert a SIM card...")
 
     def _fields_have_data(self) -> bool:
-        """Return True if any form field (beyond ICCID) has a value.
-
-        Used to detect whether the user has already pre-loaded data
-        (e.g. from CSV selection or manual entry) so that card-detection
-        callbacks don't overwrite it.
-        """
         for key, _, _ in _FORM_FIELDS:
             if key == "ICCID":
-                continue  # ICCID alone doesn't count
-            if self._field_vars[key].get().strip():
+                continue
+            if self._field_entries[key].text().strip():
                 return True
         return False
 
     def on_card_detected(self, iccid, card_data=None, file_path=None):
-        """Called by CardWatcher (via main.py) when a card is auto-detected.
-
-        If *card_data* is provided the form fields are auto-populated.
-        The data is also saved as the baseline for change tracking.
-
-        For non-empty cards (with an ICCID), ICCID is forced read-only
-        because it comes from the factory and is used for traceability.
-
-        **Blank-card + pre-loaded data**:  When the card is blank
-        (empty ICCID) and no *card_data* is supplied, the method checks
-        whether the form already contains data (e.g. from a CSV row
-        selection).  If so, the existing field values are preserved and
-        the panel moves straight to STEP 1 (ready to program).
-        """
         self._step = 1
-        self._prog_btn.configure(state=tk.NORMAL)
-
-        # Track whether this is a non-empty card
+        self._prog_btn.setEnabled(True)
         self._detected_non_empty = bool(iccid)
 
         if card_data:
-            # Auto-populate all form fields from the indexed data
             for key, _, _ in _FORM_FIELDS:
                 val = card_data.get(key, card_data.get(key.upper(), ""))
                 if key == "OPc" and not val:
                     val = card_data.get("OPC", "")
-                self._field_vars[key].set(val)
-            # Save baseline for change tracking
+                self._field_entries[key].setText(val)
             self._original_form_data = {
-                k: self._field_vars[k].get() for k, _, _ in _FORM_FIELDS
+                k: self._field_entries[k].text() for k, _, _ in _FORM_FIELDS
             }
-            import os
             src = os.path.basename(file_path) if file_path else "index"
             self._set_action_status(
-                f"Card detected \u2014 data loaded from {src}",
-                "Success.TLabel")
+                f"Card detected — data loaded from {src}",
+                "success")
         elif not iccid and self._fields_have_data():
-            # Blank card inserted but fields are already populated
-            # (e.g. from CSV row selection or manual entry).  Preserve
-            # the existing data — don't overwrite with empty values.
-            self._original_form_data = {}  # all fields will be written
+            self._original_form_data = {}
             self._set_action_status(
-                "Blank card detected \u2014 ready to program",
-                "Success.TLabel")
+                "Blank card detected — ready to program",
+                "success")
         else:
-            # Card found but not in index — just show ICCID
             if iccid:
-                self._field_vars["ICCID"].set(iccid)
-            # Empty card or unknown: no baseline (all fields will be written)
+                self._field_entries["ICCID"].setText(iccid)
             self._original_form_data = {}
             if iccid:
                 self._set_action_status(
-                    f"Card detected (ICCID {iccid}) \u2014 not in index, enter data manually",
-                    "Warning.TLabel")
+                    f"Card detected (ICCID {iccid}) — not in index, enter data manually",
+                    "warning")
             else:
                 self._set_action_status(
-                    "Blank card detected \u2014 select a CSV row or enter data manually",
-                    "Warning.TLabel")
+                    "Blank card detected — select a CSV row or enter data manually",
+                    "warning")
 
-        # Enforce ICCID read-only for non-empty cards (factory-assigned,
-        # used for traceability — must never be changed).
         if self._detected_non_empty:
-            self._field_entries["ICCID"].configure(state="readonly")
+            self._field_entries["ICCID"].setReadOnly(True)
         else:
-            self._field_entries["ICCID"].configure(state="normal")
+            self._field_entries["ICCID"].setReadOnly(False)
 
     def on_card_removed(self):
-        """Called by CardWatcher when the card is removed."""
         self._detected_non_empty = False
-        self._step = 0  # clear before _reset_step so it shows 'Insert SIM'
+        self._step = 0
         self._reset_step()
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
-            self._field_vars[key].set("")
-        # Restore ICCID to editable (will be locked again on next detect)
-        self._field_entries["ICCID"].configure(state="normal")
+            self._field_entries[key].setText("")
+        self._field_entries["ICCID"].setReadOnly(False)
+
+    def _on_browse_csv(self):
+        init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
+        fp, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open SIM Data File",
+            init_dir or "",
+            ";;".join(f"{desc} ({pattern})" for desc, pattern in SIM_DATA_FILETYPES)
+        )
+        if callable(self.on_file_browsed_callback):
+            self.on_file_browsed_callback()
+        if not fp:
+            return
+        self._last_browse_dir = os.path.dirname(fp)
+        self.load_csv_file(fp)
+
+    def load_csv_file(self, path: str, *, _from_sync: bool = False) -> bool:
+        try:
+            if not self._csv.load_file(path):
+                if not _from_sync:
+                    QMessageBox.critical(self, "Error", f"No card data found in {path}")
+                return False
+        except ValueError as exc:
+            if not _from_sync:
+                QMessageBox.critical(self, "Import Error", str(exc))
+            return False
+
+        self._csv_path_entry.setText(path)
+        self._csv_count_lbl.setText(f"({self._csv.get_card_count()} cards)")
+        self._refresh_card_table()
+
+        if not _from_sync and self._csv.load_warnings:
+            QMessageBox.warning(
+                self, "Missing Fields",
+                "\n".join(self._csv.load_warnings))
+
+        if not _from_sync and callable(self.on_csv_loaded_callback):
+            self.on_csv_loaded_callback(path)
+        return True
+
+    def _refresh_card_table(self):
+        self._card_table.setRowCount(self._csv.get_card_count())
+        for i in range(self._csv.get_card_count()):
+            card = self._csv.get_card(i)
+            if card:
+                iccid_item = QTableWidgetItem(card.get("ICCID", ""))
+                imsi_item = QTableWidgetItem(card.get("IMSI", ""))
+                adm1_item = QTableWidgetItem(card.get("ADM1", ""))
+                self._card_table.setItem(i, 0, iccid_item)
+                self._card_table.setItem(i, 1, imsi_item)
+                self._card_table.setItem(i, 2, adm1_item)
+
+    def _on_card_select(self):
+        current_row = self._card_table.currentRow()
+        if current_row < 0:
+            return
+        card = self._csv.get_card(current_row)
+        if not card:
+            return
+        for key, _, _ in _FORM_FIELDS:
+            val = card.get(key, card.get(key.upper(), ""))
+            if key == "OPc" and not val:
+                val = card.get("OPC", "")
+            self._field_entries[key].setText(val)
+
+        if self._step >= 1:
+            self._set_action_status(
+                "CSV row selected — ready to program",
+                "success")
+        else:
+            self._reset_step()
 
     def _on_program(self):
         if self._step < 1:
             return
-        adm1 = self._field_vars["ADM1"].get().strip()
+        adm1 = self._field_entries["ADM1"].text().strip()
         if not adm1:
-            self._set_action_status("ADM1 is required", "Warning.TLabel")
+            self._set_action_status("ADM1 is required", "warning")
             return
-        expected_iccid = self._field_vars["ICCID"].get().strip() or None
-        card_data = {k: self._field_vars[k].get().strip()
+        expected_iccid = self._field_entries["ICCID"].text().strip() or None
+        card_data = {k: self._field_entries[k].text().strip()
                      for k, _, _ in _FORM_FIELDS}
 
-        # Pause the card watcher so its probes don't interfere with
-        # the VERIFY APDU and programming calls.
         if self._card_watcher:
             self._card_watcher.pause()
         try:
-            ok, msg = self._cm.authenticate(
-                adm1, expected_iccid=expected_iccid)
+            ok, msg = self._cm.authenticate(adm1, expected_iccid=expected_iccid)
 
-            # If auth was refused due to low retry counter, offer a
-            # force-override so the operator can still proceed when
-            # they are confident the key is correct.
             if not ok and "DANGER" in msg and "attempt" in msg:
-                confirm = messagebox.askyesno(
+                confirm = QMessageBox.warning(
+                    self,
                     "Low ADM1 Attempts",
                     f"{msg}\n\n"
                     "Are you SURE the ADM1 key is correct?\n"
                     "A wrong key will permanently lock this card.\n\n"
                     "Force authentication?",
-                    icon=messagebox.WARNING,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
-                if confirm:
+                if confirm == QMessageBox.StandardButton.Yes:
                     ok, msg = self._cm.authenticate(
-                        adm1, force=True,
-                        expected_iccid=expected_iccid)
+                        adm1, force=True, expected_iccid=expected_iccid)
 
             if not ok:
-                self._set_action_status(msg, "Error.TLabel")
+                self._set_action_status(msg, "error")
                 return
 
             ok, msg = self._cm.program_card(
@@ -577,9 +399,8 @@ class ProgramSIMPanel(ttk.Frame):
                 self._card_watcher.resume()
 
         if ok:
-            self._set_action_status(msg, "Success.TLabel")
-            # Notify main.py so it can save auto-artifact
+            self._set_action_status(msg, "success")
             if callable(getattr(self, 'on_card_programmed_callback', None)):
                 self.on_card_programmed_callback(card_data)
         else:
-            self._set_action_status(msg, "Error.TLabel")
+            self._set_action_status(msg, "error")
