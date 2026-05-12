@@ -7,22 +7,32 @@ Protected fields (Ki, OPc, OTA keys) are revealed after ADM1 auth
 and clicking "Read Card".
 
 Detection is handled by the shared Card Status panel (left side).
-This tab observes the card manager state — call refresh() after
+This widget observes the card manager state — call refresh() after
 a detect/mode change from the main window.
 """
 
-from typing import Optional, Union
+from typing import Optional
 
 import csv
 import os
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QGroupBox,
+    QScrollArea,
+    QFileDialog,
+    QMessageBox,
+)
 
 from managers.card_manager import CardManager
 from state_manager import StateManager, CardInfo, CardState
-from theme import ModernTheme
-from utils import get_browse_initial_dir
-from widgets.tooltip import add_tooltip, hide_all_tooltips
 
 # Display order and labels for public fields
 _PUBLIC_DISPLAY = [
@@ -57,24 +67,28 @@ _PROTECTED_DISPLAY = [
 ]
 
 
-class ReadSIMPanel(ttk.Frame):
+class ReadSIMPanel(QWidget):
     """Tab that guides the user through reading a SIM card."""
 
     def __init__(self, parent, card_manager: CardManager, *,
                  state_manager: Optional[StateManager] = None,
-                 last_read_data: Optional[dict]= None,
+                 last_read_data: Optional[dict] = None,
                  ns_manager=None, card_watcher=None, **kwargs):
-        super().__init__(parent, **kwargs)
+        super().__init__(parent)
         self._cm = card_manager
         self.state_manager = state_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
-        self._last_browse_dir: Optional[str]= None
+        self._last_browse_dir: Optional[str] = None
         self._last_read_data = last_read_data if last_read_data is not None else {}
         self._public_data: dict = {}
         self._protected_data: dict = {}
         self._detected_iccid: str = ""
         self._authenticated: bool = False
+
+        self._pub_fields: dict[str, QLineEdit] = {}
+        self._prot_fields: dict[str, QLineEdit] = {}
+
         self._build_ui()
 
         if self.state_manager:
@@ -84,159 +98,113 @@ class ReadSIMPanel(ttk.Frame):
     # ---- UI construction -----------------------------------------------
 
     def _build_ui(self):
-        pad = ModernTheme.get_padding("medium")
+        """Build the main UI layout."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
 
-        # --- Scrollable container for all content ---
-        self._canvas = tk.Canvas(self, highlightthickness=0)
-        self._vscroll = ttk.Scrollbar(
-            self, orient=tk.VERTICAL, command=self._canvas.yview)
-        self._inner = ttk.Frame(self._canvas)
+        # Scrollable area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
 
-        self._inner.bind(
-            "<Configure>",
-            lambda e: self._canvas.configure(
-                scrollregion=self._canvas.bbox("all")))
-        self._canvas_window = self._canvas.create_window(
-            (0, 0), window=self._inner, anchor="nw")
-        self._canvas.configure(yscrollcommand=self._vscroll.set)
+        # --- Public Fields section ---
+        pub_group = QGroupBox("Public Fields (no auth required)")
+        pub_layout = QGridLayout(pub_group)
+        pub_layout.setSpacing(6)
 
-        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Keep inner frame width in sync with canvas
-        self._canvas.bind(
-            "<Configure>",
-            lambda e: self._canvas.itemconfigure(
-                self._canvas_window, width=e.width))
-
-        # Mousewheel scrolling
-        def _on_mousewheel(event):
-            self._canvas.yview_scroll(
-                int(-1 * (event.delta / 120)), "units")
-
-        def _on_mousewheel_linux(event):
-            if event.num == 4:
-                self._canvas.yview_scroll(-1, "units")
-            elif event.num == 5:
-                self._canvas.yview_scroll(1, "units")
-
-        def _bind_wheel(event):
-            self._canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            self._canvas.bind_all("<Button-4>", _on_mousewheel_linux)
-            self._canvas.bind_all("<Button-5>", _on_mousewheel_linux)
-
-        def _unbind_wheel(event):
-            self._canvas.unbind_all("<MouseWheel>")
-            self._canvas.unbind_all("<Button-4>")
-            self._canvas.unbind_all("<Button-5>")
-
-        self._canvas.bind("<Enter>", _bind_wheel)
-        self._canvas.bind("<Leave>", _unbind_wheel)
-
-        # --- All content goes inside self._inner ---
-
-        # --- Public Fields grid ---
-        pub_frame = ttk.LabelFrame(
-            self._inner, text="Public Fields (no auth required)")
-        pub_frame.pack(fill=tk.X, padx=pad, pady=(pad, pad // 2))
-
-        pub_grid = ttk.Frame(pub_frame)
-        pub_grid.pack(fill=tk.X, padx=pad, pady=pad)
-
-        self._pub_vars: dict[str, tk.StringVar] = {}
-        self._pub_entries: dict[str, ttk.Entry] = {}
         for i, (key, label) in enumerate(_PUBLIC_DISPLAY):
             row, col = divmod(i, 2)
-            ttk.Label(pub_grid, text=f"{label}:").grid(
-                row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
-            var = tk.StringVar(value="-")
-            entry = ttk.Entry(pub_grid, textvariable=var,
-                              state="readonly", style="Copyable.TEntry")
-            entry.grid(row=row, column=col * 2 + 1, sticky=(tk.W, tk.E),
-                       pady=2, padx=(0, pad * 2))
-            self._pub_vars[key] = var
-            self._pub_entries[key] = entry
+            label_widget = QLabel(f"{label}:")
+            value_field = QLineEdit()
+            value_field.setText("-")
+            value_field.setReadOnly(True)
 
-        # Make value columns expand
-        pub_grid.columnconfigure(1, weight=1)
-        pub_grid.columnconfigure(3, weight=1)
+            pub_layout.addWidget(label_widget, row, col * 2)
+            pub_layout.addWidget(value_field, row, col * 2 + 1)
+            self._pub_fields[key] = value_field
+
+        pub_layout.setColumnStretch(1, 1)
+        pub_layout.setColumnStretch(3, 1)
+        content_layout.addWidget(pub_group)
 
         # --- Authentication section ---
-        auth_frame = ttk.LabelFrame(self._inner, text="Authentication")
-        auth_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        auth_group = QGroupBox("Authentication")
+        auth_layout = QGridLayout(auth_group)
+        auth_layout.setSpacing(6)
 
-        auth_inner = ttk.Frame(auth_frame)
-        auth_inner.pack(fill=tk.X, padx=pad, pady=pad)
+        auth_label = QLabel("ADM1:")
+        self._adm1_field = QLineEdit()
+        self._auth_btn = QPushButton("Authenticate")
+        self._auth_btn.clicked.connect(self._on_authenticate)
 
-        ttk.Label(auth_inner, text="ADM1:").grid(
-            row=0, column=0, sticky=tk.W, pady=2)
-        self._adm1_var = tk.StringVar()
-        self._adm1_entry = ttk.Entry(
-            auth_inner, textvariable=self._adm1_var, width=20)
-        self._adm1_entry.grid(row=0, column=1, sticky=tk.W, padx=pad, pady=2)
-        self._auth_btn = ttk.Button(
-            auth_inner, text="Authenticate", command=self._on_authenticate)
-        self._auth_btn.grid(row=0, column=2, padx=(0, pad), pady=2)
-        add_tooltip(self._auth_btn, "Enter ADM1 key to unlock protected fields (Ki, OPc, etc.)")
+        auth_layout.addWidget(auth_label, 0, 0)
+        auth_layout.addWidget(self._adm1_field, 0, 1)
+        auth_layout.addWidget(self._auth_btn, 0, 2)
 
-        self._csv_adm_btn = ttk.Button(
-            auth_inner, text="Load ADM1 from CSV...",
-            command=self._on_load_adm1_csv)
-        self._csv_adm_btn.grid(row=1, column=1, sticky=tk.W, padx=pad, pady=2)
-        add_tooltip(self._csv_adm_btn, "Load ADM1 from a CSV/EML file matching this card's ICCID")
+        self._csv_adm_btn = QPushButton("Load ADM1 from CSV...")
+        self._csv_adm_btn.clicked.connect(self._on_load_adm1_csv)
+        auth_layout.addWidget(self._csv_adm_btn, 1, 1, 1, 2)
 
-        self._auth_status = ttk.Label(
-            auth_inner, text="Enter ADM1 to authenticate")
-        self._auth_status.grid(row=2, column=0, columnspan=3,
-                               sticky=tk.W, pady=(pad, 0))
+        self._auth_status = QLabel("Enter ADM1 to authenticate")
+        auth_layout.addWidget(self._auth_status, 2, 0, 1, 3)
+
+        auth_layout.setColumnStretch(1, 1)
+        content_layout.addWidget(auth_group)
 
         # --- Protected Fields section ---
-        prot_frame = ttk.LabelFrame(
-            self._inner, text="Protected Fields (requires ADM1)")
-        prot_frame.pack(fill=tk.X, padx=pad, pady=pad // 2)
+        prot_group = QGroupBox("Protected Fields (requires ADM1)")
+        prot_layout_outer = QVBoxLayout(prot_group)
 
-        prot_top = ttk.Frame(prot_frame)
-        prot_top.pack(fill=tk.X, padx=pad, pady=(pad, 0))
+        prot_top = QHBoxLayout()
+        self._read_btn = QPushButton("Read Card")
+        self._read_btn.clicked.connect(self._on_read_card)
+        self._read_btn.setEnabled(False)
+        self._read_status = QLabel("Authenticate first")
 
-        self._read_btn = ttk.Button(
-            prot_top, text="Read Card", command=self._on_read_card)
-        self._read_btn.pack(side=tk.LEFT)
-        add_tooltip(self._read_btn, "Read all accessible data from the inserted card")
-        self._read_btn.configure(state=tk.DISABLED)
-        self._read_status = ttk.Label(prot_top, text="Authenticate first")
-        self._read_status.pack(side=tk.LEFT, padx=(pad, 0))
+        prot_top.addWidget(self._read_btn)
+        prot_top.addWidget(self._read_status)
+        prot_top.addStretch()
+        prot_layout_outer.addLayout(prot_top)
 
-        prot_grid = ttk.Frame(prot_frame)
-        prot_grid.pack(fill=tk.X, padx=pad, pady=pad)
+        prot_grid = QGridLayout()
+        prot_grid.setSpacing(6)
 
-        self._prot_vars: dict[str, tk.StringVar] = {}
-        self._prot_entries: dict[str, ttk.Entry] = {}
         for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
             row, col = divmod(i, 2)
-            ttk.Label(prot_grid, text=f"{label}:").grid(
-                row=row, column=col * 2, sticky=tk.W, pady=2, padx=(0, 4))
-            var = tk.StringVar(value="-")
-            entry = ttk.Entry(prot_grid, textvariable=var,
-                              state="readonly", style="Copyable.TEntry")
-            entry.grid(row=row, column=col * 2 + 1, sticky=(tk.W, tk.E),
-                       pady=2, padx=(0, pad * 2))
-            self._prot_vars[key] = var
-            self._prot_entries[key] = entry
+            label_widget = QLabel(f"{label}:")
+            value_field = QLineEdit()
+            value_field.setText("-")
+            value_field.setReadOnly(True)
 
-        prot_grid.columnconfigure(1, weight=1)
-        prot_grid.columnconfigure(3, weight=1)
+            prot_grid.addWidget(label_widget, row, col * 2)
+            prot_grid.addWidget(value_field, row, col * 2 + 1)
+            self._prot_fields[key] = value_field
+
+        prot_grid.setColumnStretch(1, 1)
+        prot_grid.setColumnStretch(3, 1)
+        prot_layout_outer.addLayout(prot_grid)
+        content_layout.addWidget(prot_group)
 
         # --- Bottom action buttons ---
-        btn_row = ttk.Frame(self._inner)
-        btn_row.pack(fill=tk.X, padx=pad, pady=(0, pad))
-        self._copy_btn = ttk.Button(
-            btn_row, text="Copy All to Clipboard", command=self._on_copy)
-        self._copy_btn.pack(side=tk.LEFT, padx=(0, pad))
-        add_tooltip(self._copy_btn, "Copy all card data to clipboard")
-        self._export_btn = ttk.Button(
-            btn_row, text="Export to CSV...", command=self._on_export)
-        self._export_btn.pack(side=tk.LEFT)
-        add_tooltip(self._export_btn, "Export card data as a JSON file")
+        btn_layout = QHBoxLayout()
+        self._copy_btn = QPushButton("Copy All to Clipboard")
+        self._copy_btn.clicked.connect(self._on_copy)
+        self._export_btn = QPushButton("Export to CSV...")
+        self._export_btn.clicked.connect(self._on_export)
+
+        btn_layout.addWidget(self._copy_btn)
+        btn_layout.addWidget(self._export_btn)
+        btn_layout.addStretch()
+        content_layout.addLayout(btn_layout)
+
+        content_layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
 
     def _on_card_state_changed(self, card_state: CardState):
         """Signal handler for card state changes."""
@@ -256,11 +224,11 @@ class ReadSIMPanel(ttk.Frame):
         """
         # Reset auth / protected state when card changes
         self._authenticated = False
-        self._read_btn.configure(state=tk.DISABLED)
-        self._read_status.configure(text="Authenticate first")
+        self._read_btn.setEnabled(False)
+        self._read_status.setText("Authenticate first")
         self._protected_data = {}
-        for var in self._prot_vars.values():
-            var.set("-")
+        for field in self._prot_fields.values():
+            field.setText("-")
 
         # Read public data
         raw = self._cm.read_public_data()
@@ -271,29 +239,29 @@ class ReadSIMPanel(ttk.Frame):
             pub = {k.lower(): v for k, v in raw.items()}
             self._public_data = pub
             self._detected_iccid = pub.get("iccid", "")
-            for key, var in self._pub_vars.items():
+            for key, field in self._pub_fields.items():
                 val = pub.get(key, "")
-                var.set(val if val else "-")
+                field.setText(val if val else "-")
             # Store public data in shared state for Program SIM tab
             self._update_shared_read_data()
         else:
             self._public_data = {}
             self._detected_iccid = ""
-            for var in self._pub_vars.values():
-                var.set("-")
+            for field in self._pub_fields.values():
+                field.setText("-")
             # Clear shared state when no card
             self._last_read_data.clear()
 
     # ---- actions -------------------------------------------------------
 
     def _on_authenticate(self):
-        adm1 = self._adm1_var.get().strip()
+        adm1 = self._adm1_field.text().strip()
         if not adm1:
-            self._auth_status.configure(text="Please enter ADM1")
+            self._auth_status.setText("Please enter ADM1")
             return
         if not self._detected_iccid:
-            self._auth_status.configure(
-                text="No card detected \u2014 use Detect Card in the left panel")
+            self._auth_status.setText(
+                "No card detected — use Detect Card in the left panel")
             return
 
         expected_iccid = self._detected_iccid or None
@@ -309,15 +277,16 @@ class ReadSIMPanel(ttk.Frame):
             # If auth was refused due to low retry counter, offer a
             # force-override so the operator can still proceed.
             if not ok and "DANGER" in msg and "attempt" in msg:
-                confirm = messagebox.askyesno(
+                confirm = QMessageBox.warning(
+                    self,
                     "Low ADM1 Attempts",
                     f"{msg}\n\n"
                     "Are you SURE the ADM1 key is correct?\n"
                     "A wrong key will permanently lock this card.\n\n"
                     "Force authentication?",
-                    icon=messagebox.WARNING,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
-                if confirm:
+                if confirm == QMessageBox.StandardButton.Yes:
                     ok, msg = self._cm.authenticate(
                         adm1, force=True,
                         expected_iccid=expected_iccid)
@@ -326,42 +295,45 @@ class ReadSIMPanel(ttk.Frame):
                 self._card_watcher.resume()
 
         if ok:
-            self._auth_status.configure(text=msg)
+            self._auth_status.setText(msg)
             self._authenticated = True
-            self._read_btn.configure(state=tk.NORMAL)
-            self._read_status.configure(text="Ready to read")
+            self._read_btn.setEnabled(True)
+            self._read_status.setText("Ready to read")
         else:
-            self._auth_status.configure(text=msg)
+            self._auth_status.setText(msg)
             self._authenticated = False
-            self._read_btn.configure(state=tk.DISABLED)
+            self._read_btn.setEnabled(False)
             if "ICCID mismatch" in msg:
-                messagebox.showwarning("ICCID Mismatch", msg)
+                QMessageBox.warning(self, "ICCID Mismatch", msg)
 
     def _on_load_adm1_csv(self):
         if not self._detected_iccid:
-            hide_all_tooltips()
-            messagebox.showinfo(
+            QMessageBox.information(
+                self,
                 "Detect First",
                 "Please detect a card first (via Card Status panel) "
                 "so the ICCID is known.")
             return
         from managers.csv_manager import SIM_DATA_FILETYPES
+        from utils import get_browse_initial_dir
+
         init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        kwargs = {"title": "Select ADM1 Data File", "filetypes": SIM_DATA_FILETYPES}
-        if init_dir:
-            kwargs["initialdir"] = init_dir
-        path = filedialog.askopenfilename(**kwargs)
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select ADM1 Data File",
+            init_dir or "",
+            ";;".join(f"{desc} ({pattern})" for desc, pattern in SIM_DATA_FILETYPES))
         if not path:
             return
         self._last_browse_dir = os.path.dirname(path)
         adm1 = self._lookup_adm1_in_file(path, self._detected_iccid)
         if adm1:
-            self._adm1_var.set(adm1)
-            self._auth_status.configure(
-                text="ADM1 loaded from CSV (matched ICCID)")
+            self._adm1_field.setText(adm1)
+            self._auth_status.setText(
+                "ADM1 loaded from CSV (matched ICCID)")
         else:
-            self._auth_status.configure(
-                text="No matching ICCID found in CSV")
+            self._auth_status.setText(
+                "No matching ICCID found in CSV")
 
     @staticmethod
     def _lookup_adm1_in_file(path: str, iccid: str) -> str:
@@ -386,18 +358,18 @@ class ReadSIMPanel(ttk.Frame):
     def _on_read_card(self):
         """Read protected fields from the card after authentication."""
         if not self._authenticated:
-            self._read_status.configure(text="Not authenticated")
+            self._read_status.setText("Not authenticated")
             return
         data = self._cm.read_protected_data()
         if data is None:
-            self._read_status.configure(text="Failed to read card data")
+            self._read_status.setText("Failed to read card data")
             return
         self._protected_data = data
-        self._read_status.configure(
-            text=f"Read {len(data)} protected field(s)")
-        for key, var in self._prot_vars.items():
+        self._read_status.setText(
+            f"Read {len(data)} protected field(s)")
+        for key, field in self._prot_fields.items():
             val = data.get(key, "")
-            var.set(val if val else "-")
+            field.setText(val if val else "-")
         # Update shared state with protected fields
         self._update_shared_read_data()
 
@@ -415,8 +387,10 @@ class ReadSIMPanel(ttk.Frame):
             return
         lines = [f"{k.upper()}: {v}" for k, v in combined.items()]
         text = "\n".join(lines)
-        self.clipboard_clear()
-        self.clipboard_append(text)
+        from PyQt6.QtGui import QClipboard
+        from PyQt6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
 
     def _on_export(self):
         combined = {}
@@ -424,14 +398,14 @@ class ReadSIMPanel(ttk.Frame):
         combined.update(self._protected_data)
         if not combined:
             return
+        from utils import get_browse_initial_dir
+
         init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
-        save_kwargs = {
-            "title": "Export Card Data", "defaultextension": ".csv",
-            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
-        }
-        if init_dir:
-            save_kwargs["initialdir"] = init_dir
-        path = filedialog.asksaveasfilename(**save_kwargs)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Card Data",
+            init_dir or "",
+            "CSV files (*.csv);;All files (*.*)")
         if not path:
             return
         try:
@@ -441,4 +415,4 @@ class ReadSIMPanel(ttk.Frame):
                 writer.writeheader()
                 writer.writerow(combined)
         except Exception as exc:
-            messagebox.showerror("Export Error", str(exc))
+            QMessageBox.critical(self, "Export Error", str(exc))
