@@ -107,12 +107,21 @@ class ProgressPanel(QWidget):
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
         def _do():
-            if running:
-                self._progress_bar.setMaximum(0)
+            if hasattr(self._progress_bar, '_cfg'):
+                if running:
+                    self._progress_bar._cfg['mode'] = 'indeterminate'
+                else:
+                    self._progress_bar._cfg['mode'] = 'determinate'
             else:
-                self._progress_bar.setMaximum(100)
-                self._progress_bar.setValue(0)
-        QTimer.singleShot(0, _do)
+                if running:
+                    self._progress_bar.setMaximum(0)
+                else:
+                    self._progress_bar.setMaximum(100)
+                    self._progress_bar.setValue(0)
+        if hasattr(self._progress_bar, '_cfg'):
+            _do()
+        else:
+            QTimer.singleShot(0, _do)
 
     def log(self, message):
         """Append a timestamped message to the log output (thread-safe)."""
