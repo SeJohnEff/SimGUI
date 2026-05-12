@@ -242,6 +242,10 @@ class CardWatcher:
         """
         if present:
             # Card is in reader — reset removal debounce and no-reader counter
+            if not hasattr(self, "_no_card_streak"):
+                self._no_card_streak = 0
+            if not hasattr(self, "_no_reader_poll_count"):
+                self._no_reader_poll_count = 0
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             atr = msg
@@ -266,6 +270,8 @@ class CardWatcher:
                     # absent probes before declaring removal.  Blank gialersim
                     # cards can cause a transient "No card" from the PCSC
                     # probe right after pySim-read releases the reader.
+                    if not hasattr(self, "_no_card_streak"):
+                        self._no_card_streak = 0
                     self._no_card_streak += 1
                     if self._no_card_streak < 2:
                         return
@@ -274,6 +280,8 @@ class CardWatcher:
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
+                if not hasattr(self, "_atr_iccid_cache"):
+                    self._atr_iccid_cache = {}
                 self._atr_iccid_cache.clear()
                 logger.info("CardWatcher: card removed")
                 if self.on_card_removed:
@@ -295,10 +303,14 @@ class CardWatcher:
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
+                if not hasattr(self, "_atr_iccid_cache"):
+                    self._atr_iccid_cache = {}
                 self._atr_iccid_cache.clear()
             # Periodic pyscard reset: every ~10 seconds when no reader detected,
             # force re-initialization in case PC/SC context is stale or pcscd
             # just became available.
+            if not hasattr(self, "_no_reader_poll_count"):
+                self._no_reader_poll_count = 0
             self._no_reader_poll_count += 1
             if self._no_reader_poll_count >= _NO_READER_RESET_AFTER:
                 self._no_reader_poll_count = 0
@@ -378,6 +390,8 @@ class CardWatcher:
             if self._card_present:
                 if self._last_iccid is None:
                     # Blank card — require confirmation before declaring removal
+                    if not hasattr(self, "_no_card_streak"):
+                        self._no_card_streak = 0
                     self._no_card_streak += 1
                     if self._no_card_streak < 2:
                         return
@@ -385,6 +399,8 @@ class CardWatcher:
                 self._no_card_streak = 0
                 self._last_iccid = None
                 self._card_present = False
+                if not hasattr(self, "_atr_iccid_cache"):
+                    self._atr_iccid_cache = {}
                 self._atr_iccid_cache.clear()
                 if self.on_card_removed:
                     try:
