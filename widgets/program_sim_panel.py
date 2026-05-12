@@ -52,6 +52,17 @@ _FORM_FIELDS = [
 class ProgramSIMPanel(QWidget):
     """Tab for programming a single SIM card."""
 
+    _READ_KEY_MAP = {
+        'iccid': 'ICCID',
+        'imsi': 'IMSI',
+        'ki': 'Ki',
+        'opc': 'OPc',
+        'adm1': 'ADM1',
+        'acc': 'ACC',
+        'spn': 'SPN',
+        'fplmn': 'FPLMN',
+    }
+
     def __init__(self, parent=None, card_manager: CardManager = None, *,
                  state_manager: Optional[StateManager] = None,
                  last_read_data: Optional[dict] = None,

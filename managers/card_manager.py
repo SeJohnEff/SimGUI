@@ -1141,7 +1141,9 @@ class CardManager:
         already-personalised cards.  pySim-prog selects the correct auth
         sequence per card type automatically (gialersim vs SJA5).
         """
-        summary = ', '.join(k for k in fields if k != 'ADM1') or 'all fields'
+        fields = fields.copy()
+        fields.pop('ADM1', None)
+        summary = ', '.join(k for k in fields) or 'all fields'
         logger.info("Programming card via pySim-prog: %s", summary)
 
         ok, stdout, stderr = self._run_pysim_prog(

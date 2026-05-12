@@ -655,7 +655,8 @@ class TestReconnectResilience:
             label, ok, msg = results[0]
             assert label == "NAS"
             assert ok is False
-            assert "simgui-setup-mount" in msg
+            # Platform-specific: Linux has simgui-setup-mount, macOS has Finder
+            assert ("simgui-setup-mount" in msg or "Finder" in msg) and "SimGUI needs permission" in msg
         finally:
             os.unlink(path)
 
