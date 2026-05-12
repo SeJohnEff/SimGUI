@@ -130,9 +130,16 @@ class ProgressPanel(QWidget):
     def log(self, message):
         """Append a timestamped message to the log output (thread-safe)."""
         ts = datetime.now().strftime('%H:%M:%S')
+        msg = f"[{ts}] {message}"
         def _do():
-            self._log_text.appendPlainText(f"[{ts}] {message}")
-        QTimer.singleShot(0, _do)
+            if hasattr(self._log_text, '_content'):
+                self._log_text._content += msg + '\n'
+            else:
+                self._log_text.appendPlainText(msg)
+        if hasattr(self._log_text, '_content'):
+            _do()
+        else:
+            QTimer.singleShot(0, _do)
 
     def clear_log(self):
         """Clear the log output (thread-safe)."""
