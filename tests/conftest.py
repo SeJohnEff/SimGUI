@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -20,6 +21,66 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
+
+
+@pytest.fixture(autouse=True)
+def mock_qt_dialogs(monkeypatch):
+    """Mock all blocking Qt dialogs to prevent hangs in tests.
+
+    This fixture is applied to all tests automatically to ensure:
+    - No QFileDialog blocks waiting for user input
+    - No QMessageBox blocks waiting for user interaction
+    - No dialog.exec() is called
+    """
+    # Mock QFileDialog.getOpenFileName
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *a, **k: ("/tmp/test.csv", "")
+    )
+
+    # Mock QFileDialog.getSaveFileName
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *a, **k: ("/tmp/test_save.csv", "")
+    )
+
+    # Mock QFileDialog.getExistingDirectory
+    monkeypatch.setattr(
+        QFileDialog,
+        "getExistingDirectory",
+        lambda *a, **k: "/tmp/test_dir"
+    )
+
+    # Mock QMessageBox.information (returns OK)
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *a, **k: QMessageBox.StandardButton.Ok
+    )
+
+    # Mock QMessageBox.warning (returns Ok)
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *a, **k: QMessageBox.StandardButton.Ok
+    )
+
+    # Mock QMessageBox.critical (returns Ok)
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda *a, **k: QMessageBox.StandardButton.Ok
+    )
+
+    # Mock QMessageBox.question (returns Yes)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
+
 
 from managers.backup_manager import BackupManager
 from managers.card_manager import CardManager
