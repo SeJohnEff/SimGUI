@@ -106,6 +106,10 @@ class ProgressPanel(QWidget):
 
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
+        if hasattr(self, '_exists') and not self._exists:
+            return
+        if hasattr(self, 'winfo_exists') and not self.winfo_exists():
+            return
         def _do():
             if hasattr(self._progress_bar, '_cfg'):
                 if running:
