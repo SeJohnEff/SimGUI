@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from managers.batch_manager import BatchManager
+from managers.batch_manager import BatchManager, CardResult
 from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager, SIM_DATA_FILETYPES
 from managers.settings_manager import SettingsManager
@@ -111,7 +111,7 @@ class BatchProgramPanel(QWidget):
         self.on_file_browsed_callback = None
 
         self._batch_mgr.on_progress = self._on_progress
-        self._batch_mgr.on_card_result = lambda r: self._on_card_result(r.iccid, r.success, r.message)
+        self._batch_mgr.on_card_result = self._on_card_result
         self._batch_mgr.on_waiting_for_card = self._on_waiting_for_card
         self._batch_mgr.on_completed = self._on_batch_completed
 
@@ -322,9 +322,27 @@ class BatchProgramPanel(QWidget):
         self._progress_bar.setMaximum(total)
         self._progress_bar.setValue(current)
 
-    def _on_card_result(self, iccid: str, success: bool, message: str):
-        status = "✓" if success else "✗"
-        self._log_text.appendPlainText(f"{status} {iccid}: {message}")
+    def _on_card_result(self, *args):
+        iccid = None
+        success = False
+        message = ""
+        index = None
+
+        if len(args) == 1 and isinstance(args[0], CardResult):
+            result = args[0]
+            iccid = result.iccid
+            success = result.success
+            message = result.message
+            index = result.index
+        elif len(args) == 3:
+            iccid, success, message = args
+
+        if iccid is not None:
+            status = "✓" if success else "✗"
+            self._log_text.appendPlainText(f"{status} {iccid}: {message}")
+            if success and index is not None and self._preview_data:
+                card_data = self._preview_data[index] if index < len(self._preview_data) else {}
+                self._save_per_card_artifact(card_data)
 
     def _on_waiting_for_card(self):
         self._log_text.appendPlainText("Waiting for card insertion...")
