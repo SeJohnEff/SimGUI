@@ -223,6 +223,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - **Signals & subscriptions for globals** — use `StateManager` signals for cross-component communication, not direct coupling between widgets
 - **Managers are framework-free** — `card_manager`, `csv_manager`, etc. have zero Qt imports. StateManager bridges them to the UI via signals.
 - **Widgets never import each other** — they subscribe to StateManager signals. Only MainWindow (controller) writes to StateManager.
+- **No blocking on the event loop** — Any I/O, network, or filesystem work must run in a `QThread` worker, not on the main thread. Workers emit signals; slots update StateManager. Never use `time.sleep()`, blocking subprocess calls, or loops on the main thread. The GUI must stay responsive.
 - **Plan before coding** — make a plan before fixing bugs. The workflow must be in the plan.
 
 ### Documentation Is Part of the Change
@@ -276,6 +277,7 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - pyscard module-level cache (`_pyscard_available`) is set once and persists for the process lifetime — if pcscd is not running at app startup, the cache is set to `False` and never re-evaluated. Solution: add a `reset_pyscard()` function to clear the cache and force re-import. CardWatcher calls this periodically when no reader is detected, enabling automatic recovery when pcscd/USB becomes available. Fixed in v0.5.36.
 - UTM USB passthrough auto-connect doesn't work reliably on macOS — with auto-connect enabled, the reader attaches at VM boot, but if unplugged/replugged during use, it won't re-attach automatically. User must toggle in UTM's USB menu. A systemd monitoring service (`smartcard-hotplug-monitor.service`) detects when the reader reappears and sends a desktop notification. This is a UTM/QEMU limitation, not fixable at the application level without requiring users to modify QEMU settings (which breaks vanilla install requirement). Documented in `docs/how-to/install.md`.
 - Toast notifications should track state to prevent repeated display on every poll cycle — when CardWatcher polls at 1.5s intervals and encounters the same error repeatedly, naive toast display creates popup spam. Solution: add a flag (e.g., `_no_reader_toast_shown`) that is set when the toast is shown and reset only when the error condition clears. For dismissal, store the returned Toplevel widget from `show_toast()` and programmatically destroy it when the condition resolves (e.g., when reader is detected). Fixed in v0.5.36.
+- Blocking I/O on event loop freezes the UI — Initial implementation of background startup tasks used `QTimer.singleShot(0, lambda: blocking_work())`. This schedules blocking work on the main thread, freezing the UI. Solution: use `QThread` worker pattern (v0.5.38). Worker class emits signals, main window connects them to slots. Slots call StateManager methods. No lambdas with direct state manipulation, no blocking on event loop. See `docs/explanation/architecture.md` for the pattern.
 
 ## StateManager Signal Architecture
 

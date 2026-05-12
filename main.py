@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -48,6 +48,56 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
 )
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Background Worker (Qt-style async)
+# ---------------------------------------------------------------------------
+
+class BackgroundStartupWorker(QObject):
+    """Worker for async startup tasks; runs in dedicated thread."""
+
+    finished = pyqtSignal()
+    toast_requested = pyqtSignal(str, str, int)
+    status_requested = pyqtSignal(str)
+    mounts_updated = pyqtSignal(list)
+    index_updated = pyqtSignal()
+
+    def __init__(self, ns_manager, iccid_index) -> None:
+        super().__init__()
+        self._ns_manager = ns_manager
+        self._iccid_index = iccid_index
+
+    def run(self) -> None:
+        """Execute startup tasks and emit signals."""
+        try:
+            results = self._ns_manager.reconnect_saved()
+        except Exception as exc:
+            logger.warning("Auto-reconnect failed: %s", exc)
+            results = []
+
+        if results:
+            ok_labels = [label for label, ok, _ in results if ok]
+            if ok_labels:
+                names = ", ".join(ok_labels)
+                self.toast_requested.emit(
+                    f"Network share reconnected: {names}",
+                    "success", 5000)
+                self.status_requested.emit(
+                    f"Network share connected: {names}")
+
+        mounts = self._ns_manager.get_active_mount_paths()
+        self.mounts_updated.emit(mounts or [])
+
+        for _label, mount_path in (mounts or []):
+            try:
+                self._iccid_index.scan_directory(mount_path)
+            except Exception as exc:
+                logger.warning("ICCID scan failed for %s: %s",
+                               mount_path, exc)
+
+        self.index_updated.emit()
+        self.finished.emit()
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +257,7 @@ class SimGUIApp(QMainWindow):
 
         # Shared state
         self.last_read_data: dict[str, str] = {}
+        self._startup_worker_thread: Optional[QThread] = None
 
         # ---- Build UI ----
         self._build_menu()
@@ -495,35 +546,39 @@ class SimGUIApp(QMainWindow):
             logger.warning("Startup card detection failed: %s", exc)
 
     def _background_startup(self) -> None:
-        """Run slow startup tasks in a worker thread."""
-        def _run():
-            try:
-                results = self._ns_manager.reconnect_saved()
-            except Exception as exc:
-                logger.warning("Auto-reconnect failed: %s", exc)
-                results = []
+        """Launch slow startup tasks in a dedicated worker thread."""
+        if self._startup_worker_thread is not None:
+            return
 
-            if results:
-                ok_labels = [label for label, ok, _ in results if ok]
-                if ok_labels:
-                    names = ", ".join(ok_labels)
-                    self.state_manager.request_toast(
-                        f"Network share reconnected: {names}",
-                        "success", 5000)
-                    self.state_manager.status_text = f"Network share connected: {names}"
+        worker = BackgroundStartupWorker(self._ns_manager, self._iccid_index)
+        self._startup_worker_thread = QThread()
+        worker.moveToThread(self._startup_worker_thread)
 
-            mounts = self._ns_manager.get_active_mount_paths()
-            self.state_manager.update_share_status(mounts)
+        worker.toast_requested.connect(self._on_worker_toast)
+        worker.status_requested.connect(self._on_worker_status)
+        worker.mounts_updated.connect(self._on_worker_mounts)
+        worker.index_updated.connect(self._on_worker_index_updated)
+        worker.finished.connect(self._startup_worker_thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        self._startup_worker_thread.finished.connect(self._on_thread_finished)
 
-            for _label, mount_path in (mounts or []):
-                try:
-                    self._iccid_index.scan_directory(mount_path)
-                except Exception as exc:
-                    logger.warning("ICCID scan failed for %s: %s",
-                                   mount_path, exc)
-            self.state_manager.notify_index_updated()
+        self._startup_worker_thread.started.connect(worker.run)
+        self._startup_worker_thread.start()
 
-        QTimer.singleShot(0, _run)
+    def _on_worker_toast(self, msg: str, typ: str, dur: int) -> None:
+        self.state_manager.request_toast(msg, typ, dur)
+
+    def _on_worker_status(self, msg: str) -> None:
+        self.state_manager.status_text = msg
+
+    def _on_worker_mounts(self, mounts: list) -> None:
+        self.state_manager.update_share_status(mounts)
+
+    def _on_worker_index_updated(self) -> None:
+        self.state_manager.notify_index_updated()
+
+    def _on_thread_finished(self) -> None:
+        self._startup_worker_thread = None
 
     # ---- Menu callbacks -----------------------------------------------
 
@@ -580,11 +635,17 @@ class SimGUIApp(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._card_watcher.stop()
+        self._shutdown_worker()
         self._settings.set("window_geometry",
                            f"{self.width()}x{self.height()}")
         self._settings.save()
         self._ns_manager.unmount_all()
         event.accept()
+
+    def _shutdown_worker(self) -> None:
+        if self._startup_worker_thread is not None:
+            self._startup_worker_thread.quit()
+            self._startup_worker_thread.wait()
 
 
 # ---------------------------------------------------------------------------

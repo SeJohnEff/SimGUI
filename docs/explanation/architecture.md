@@ -168,6 +168,32 @@ Only `MainWindow` (the controller) writes to StateManager. This ensures a single
 
 ---
 
+## Async patterns (QThread workers)
+
+Long-running tasks (e.g., network share reconnect, ICCID index scanning) must not block the event loop. SimGUI uses `QThread` workers for any blocking I/O or CPU work:
+
+**Worker pattern:**
+
+1. Create a `QObject` subclass (e.g., `BackgroundStartupWorker`) that emits signals for each result
+2. Worker does all blocking work in a `run()` method, emitting signals when done
+3. Create a `QThread`, move the worker to it, and connect thread lifecycle signals
+4. Connect worker signals to main window slots (`_on_worker_*`)
+5. Slots update `StateManager` via normal methods (never direct state mutation)
+
+**Example (v0.5.38):**
+- `BackgroundStartupWorker.run()` does blocking I/O (network share reconnect, dir scan)
+- Emits: `toast_requested`, `status_requested`, `mounts_updated`, `index_updated`
+- `_on_worker_*` slots update `StateManager` or call its methods
+- No lambdas with `setattr()` or direct state manipulation — all updates go through proper slots
+
+**Benefits:**
+- Event loop never blocks (UI stays responsive)
+- No threading race conditions (Qt handles thread-safe signal dispatch)
+- Clean separation: worker emits signals, slots react
+- Easy to test: disconnect signals, verify emissions; separately verify slot behavior
+
+---
+
 ## The simulator backend
 
 The simulator provides a complete card-operations API without requiring hardware. It is activated by setting `CardManager._simulator` to a `SimulatorBackend` instance.

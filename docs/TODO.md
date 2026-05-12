@@ -1,21 +1,19 @@
 # SimGUI — TODO / Backlog
 
-## Current Blockers (v0.5.37+)
+## Current Blockers (v0.5.38+)
 
-### macOS GUI Asset Loading — BLOCKER
-- **Status**: Blocking macOS .pkg release
-- **Issue**: tkinter `PhotoImage` fails to load PNG from PyInstaller temp directory
+### [RESOLVED v0.5.38] macOS GUI Asset Loading
+- **Status**: ✅ FIXED — PyQt6 migration complete
+- **Issue (historical)**: tkinter `PhotoImage` failed to load PNG from PyInstaller temp directory
   ```
   _tkinter.TclError: couldn't recognize data in image file "/var/folders/.../assets/simgui-256.png"
   ```
-- **Impact**: App imports work; crashes immediately on GUI initialization
-- **No workaround**: PyInstaller bundle structure doesn't expose source files
-- **Root Cause**: tkinter native PNG/JPEG support via PIL unavailable in bundled Python 3.9
-- **Fix Options** (pick one for v0.5.38):
-  1. Bundle Pillow in PyInstaller — add `'PIL'`, `'PIL.Image'`, `'PIL.ImageTk'` to `hiddenimports` in SimGUI.spec
-  2. Convert PNG → PPM — use ImageMagick/Pillow to convert assets/*.png to .ppm (native tkinter support)
-  3. Embed images as base64 strings — load from Python data, no external files
-  4. Migrate to PyQt6 (Phase 1+ work) — eliminates tkinter asset issues entirely
+- **Resolution**: Full migration to PyQt6 (main.py, all panels, dialogs) eliminates tkinter dependency entirely. QIcon uses PyQt6's native image loading — works with PNG, JPEG, SVG. No PIL/Pillow needed.
+- **Sections completed**:
+  1. Refactored `main.py` to PyQt6 (v0.5.36)
+  2. Migrated all panels (CardStatus, ReadSIM, Program, Batch, Progress) to PyQt6 (v0.5.36)
+  3. Fixed background startup to use QThread worker pattern (v0.5.38)
+  4. All signal-based communication (no blocking event loop) (v0.5.38)
 
 ---
 

@@ -1,3 +1,14 @@
+simgui (0.5.38) unstable; urgency=medium
+
+  * refactor: background startup tasks now use QThread worker pattern for
+    proper async execution instead of blocking event loop
+  * refactor: all background worker communication via signals (no direct UI
+    calls) — cleaner separation of concerns, proper thread safety
+  * fix: startup background tasks (network share reconnect, ICCID index scan)
+    no longer block main event loop
+
+ -- Claude Code <noreply@anthropic.com>  Mon, 12 May 2026 00:00:00 +0000
+
 simgui (0.5.37) unstable; urgency=medium
 
   * feat: native macOS support — SimGUI now runs on macOS as a standalone
