@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from managers.batch_manager import BatchManager, CardResult
+from managers.batch_manager import BatchManager
 from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager, SIM_DATA_FILETYPES
 from managers.settings_manager import SettingsManager
@@ -111,7 +111,7 @@ class BatchProgramPanel(QWidget):
         self.on_file_browsed_callback = None
 
         self._batch_mgr.on_progress = self._on_progress
-        self._batch_mgr.on_card_result = self._on_card_result
+        self._batch_mgr.on_card_result = lambda r: self._on_card_result(r.iccid, r.success, r.message)
         self._batch_mgr.on_waiting_for_card = self._on_waiting_for_card
         self._batch_mgr.on_completed = self._on_batch_completed
 
@@ -322,12 +322,9 @@ class BatchProgramPanel(QWidget):
         self._progress_bar.setMaximum(total)
         self._progress_bar.setValue(current)
 
-    def _on_card_result(self, result: CardResult):
-        status = "✓" if result.success else "✗"
-        self._log(f"{status} {result.iccid}: {result.message}")
-        if result.success and self._preview_data:
-            card_data = self._preview_data[result.index] if result.index < len(self._preview_data) else {}
-            self._save_per_card_artifact(card_data)
+    def _on_card_result(self, iccid: str, success: bool, message: str):
+        status = "✓" if success else "✗"
+        self._log_text.appendPlainText(f"{status} {iccid}: {message}")
 
     def _on_waiting_for_card(self):
         self._log_text.appendPlainText("Waiting for card insertion...")
