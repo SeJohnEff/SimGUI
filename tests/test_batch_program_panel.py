@@ -1,7 +1,6 @@
 """Tests for the BatchProgramPanel widget — CSV layout and error messages."""
 
 import os
-import tkinter as tk
 from unittest.mock import patch
 
 import pytest
@@ -17,83 +16,74 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def root():
-    root = tk.Tk()
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
-@pytest.fixture
-def panel(root, tmp_path):
+def panel(qtbot, tmp_path):
     settings = SettingsManager(path=str(tmp_path / "settings.json"))
     cm = CardManager()
     cm.enable_simulator()
-    p = BatchProgramPanel(root, cm, settings)
-    p.pack()
-    root.update_idletasks()
+    p = BatchProgramPanel(None, cm, settings)
+    qtbot.addWidget(p)
     return p
 
 
 class TestSourceChangeLayout:
     """Verify sections appear in correct visual order when switching sources."""
 
-    def test_csv_section_visible_when_csv_selected(self, panel):
-        panel._source_var.set("csv")
+    def test_csv_section_visible_when_csv_selected(self, panel, qtbot):
+        panel._source_var = "csv"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        assert panel._csv_section.winfo_manager() == "pack"
+        qtbot.wait(50)
+        assert panel._csv_group.isVisible()
 
-    def test_gen_section_hidden_when_csv_selected(self, panel):
-        panel._source_var.set("csv")
+    def test_gen_section_hidden_when_csv_selected(self, panel, qtbot):
+        panel._source_var = "csv"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        assert panel._gen_section.winfo_manager() == ""
+        qtbot.wait(50)
+        assert not panel._gen_group.isVisible()
 
-    def test_gen_section_visible_when_generate_selected(self, panel):
-        panel._source_var.set("generate")
+    def test_gen_section_visible_when_generate_selected(self, panel, qtbot):
+        panel._source_var = "generate"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        assert panel._gen_section.winfo_manager() == "pack"
+        qtbot.wait(50)
+        assert panel._gen_group.isVisible()
 
-    def test_csv_section_hidden_when_generate_selected(self, panel):
-        panel._source_var.set("generate")
+    def test_csv_section_hidden_when_generate_selected(self, panel, qtbot):
+        panel._source_var = "generate"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        assert panel._csv_section.winfo_manager() == ""
+        qtbot.wait(50)
+        assert not panel._csv_group.isVisible()
 
-    def test_csv_section_appears_before_preview(self, panel):
-        """CSV section must pack before the preview frame in the pack order."""
-        panel._source_var.set("csv")
+    def test_csv_section_appears_before_preview(self, panel, qtbot):
+        """CSV section must be laid out before the preview frame."""
+        panel._source_var = "csv"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        children = panel.pack_slaves()
-        csv_idx = children.index(panel._csv_section)
-        preview_idx = children.index(panel._preview_frame)
+        qtbot.wait(50)
+        main_layout = panel.layout()
+        csv_idx = main_layout.indexOf(panel._csv_group)
+        preview_idx = main_layout.indexOf(panel._preview_frame)
         assert csv_idx < preview_idx
 
-    def test_gen_section_appears_before_preview(self, panel):
-        panel._source_var.set("generate")
+    def test_gen_section_appears_before_preview(self, panel, qtbot):
+        panel._source_var = "generate"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        children = panel.pack_slaves()
-        gen_idx = children.index(panel._gen_section)
-        preview_idx = children.index(panel._preview_frame)
+        qtbot.wait(50)
+        main_layout = panel.layout()
+        gen_idx = main_layout.indexOf(panel._gen_group)
+        preview_idx = main_layout.indexOf(panel._preview_frame)
         assert gen_idx < preview_idx
 
-    def test_switching_back_and_forth_preserves_order(self, panel):
+    def test_switching_back_and_forth_preserves_order(self, panel, qtbot):
         """Switching csv → generate → csv must still show csv_section above preview."""
         for _ in range(3):
-            panel._source_var.set("csv")
+            panel._source_var = "csv"
             panel._on_source_change()
-            panel._source_var.set("generate")
+            panel._source_var = "generate"
             panel._on_source_change()
-        panel._source_var.set("csv")
+        panel._source_var = "csv"
         panel._on_source_change()
-        panel.winfo_toplevel().update_idletasks()
-        children = panel.pack_slaves()
-        csv_idx = children.index(panel._csv_section)
-        preview_idx = children.index(panel._preview_frame)
+        qtbot.wait(50)
+        main_layout = panel.layout()
+        csv_idx = main_layout.indexOf(panel._csv_group)
+        preview_idx = main_layout.indexOf(panel._preview_frame)
         assert csv_idx < preview_idx
 
 
@@ -102,8 +92,8 @@ class TestStartErrorMessages:
 
     @patch("widgets.batch_program_panel.messagebox")
     def test_csv_no_file_loaded(self, mock_mb, panel):
-        panel._source_var.set("csv")
-        panel._csv_path_var.set("")
+        panel._source_var = "csv"
+        panel._csv_path_entry.setText("")
         panel._preview_data = []
         panel._on_start()
         mock_mb.showinfo.assert_called_once_with(
@@ -111,8 +101,8 @@ class TestStartErrorMessages:
 
     @patch("widgets.batch_program_panel.messagebox")
     def test_csv_file_loaded_but_empty(self, mock_mb, panel):
-        panel._source_var.set("csv")
-        panel._csv_path_var.set("/some/file.csv")
+        panel._source_var = "csv"
+        panel._csv_path_entry.setText("/some/file.csv")
         panel._preview_data = []
         panel._on_start()
         mock_mb.showinfo.assert_called_once_with(
@@ -120,7 +110,7 @@ class TestStartErrorMessages:
 
     @patch("widgets.batch_program_panel.messagebox")
     def test_generate_no_preview(self, mock_mb, panel):
-        panel._source_var.set("generate")
+        panel._source_var = "generate"
         panel._preview_data = []
         panel._on_start()
         mock_mb.showinfo.assert_called_once_with(
