@@ -79,8 +79,12 @@ class ProgressPanel(QWidget):
     def set_progress(self, value, maximum=100, label=None):
         """Update the progress bar value and optional label (thread-safe)."""
         def _do():
-            self._progress_bar.setMaximum(maximum)
-            self._progress_bar.setValue(value)
+            if hasattr(self._progress_bar, '_cfg'):
+                self._progress_bar._cfg['maximum'] = maximum
+                self._progress_bar._cfg['value'] = value
+            else:
+                self._progress_bar.setMaximum(maximum)
+                self._progress_bar.setValue(value)
             pct = int((value / maximum) * 100) if maximum > 0 else 0
             self._percent_label.setText(f"{pct}%")
             if label:
