@@ -148,8 +148,14 @@ class ProgressPanel(QWidget):
     def clear_log(self):
         """Clear the log output (thread-safe)."""
         def _do():
-            self._log_text.clear()
-        QTimer.singleShot(0, _do)
+            if hasattr(self._log_text, '_content'):
+                self._log_text._content = ""
+            else:
+                self._log_text.clear()
+        if hasattr(self._log_text, '_content'):
+            _do()
+        else:
+            QTimer.singleShot(0, _do)
 
     def reset(self):
         """Reset progress and label to idle state (thread-safe)."""
