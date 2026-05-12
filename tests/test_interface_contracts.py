@@ -34,7 +34,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Directories to skip (not production code)
-_SKIP_DIRS = {"__pycache__", "htmlcov", ".git", "debian", "scripts", "docs"}
+_SKIP_DIRS = {
+    "__pycache__", "htmlcov", ".git", "debian", "scripts", "docs",
+    ".venv", "venv", "site-packages",
+}
 
 
 def _iter_py_files():
