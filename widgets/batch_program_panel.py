@@ -339,7 +339,8 @@ class BatchProgramPanel(QWidget):
 
         if iccid is not None:
             status = "✓" if success else "✗"
-            self._log_text.appendPlainText(f"{status} {iccid}: {message}")
+            if hasattr(self, "_log_text") and self._log_text:
+                self._log_text.appendPlainText(f"{status} {iccid}: {message}")
             if success and index is not None and self._preview_data:
                 card_data = self._preview_data[index] if index < len(self._preview_data) else {}
                 self._save_per_card_artifact(card_data)
