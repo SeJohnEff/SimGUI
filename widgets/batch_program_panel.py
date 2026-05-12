@@ -48,6 +48,42 @@ from utils.iccid_utils import (
 logger = logging.getLogger(__name__)
 
 
+def apply_imsi_override(cards: list[dict[str, str]], imsi_base: str,
+                        start_seq: int = 1) -> list[dict[str, str]]:
+    """Return copies of *cards* with IMSI replaced by base + 5-digit seq.
+
+    Args:
+        cards: List of card data dicts.
+        imsi_base: First 10 digits of the IMSI (MCC+MNC + SSSS + T).
+        start_seq: Sequence number for the first card (default 1).
+
+    Returns:
+        New list of card dicts — ICCID and all other fields are untouched.
+    """
+    result: list[dict[str, str]] = []
+    for i, card in enumerate(cards):
+        new_card = dict(card)
+        new_card["IMSI"] = f"{imsi_base}{(start_seq + i):05d}"
+        result.append(new_card)
+    return result
+
+
+def apply_range_filter(cards: list[dict[str, str]], start: int,
+                       count: int) -> list[dict[str, str]]:
+    """Return a slice of *cards* using 1-based *start* and *count*.
+
+    Args:
+        cards: Full list of card data dicts.
+        start: 1-based start row.
+        count: Number of cards to include.
+
+    Returns:
+        Sublist (shallow copies of dicts).
+    """
+    idx = max(start - 1, 0)
+    return [dict(c) for c in cards[idx:idx + count]]
+
+
 class BatchProgramPanel(QWidget):
     """Tab for batch-programming multiple SIM cards."""
 
