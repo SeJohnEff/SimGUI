@@ -47,8 +47,10 @@ class TestCSVFileLoading:
 
     def test_load_csv_updates_path_entry(self, panel, tmp_path, qtbot):
         csv_file = tmp_path / "test.csv"
-        csv_file.write_text("ICCID,IMSI,Ki,OPc,ADM1\n")
-        csv_file.write_text("8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
+        csv_file.write_text(
+            "ICCID,IMSI,Ki,OPc,ADM1\n"
+            "8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n"
+        )
 
         ok = panel.load_csv_file(str(csv_file))
         qtbot.wait(50)
@@ -58,9 +60,11 @@ class TestCSVFileLoading:
 
     def test_load_csv_updates_count_label(self, panel, tmp_path, qtbot):
         csv_file = tmp_path / "test.csv"
-        csv_file.write_text("ICCID,IMSI,Ki,OPc,ADM1\n")
-        csv_file.write_text("8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
-        csv_file.write_text("8988601234567890124,310410123456790,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
+        csv_file.write_text(
+            "ICCID,IMSI,Ki,OPc,ADM1\n"
+            "8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n"
+            "8988601234567890124,310410123456790,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n"
+        )
 
         panel.load_csv_file(str(csv_file))
         qtbot.wait(50)
