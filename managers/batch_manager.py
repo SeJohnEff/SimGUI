@@ -99,11 +99,19 @@ class BatchManager:
         self._skip_event.set()
         self._card_ready_event.set()  # unblock waiting
 
+    def skip_card(self) -> None:
+        """Public alias for skip() — skip the current card."""
+        self.skip()
+
     def abort(self) -> None:
         self._abort_event.set()
         self._pause_event.set()  # unblock if paused
         self._card_ready_event.set()  # unblock if waiting
         self.state = BatchState.ABORTED
+
+    def stop(self) -> None:
+        """Public alias for abort() — stop the batch."""
+        self.abort()
 
     def card_ready(self) -> None:
         """Signal that the user has inserted the next card."""
