@@ -15,5 +15,5 @@ pytlv>=0.3        # TLV parsing for SIM card data structures
 
 # Development / testing
 # pytest>=7.0
-# pytest-qt>=4.4  # Qt widget testing
+pytest-qt>=4.4  # Qt widget testing
 pytest-env>=0.8.2  # Environment variable support for pytest
