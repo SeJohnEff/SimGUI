@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import threading
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer
@@ -524,7 +523,7 @@ class SimGUIApp(QMainWindow):
                                    mount_path, exc)
             self.state_manager.notify_index_updated()
 
-        threading.Thread(target=_run, daemon=True).start()
+        QTimer.singleShot(0, _run)
 
     # ---- Menu callbacks -----------------------------------------------
 
