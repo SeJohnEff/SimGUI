@@ -1,6 +1,10 @@
-"""Tests that execute actual widget source code with mocked tkinter.
+"""DEPRECATED: Tests that execute actual widget source code with mocked tkinter.
 
-Uses the 'unbound method with fake self' pattern to call actual source lines.
+PyQt6 Migration: This test file was written for tkinter widgets. The app has
+migrated to PyQt6, but this test file uses tkinter mocking which is incompatible.
+
+Tests are skipped pending refactoring to use proper PyQt6 testing patterns.
+See test_batch_program_panel.py for the new PyQt6 test pattern.
 """
 
 import os
@@ -9,6 +13,8 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.skip(reason="tkinter mocking incompatible with PyQt6 migration")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

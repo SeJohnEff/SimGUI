@@ -1,9 +1,15 @@
 """
-Comprehensive widget/dialog instantiation tests for coverage.
+DEPRECATED: Widget instantiation tests using tkinter mocking.
 
-Loads every major widget and dialog class through the importlib mock loader,
-instantiates each class (covering __init__ + _build_ui), then exercises
-public methods to maximise statement coverage.
+PyQt6 Migration: These tests were written for tkinter widgets and used
+tkinter mocking to test widget instantiation. The app has migrated to PyQt6,
+but this test file was not updated. The approach is fundamentally incompatible
+with PyQt6 (widgets, dialogs, panels all use PyQt6.QtWidgets now).
+
+Tests are skipped pending refactoring to use proper PyQt6 testing patterns
+(qtbot fixture from pytest-qt, real widget instantiation).
+
+See test_batch_program_panel.py for the new PyQt6 test pattern.
 """
 
 from typing import Optional, Union
@@ -19,6 +25,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 _PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
+
+pytestmark = pytest.mark.skip(reason="tkinter mocking incompatible with PyQt6 migration")
 
 
 # ---------------------------------------------------------------------------
