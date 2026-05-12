@@ -35,7 +35,7 @@ _MACOS = sys.platform == "darwin"
 _SUDO = "/usr/bin/sudo"
 _MOUNT = "/usr/bin/mount"
 _UMOUNT = "/usr/bin/umount"
-_MOUNT_SMB_FS = "/sbin/mount_smbfs"  # macOS-specific
+_MOUNT_SMB_FS = "/sbin/mount_smbfs" if _MACOS else "/usr/bin/mount"
 
 
 @dataclass
@@ -360,21 +360,49 @@ class NetworkStorageManager:
             return [_SUDO, _MOUNT, "-t", "nfs",
                     "-o", opts, src, mp]
 
-        # SMB / CIFS — use mount_smbfs on all platforms
-        if profile.username:
-            user = quote(profile.username, safe="")
-            if profile.password:
-                pwd = quote(profile.password, safe="")
-                url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
+        # SMB / CIFS
+        if _MACOS:
+            # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
+            if profile.username:
+                user = quote(profile.username, safe="")
+                if profile.password:
+                    pwd = quote(profile.password, safe="")
+                    url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
+                else:
+                    url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
             else:
-                url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
+                url = f"//{profile.server}/{profile.share.lstrip('/')}"
+            cmd = [_SUDO, _MOUNT_SMB_FS]
+            if profile.mount_options:
+                cmd.extend(["-o", profile.mount_options])
+            cmd.extend([url, mp])
+            return cmd
+
+        # Linux CIFS
+        opts_parts = [
+            f"uid={os.getuid()}",
+            f"gid={os.getgid()}",
+            "file_mode=0664",
+            "dir_mode=0775",
+        ]
+        if profile.username:
+            cred_path = self._cred_file_path(profile.label)
+            if os.path.isfile(cred_path):
+                opts_parts.append(f"credentials={cred_path}")
+            else:
+                opts_parts.append(f"username={profile.username}")
+                if profile.password:
+                    opts_parts.append(f"password={profile.password}")
+                if profile.domain:
+                    opts_parts.append(f"domain={profile.domain}")
         else:
-            url = f"//{profile.server}/{profile.share.lstrip('/')}"
-        cmd = [_SUDO, _MOUNT_SMB_FS]
+            opts_parts.append("guest")
+
         if profile.mount_options:
-            cmd.extend(["-o", profile.mount_options])
-        cmd.extend([url, mp])
-        return cmd
+            opts_parts.append(profile.mount_options)
+
+        return [_SUDO, _MOUNT_SMB_FS, "-t", "cifs",
+                "-o", ",".join(opts_parts), src, mp]
 
     def _test_smb(self, profile: StorageProfile) -> tuple[bool, str]:
         """Test SMB connectivity with smbclient."""
