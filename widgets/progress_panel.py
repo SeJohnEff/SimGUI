@@ -79,6 +79,10 @@ class ProgressPanel(QWidget):
     def set_progress(self, value, maximum=100, label=None):
         """Update the progress bar value and optional label (thread-safe)."""
         def _do():
+            if hasattr(self, '_exists') and not self._exists:
+                return
+            if hasattr(self, 'winfo_exists') and not self.winfo_exists():
+                return
             if hasattr(self._progress_bar, '_cfg'):
                 self._progress_bar._cfg['maximum'] = maximum
                 self._progress_bar._cfg['value'] = value
