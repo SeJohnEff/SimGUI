@@ -82,7 +82,7 @@ class ProgressPanel(QWidget):
             if hasattr(self._progress_bar, '_cfg'):
                 self._progress_bar._cfg['maximum'] = maximum
                 self._progress_bar._cfg['value'] = value
-            else:
+            elif hasattr(self._progress_bar, 'setValue'):
                 self._progress_bar.setMaximum(maximum)
                 self._progress_bar.setValue(value)
             pct = int((value / maximum) * 100) if maximum > 0 else 0
