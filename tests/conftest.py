@@ -10,6 +10,17 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from PyQt6.QtWidgets import QApplication
+
+
+@pytest.fixture(scope='session', autouse=True)
+def qapp():
+    """Create a QApplication for the test session."""
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
 from managers.backup_manager import BackupManager
 from managers.card_manager import CardManager
 from managers.csv_manager import STANDARD_COLUMNS, CSVManager

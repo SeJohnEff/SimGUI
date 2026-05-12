@@ -29,6 +29,7 @@ from managers.network_storage_manager import (
     NetworkStorageManager,
     StorageProfile,
     _MOUNT,
+    _MOUNT_SMB_FS,
     _SUDO,
     _UMOUNT,
 )
@@ -73,7 +74,7 @@ class TestAbsolutePathsInCommands:
         p = StorageProfile(label="test", protocol="smb",
                            server="nas", share="data")
         cmd = ns._build_mount_cmd(p)
-        assert cmd[1] == "/usr/bin/mount", (
+        assert cmd[1] == _MOUNT_SMB_FS, (
             f"Second element should be absolute mount, got: {cmd[1]}")
 
     def test_build_mount_cmd_nfs_uses_absolute_paths(self):
@@ -103,7 +104,8 @@ class TestAbsolutePathsInCommands:
     def test_check_sudo_mount_checks_sudoers_file(self):
         """check_sudo_mount() checks for the sudoers drop-in file."""
         ns = NetworkStorageManager()
-        with patch("os.path.isfile",
+        with patch("managers.network_storage_manager._MACOS", False), \
+             patch("os.path.isfile",
                    return_value=True) as mock_isfile:
             result = ns.check_sudo_mount()
         assert result is True
@@ -147,16 +149,19 @@ class TestSudoersRuleMatching:
     """
 
     def test_smb_mount_matches_sudoers_pattern(self):
-        """SMB mount cmd: /usr/bin/mount -t cifs -o ... //server/share /tmp/..."""
+        """SMB mount cmd: platform-specific (macOS uses mount_smbfs, Linux uses mount -t cifs)."""
         ns = NetworkStorageManager()
         p = StorageProfile(label="sudoers_test", protocol="smb",
                            server="nas.local", share="simdata")
         cmd = ns._build_mount_cmd(p)
-        # Rule: /usr/bin/mount -t cifs *
-        # Command after sudo must be: /usr/bin/mount -t cifs ...
-        assert cmd[1] == "/usr/bin/mount"
-        assert cmd[2] == "-t"
-        assert cmd[3] == "cifs"
+        # macOS: /usr/bin/sudo /sbin/mount_smbfs ...
+        # Linux: /usr/bin/sudo /usr/bin/mount -t cifs ...
+        if sys.platform == "darwin":
+            assert cmd[1] == _MOUNT_SMB_FS
+        else:
+            assert cmd[1] == "/usr/bin/mount"
+            assert cmd[2] == "-t"
+            assert cmd[3] == "cifs"
 
     def test_nfs_mount_matches_sudoers_pattern(self):
         """NFS mount cmd: /usr/bin/mount -t nfs -o ... server:/path /tmp/..."""
@@ -276,7 +281,10 @@ class TestSudoPermissionDetection:
                                           stdout="")):
             ok, msg = ns.mount(p)
         assert ok is False
-        assert "simgui-setup-mount" in msg
+        if sys.platform == "darwin":
+            assert "macOS" in msg or "mount_smbfs" in msg
+        else:
+            assert "simgui-setup-mount" in msg
         assert "Mount failed" not in msg  # should NOT show raw error
 
     def test_unmount_returns_fix_message_on_sudo_error(self):
@@ -291,14 +299,22 @@ class TestSudoPermissionDetection:
                                           stdout="")):
             ok, msg = ns.unmount(p)
         assert ok is False
-        assert "simgui-setup-mount" in msg
+        if sys.platform == "darwin":
+            assert "macOS" in msg or "mount_smbfs" in msg
+        else:
+            assert "simgui-setup-mount" in msg
 
     def test_fix_message_contains_actionable_instructions(self):
         """The sudo fix message must tell the user exactly what to run."""
         msg = NetworkStorageManager._sudo_fix_message()
-        assert "sudo simgui-setup-mount" in msg
-        # Should also mention manual alternative
-        assert "sudoers" in msg.lower() or "/etc/sudoers.d/" in msg
+        if sys.platform == "darwin":
+            # macOS message mentions mount_smbfs or Finder
+            assert "mount_smbfs" in msg or "Finder" in msg
+        else:
+            # Linux message mentions simgui-setup-mount
+            assert "sudo simgui-setup-mount" in msg
+            # Should also mention manual alternative
+            assert "sudoers" in msg.lower() or "/etc/sudoers.d/" in msg
 
 
 # ---------------------------------------------------------------------------

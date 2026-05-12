@@ -241,7 +241,7 @@ class TestBatchProgramPanelInstantiation:
     def _make_panel(self):
         mod = _load_module("widgets/batch_program_panel.py",
                            "widgets.batch_program_panel")
-        parent = _FakeWidget()
+        parent = None
         cm = _mock.MagicMock()
         settings = _mock.MagicMock()
         settings.get.return_value = ""
@@ -506,7 +506,7 @@ class TestBatchProgramPanelInstantiation:
     def test_with_ns_manager(self):
         mod = _load_module("widgets/batch_program_panel.py",
                            "widgets.batch_program_panel")
-        parent = _FakeWidget()
+        parent = None
         cm = _mock.MagicMock()
         settings = _mock.MagicMock()
         settings.get.return_value = ""
@@ -518,7 +518,7 @@ class TestBatchProgramPanelInstantiation:
     def test_load_settings_with_values(self):
         mod = _load_module("widgets/batch_program_panel.py",
                            "widgets.batch_program_panel")
-        parent = _FakeWidget()
+        parent = None
         cm = _mock.MagicMock()
         settings = _mock.MagicMock()
         # Return non-empty values so all branches are exercised
@@ -548,7 +548,7 @@ class TestReadSIMPanelInstantiation:
     def _make_panel(self):
         mod = _load_module("widgets/read_sim_panel.py",
                            "widgets.read_sim_panel")
-        parent = _FakeWidget()
+        parent = None
         cm = _mock.MagicMock()
         panel = mod.ReadSIMPanel(parent, cm, ns_manager=None)
         return mod, panel, cm
@@ -673,7 +673,7 @@ class TestProgramSIMPanelInstantiation:
     def _make_panel(self):
         mod = _load_module("widgets/program_sim_panel.py",
                            "widgets.program_sim_panel")
-        parent = _FakeWidget()
+        parent = None
         cm = _mock.MagicMock()
         panel = mod.ProgramSIMPanel(parent, cm, ns_manager=None)
         return mod, panel, cm
@@ -999,7 +999,7 @@ class TestCSVEditorPanelInstantiation:
         import sys as _sys
         _sys.modules["tkinter.filedialog"] = mod.filedialog
         _sys.modules["tkinter.messagebox"] = mod.messagebox
-        parent = _FakeWidget()
+        parent = None
         panel = mod.CSVEditorPanel(parent, ns_manager=None)
         return mod, panel
 
@@ -1100,7 +1100,7 @@ class TestCardStatusPanelInstantiation:
     def _make_panel(self):
         mod = _load_module("widgets/card_status_panel.py",
                            "widgets.card_status_panel")
-        parent = _FakeWidget()
+        parent = None
         panel = mod.CardStatusPanel(parent)
         return mod, panel
 
@@ -1163,7 +1163,7 @@ class TestProgressPanelInstantiation:
     def _make_panel(self):
         mod = _load_module("widgets/progress_panel.py",
                            "widgets.progress_panel")
-        parent = _FakeWidget()
+        parent = None
         panel = mod.ProgressPanel(parent)
         return mod, panel
 
@@ -1207,7 +1207,7 @@ class TestNetworkStorageDialogInstantiation:
                 )
             }
         )
-        parent = _FakeWidget()
+        parent = None
         ns = _mock.MagicMock()
         ns.load_profiles.return_value = profiles or []
         ns.is_mounted.return_value = False
@@ -1280,7 +1280,7 @@ class TestNetworkStorageDialogInstantiation:
                                    DiscoveredServer=_mock.MagicMock,
                                )
                            })
-        parent = _FakeWidget()
+        parent = None
         ns = _mock.MagicMock()
         ns.load_profiles.return_value = [p]
         ns.is_mounted.return_value = True  # profile is mounted
@@ -1303,7 +1303,7 @@ class TestNetworkStorageDialogInstantiation:
                                    DiscoveredServer=_mock.MagicMock,
                                )
                            })
-        parent = _FakeWidget()
+        parent = None
         ns = _mock.MagicMock()
         ns.load_profiles.return_value = [p]
         ns.is_mounted.return_value = False
@@ -1329,7 +1329,7 @@ class TestNetworkStorageDialogInstantiation:
                                    DiscoveredServer=_mock.MagicMock,
                                )
                            })
-        parent = _FakeWidget()
+        parent = None
         ns = _mock.MagicMock()
         ns.load_profiles.return_value = [p]
         ns.is_mounted.return_value = True  # connected = disconnect path
@@ -1355,7 +1355,7 @@ class TestNetworkStorageDialogInstantiation:
                                    DiscoveredServer=_mock.MagicMock,
                                )
                            })
-        parent = _FakeWidget()
+        parent = None
         ns = _mock.MagicMock()
         ns.load_profiles.return_value = [p]
         ns.is_mounted.return_value = False
@@ -1391,7 +1391,7 @@ class TestArtifactExportDialogInstantiation:
         import sys as _sys
         _sys.modules["tkinter.filedialog"] = mod.filedialog
         _sys.modules["tkinter.messagebox"] = mod.messagebox
-        parent = _FakeWidget()
+        parent = None
         if records is None:
             records = [{"ICCID": "89001", "IMSI": "99988"}]
         dlg = mod.ArtifactExportDialog(parent, records, ns_manager=ns)
@@ -1482,7 +1482,7 @@ class TestArtifactExportDialogInstantiation:
     def test_default_fields(self):
         mod = _load_module("dialogs/artifact_export_dialog.py",
                            "dialogs.artifact_export_dialog")
-        parent = _FakeWidget()
+        parent = None
         dlg = mod.ArtifactExportDialog(parent, [{"ICCID": "89001"}],
                                         default_fields=["ICCID", "IMSI"])
         assert dlg._field_vars["ICCID"].get() is True

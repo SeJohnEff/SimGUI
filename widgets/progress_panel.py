@@ -79,22 +79,28 @@ class ProgressPanel(QWidget):
     def set_progress(self, value, maximum=100, label=None):
         """Update the progress bar value and optional label (thread-safe)."""
         def _do():
-            self._progress_bar.setMaximum(maximum)
-            self._progress_bar.setValue(value)
-            pct = int((value / maximum) * 100) if maximum > 0 else 0
-            self._percent_label.setText(f"{pct}%")
-            if label:
-                self._progress_label.setText(label)
+            try:
+                self._progress_bar.setMaximum(maximum)
+                self._progress_bar.setValue(value)
+                pct = int((value / maximum) * 100) if maximum > 0 else 0
+                self._percent_label.setText(f"{pct}%")
+                if label:
+                    self._progress_label.setText(label)
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _do)
 
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
         def _do():
-            if running:
-                self._progress_bar.setMaximum(0)
-            else:
-                self._progress_bar.setMaximum(100)
-                self._progress_bar.setValue(0)
+            try:
+                if running:
+                    self._progress_bar.setMaximum(0)
+                else:
+                    self._progress_bar.setMaximum(100)
+                    self._progress_bar.setValue(0)
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _do)
 
     def log(self, message):
@@ -102,23 +108,32 @@ class ProgressPanel(QWidget):
         ts = datetime.now().strftime('%H:%M:%S')
         msg = f"[{ts}] {message}"
         def _do():
-            self._log_text.appendPlainText(msg)
+            try:
+                self._log_text.appendPlainText(msg)
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _do)
 
     def clear_log(self):
         """Clear the log output (thread-safe)."""
         def _do():
-            self._log_text.clear()
+            try:
+                self._log_text.clear()
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _do)
 
     def reset(self):
         """Reset progress and label to idle state (thread-safe)."""
         self._cancel_event.clear()
         def _do():
-            self._progress_bar.setMaximum(100)
-            self._progress_bar.setValue(0)
-            self._progress_label.setText("Idle")
-            self._percent_label.setText("0%")
+            try:
+                self._progress_bar.setMaximum(100)
+                self._progress_bar.setValue(0)
+                self._progress_label.setText("Idle")
+                self._percent_label.setText("0%")
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _do)
 
     def cancel(self):
