@@ -86,8 +86,9 @@ class ProgressPanel(QWidget):
                 self._progress_bar.setMaximum(maximum)
                 self._progress_bar.setValue(value)
             pct = int((value / maximum) * 100) if maximum > 0 else 0
-            self._percent_label.setText(f"{pct}%")
-            if label:
+            if hasattr(self._percent_label, 'setText'):
+                self._percent_label.setText(f"{pct}%")
+            if label and hasattr(self._progress_label, 'setText'):
                 self._progress_label.setText(label)
         if hasattr(self._progress_bar, '_cfg'):
             _do()
