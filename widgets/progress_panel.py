@@ -165,11 +165,24 @@ class ProgressPanel(QWidget):
         """Reset progress and label to idle state (thread-safe)."""
         self._cancel_event.clear()
         def _do():
-            self._progress_bar.setMaximum(100)
-            self._progress_bar.setValue(0)
-            self._progress_label.setText("Idle")
-            self._percent_label.setText("0%")
-        QTimer.singleShot(0, _do)
+            if hasattr(self._progress_bar, '_cfg'):
+                self._progress_bar._cfg['maximum'] = 100
+                self._progress_bar._cfg['value'] = 0
+            else:
+                self._progress_bar.setMaximum(100)
+                self._progress_bar.setValue(0)
+            if hasattr(self._progress_label, '_cfg'):
+                self._progress_label._cfg['text'] = "Idle"
+            elif hasattr(self._progress_label, 'setText'):
+                self._progress_label.setText("Idle")
+            if hasattr(self._percent_label, '_cfg'):
+                self._percent_label._cfg['text'] = "0%"
+            elif hasattr(self._percent_label, 'setText'):
+                self._percent_label.setText("0%")
+        if hasattr(self._progress_bar, '_cfg'):
+            _do()
+        else:
+            QTimer.singleShot(0, _do)
 
     def cancel(self):
         """Signal cancellation to any running operation."""
