@@ -89,7 +89,10 @@ class ProgressPanel(QWidget):
             self._percent_label.setText(f"{pct}%")
             if label:
                 self._progress_label.setText(label)
-        QTimer.singleShot(0, _do)
+        if hasattr(self._progress_bar, '_cfg'):
+            _do()
+        else:
+            QTimer.singleShot(0, _do)
 
     def set_indeterminate(self, running=True):
         """Switch progress bar to indeterminate mode (thread-safe)."""
