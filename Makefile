@@ -5,7 +5,7 @@
 
 test: .venv
 	.venv/bin/python -m pip install -r requirements-dev.txt
-	.venv/bin/python -m pytest -x -q
+	.venv/bin/python -m pytest -x -q --cov=. --cov-report=term
 
 lint:
 	python3 -m ruff check .
