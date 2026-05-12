@@ -30,10 +30,8 @@ from PyQt6.QtWidgets import (
 )
 
 from managers.auto_artifact_manager import AutoArtifactManager
-from managers.backup_manager import BackupManager
 from managers.card_manager import CardManager, CLIBackend
 from managers.card_watcher import CardWatcher
-from managers.csv_manager import SIM_DATA_FILETYPES
 from managers.iccid_index import IccidIndex
 from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
@@ -246,7 +244,6 @@ class SimGUIApp(QMainWindow):
 
         # ---- Managers (framework-independent) ----------------------------
         self._card_manager = CardManager()
-        self._backup_manager = BackupManager()
         self._settings = SettingsManager()
         self._ns_manager = NetworkStorageManager(self._settings)
         self._iccid_index = IccidIndex()
