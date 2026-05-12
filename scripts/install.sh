@@ -48,6 +48,9 @@ if ! apt-get update -qq 2>&1; then
 fi
 apt-get install -y -qq git dpkg-dev debhelper pcscd pcsc-tools python3-pyscard 2>&1 | grep -v "is already the newest" || true
 
+info "Installing Qt runtime dependencies..."
+apt-get install -y -qq libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 2>&1 | grep -v "is already the newest" || true
+
 # Enable pcscd so the reader is detected immediately and on reboot
 info "Enabling pcscd service..."
 systemctl enable pcscd 2>/dev/null || warn "Could not enable pcscd (socket activation may handle it)"
