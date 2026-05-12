@@ -4,6 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PyQt6.QtWidgets import QFileDialog
 
 from managers.card_manager import CardManager
 from managers.settings_manager import SettingsManager
@@ -13,6 +14,16 @@ from widgets.batch_program_panel import BatchProgramPanel
 pytestmark = pytest.mark.skipif(
     not os.environ.get("DISPLAY"), reason="No DISPLAY — headless environment"
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_file_dialog(monkeypatch):
+    """Mock QFileDialog.getOpenFileName to prevent blocking dialogs."""
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *a, **k: ("/tmp/test.csv", "")
+    )
 
 
 @pytest.fixture
