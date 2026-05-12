@@ -338,3 +338,17 @@ class BatchProgramPanel(QWidget):
 
     def _on_export_results(self):
         pass
+
+    def _log(self, msg: str) -> None:
+        """Append a message to the log text widget."""
+        self._log_text.appendPlainText(msg)
+
+    def _check_iccid_index_duplicates(self) -> None:
+        """Check for ICCIDs already in the index and log warnings."""
+        if not self._iccid_index:
+            return
+        for record in self._preview_data:
+            iccid = record.get("ICCID")
+            if iccid and self._iccid_index.lookup(iccid):
+                self._log(f"Warning: {iccid} already programmed")
+
