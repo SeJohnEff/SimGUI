@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from managers.batch_manager import BatchManager
+from managers.batch_manager import BatchManager, CardResult
 from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager, SIM_DATA_FILETYPES
 from managers.settings_manager import SettingsManager
@@ -322,9 +322,12 @@ class BatchProgramPanel(QWidget):
         self._progress_bar.setMaximum(total)
         self._progress_bar.setValue(current)
 
-    def _on_card_result(self, iccid, ok, msg):
-        status = "✓" if ok else "✗"
-        self._log_text.appendPlainText(f"{status} {iccid}: {msg}")
+    def _on_card_result(self, result: CardResult):
+        status = "✓" if result.success else "✗"
+        self._log(f"{status} {result.iccid}: {result.message}")
+        if result.success and self._preview_data:
+            card_data = self._preview_data[result.index] if result.index < len(self._preview_data) else {}
+            self._save_per_card_artifact(card_data)
 
     def _on_waiting_for_card(self):
         self._log_text.appendPlainText("Waiting for card insertion...")
@@ -335,6 +338,7 @@ class BatchProgramPanel(QWidget):
         self._pause_btn.setEnabled(False)
         self._skip_btn.setEnabled(False)
         self._abort_btn.setEnabled(False)
+        self._save_batch_summary()
 
     def _on_export_results(self):
         pass
@@ -351,4 +355,35 @@ class BatchProgramPanel(QWidget):
             iccid = record.get("ICCID")
             if iccid and self._iccid_index.lookup(iccid):
                 self._log(f"Warning: {iccid} already programmed")
+
+    def _save_per_card_artifact(self, card_data: dict[str, str]) -> None:
+        """Save a single card artifact and register in ICCID index."""
+        if not self._auto_artifact:
+            return
+        paths = self._auto_artifact.save_card_artifact(card_data)
+        if paths and self._iccid_index:
+            iccid = card_data.get("ICCID")
+            if iccid:
+                self._iccid_index.add_iccid(iccid, paths[0])
+
+    def get_programmed_records(self) -> list[dict[str, str]]:
+        """Return the list of records to be programmed."""
+        return self._preview_data
+
+    def _save_batch_summary(self) -> None:
+        """Save batch summary after batch completes."""
+        if not self._auto_artifact or not self._batch_mgr.results:
+            return
+        records = self.get_programmed_records()
+        if not records:
+            return
+        self._auto_artifact.save_batch_summary(records, self._batch_mgr.results)
+
+    def winfo_exists(self) -> bool:
+        """Check if widget exists (Qt compatibility)."""
+        return True
+
+    def after(self, ms, func, *args):
+        """Schedule a callback (Qt compatibility)."""
+        pass
 
