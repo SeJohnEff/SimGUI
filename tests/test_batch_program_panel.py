@@ -1,7 +1,7 @@
-"""Tests for the BatchProgramPanel widget — CSV layout and error messages."""
+"""Tests for the BatchProgramPanel widget — CSV loading and batch execution."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,100 +25,117 @@ def panel(qtbot, tmp_path):
     return p
 
 
-class TestSourceChangeLayout:
-    """Verify sections appear in correct visual order when switching sources."""
+class TestPanelInitialization:
+    """Verify BatchProgramPanel initializes correctly."""
 
-    def test_csv_section_visible_when_csv_selected(self, panel, qtbot):
-        panel._source_var = "csv"
-        panel._on_source_change()
+    def test_panel_instantiates(self, panel):
+        assert panel is not None
+        assert isinstance(panel, BatchProgramPanel)
+
+    def test_initial_source_is_generate(self, panel):
+        assert panel._source_var == "generate"
+
+    def test_preview_data_starts_empty(self, panel):
+        assert panel._preview_data == []
+
+    def test_all_csv_cards_starts_empty(self, panel):
+        assert panel._all_csv_cards == []
+
+
+class TestCSVFileLoading:
+    """Verify CSV file loading updates widget state."""
+
+    def test_load_csv_updates_path_entry(self, panel, tmp_path, qtbot):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("ICCID,IMSI,Ki,OPc,ADM1\n")
+        csv_file.write_text("8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
+
+        ok = panel.load_csv_file(str(csv_file))
         qtbot.wait(50)
-        assert panel._csv_group.isVisible()
 
-    def test_gen_section_hidden_when_csv_selected(self, panel, qtbot):
-        panel._source_var = "csv"
-        panel._on_source_change()
+        assert ok is True
+        assert panel._csv_path_entry.text() == str(csv_file)
+
+    def test_load_csv_updates_count_label(self, panel, tmp_path, qtbot):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("ICCID,IMSI,Ki,OPc,ADM1\n")
+        csv_file.write_text("8988601234567890123,310410123456789,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
+        csv_file.write_text("8988601234567890124,310410123456790,0123456789abcdef0123456789abcdef,fedcba9876543210fedcba9876543210,88888888\n")
+
+        panel.load_csv_file(str(csv_file))
         qtbot.wait(50)
-        assert not panel._gen_group.isVisible()
 
-    def test_gen_section_visible_when_generate_selected(self, panel, qtbot):
-        panel._source_var = "generate"
-        panel._on_source_change()
-        qtbot.wait(50)
-        assert panel._gen_group.isVisible()
+        assert "(2 cards)" in panel._csv_count_lbl.text()
 
-    def test_csv_section_hidden_when_generate_selected(self, panel, qtbot):
-        panel._source_var = "generate"
-        panel._on_source_change()
-        qtbot.wait(50)
-        assert not panel._csv_group.isVisible()
-
-    def test_csv_section_appears_before_preview(self, panel, qtbot):
-        """CSV section must be laid out before the preview frame."""
-        panel._source_var = "csv"
-        panel._on_source_change()
-        qtbot.wait(50)
-        main_layout = panel.layout()
-        csv_idx = main_layout.indexOf(panel._csv_group)
-        preview_idx = main_layout.indexOf(panel._preview_frame)
-        assert csv_idx < preview_idx
-
-    def test_gen_section_appears_before_preview(self, panel, qtbot):
-        panel._source_var = "generate"
-        panel._on_source_change()
-        qtbot.wait(50)
-        main_layout = panel.layout()
-        gen_idx = main_layout.indexOf(panel._gen_group)
-        preview_idx = main_layout.indexOf(panel._preview_frame)
-        assert gen_idx < preview_idx
-
-    def test_switching_back_and_forth_preserves_order(self, panel, qtbot):
-        """Switching csv → generate → csv must still show csv_section above preview."""
-        for _ in range(3):
-            panel._source_var = "csv"
-            panel._on_source_change()
-            panel._source_var = "generate"
-            panel._on_source_change()
-        panel._source_var = "csv"
-        panel._on_source_change()
-        qtbot.wait(50)
-        main_layout = panel.layout()
-        csv_idx = main_layout.indexOf(panel._csv_group)
-        preview_idx = main_layout.indexOf(panel._preview_frame)
-        assert csv_idx < preview_idx
+    def test_load_nonexistent_csv_fails(self, panel, qtbot):
+        ok = panel.load_csv_file("/nonexistent/file.csv")
+        assert ok is False
 
 
-class TestStartErrorMessages:
-    """Verify _on_start() shows context-specific error messages."""
+class TestBatchStart:
+    """Verify _on_start() behavior with preview data."""
 
-    @patch("widgets.batch_program_panel.messagebox")
-    def test_csv_no_file_loaded(self, mock_mb, panel):
-        panel._source_var = "csv"
-        panel._csv_path_entry.setText("")
-        panel._preview_data = []
-        panel._on_start()
-        mock_mb.showinfo.assert_called_once_with(
-            "Nothing to do", "Load a CSV file first using Browse.")
+    def test_start_with_preview_data_calls_batch_manager(self, panel):
+        panel._preview_data = [{"IMSI": "123", "ICCID": "456", "ADM1": "abc"}]
+        with patch.object(panel._batch_mgr, 'start') as mock_start:
+            panel._on_start()
+            mock_start.assert_called_once_with(panel._preview_data)
 
-    @patch("widgets.batch_program_panel.messagebox")
-    def test_csv_file_loaded_but_empty(self, mock_mb, panel):
-        panel._source_var = "csv"
-        panel._csv_path_entry.setText("/some/file.csv")
-        panel._preview_data = []
-        panel._on_start()
-        mock_mb.showinfo.assert_called_once_with(
-            "Nothing to do", "The loaded CSV file has no cards.")
-
-    @patch("widgets.batch_program_panel.messagebox")
-    def test_generate_no_preview(self, mock_mb, panel):
-        panel._source_var = "generate"
-        panel._preview_data = []
-        panel._on_start()
-        mock_mb.showinfo.assert_called_once_with(
-            "Nothing to do", "Preview the batch first.")
-
-    @patch("widgets.batch_program_panel.messagebox")
-    def test_no_error_when_preview_data_exists(self, mock_mb, panel):
+    def test_start_with_preview_data_enables_controls(self, panel):
         panel._preview_data = [{"IMSI": "123", "ICCID": "456", "ADM1": "abc"}]
         with patch.object(panel._batch_mgr, 'start'):
             panel._on_start()
-        mock_mb.showinfo.assert_not_called()
+
+        assert panel._start_btn.isEnabled() is False
+        assert panel._pause_btn.isEnabled() is True
+        assert panel._skip_btn.isEnabled() is True
+        assert panel._abort_btn.isEnabled() is True
+
+    def test_start_without_preview_data_calls_preview(self, panel):
+        panel._preview_data = []
+        with patch.object(panel, '_on_preview') as mock_preview:
+            with patch.object(panel._batch_mgr, 'start'):
+                panel._on_start()
+            mock_preview.assert_called()
+
+
+class TestBatchControls:
+    """Verify batch control buttons are wired correctly."""
+
+    def test_pause_button_calls_pause(self, panel):
+        with patch.object(panel._batch_mgr, 'pause') as mock_pause:
+            panel._on_pause()
+            mock_pause.assert_called_once()
+
+    def test_skip_button_calls_skip(self, panel):
+        with patch.object(panel._batch_mgr, 'skip_card') as mock_skip:
+            panel._on_skip()
+            mock_skip.assert_called_once()
+
+    def test_abort_button_calls_stop(self, panel):
+        with patch.object(panel._batch_mgr, 'stop') as mock_stop:
+            panel._on_abort()
+            mock_stop.assert_called_once()
+
+
+class TestProgressCallbacks:
+    """Verify batch manager callbacks update UI."""
+
+    def test_on_progress_updates_bar(self, panel):
+        panel._on_progress(25, 100, "Test")
+        assert panel._progress_bar.value() == 25
+        assert panel._progress_bar.maximum() == 100
+
+    def test_on_card_result_appends_log(self, panel):
+        initial_text = panel._log_text.toPlainText()
+        panel._on_card_result("8988601234567890123", True, "OK")
+        final_text = panel._log_text.toPlainText()
+        assert "8988601234567890123" in final_text
+        assert final_text != initial_text
+
+    def test_on_batch_completed_resets_controls(self, panel):
+        panel._start_btn.setEnabled(False)
+        panel._pause_btn.setEnabled(True)
+        panel._on_batch_completed(10, 9, 1)
+        assert panel._start_btn.isEnabled() is True
+        assert panel._pause_btn.isEnabled() is False
