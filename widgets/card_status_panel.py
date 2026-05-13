@@ -6,24 +6,33 @@ Shows the current card state.  Card detection is handled automatically
 by :class:`CardWatcher` — there is no manual "Detect Card" button.
 """
 
-import tkinter as tk
-from tkinter import ttk
+import os
 from typing import Optional
 
-from theme import ModernTheme
-from widgets.tooltip import add_tooltip
+from PyQt6.QtWidgets import (
+    QGroupBox,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
+
 from state_manager import StateManager, CardInfo
 
 
-class CardStatusPanel(ttk.LabelFrame):
+class CardStatusPanel(QGroupBox):
     """Panel showing card detection and status"""
 
     def __init__(self, parent=None, state_manager: Optional[StateManager] = None, **kwargs):
-        padding = ModernTheme.get_padding('medium')
-        super().__init__(parent, text="Card Status", padding=padding, **kwargs)
+        super().__init__("Card Status", parent)
         self.state_manager = state_manager
         self.on_detect_callback = None
         self.on_authenticate_callback = None
+        self._info_vars = {}
         self._create_widgets()
         self.set_status("waiting", "Insert a SIM card...")
 
@@ -31,55 +40,87 @@ class CardStatusPanel(ttk.LabelFrame):
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
 
     def _create_widgets(self):
-        pad_s = ModernTheme.get_padding('small')
-        pad_m = ModernTheme.get_padding('medium')
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(8, 8, 8, 8)
 
         # Status row
-        status_frame = ttk.Frame(self)
-        status_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, pad_m))
-        ttk.Label(status_frame, text="Status:", style='Subheading.TLabel').pack(
-            side=tk.LEFT, padx=(0, pad_s))
-        self.status_indicator = tk.Canvas(status_frame, width=12, height=12,
-                                          bg=ModernTheme.get_color('panel_bg'),
-                                          highlightthickness=0)
-        self.status_indicator.pack(side=tk.LEFT, padx=(0, pad_s))
-        self.status_label = ttk.Label(status_frame, text="")
-        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        status_layout = QHBoxLayout()
+        status_label = QLabel("Status:")
+        status_label.setStyleSheet("font-weight: bold;")
+        status_layout.addWidget(status_label)
 
-        # Card info rows
-        info_labels = [('Card Type:', 'card_type'), ('IMSI:', 'imsi'),
-                       ('ICCID:', 'iccid'), ('ACC:', 'acc'),
-                       ('SPN:', 'spn'), ('FPLMN:', 'fplmn'),
-                       ('Auth:', 'auth'), ('ADM1 Left:', 'adm1_attempts'),
-                       ('Source:', 'source_file')]
-        self._info_vars = {}
-        for i, (label_text, key) in enumerate(info_labels, start=1):
-            ttk.Label(self, text=label_text, style='Subheading.TLabel').grid(
-                row=i, column=0, sticky=tk.W, padx=(0, pad_s), pady=2)
-            var = tk.StringVar(value='-')
-            entry = ttk.Entry(self, textvariable=var,
-                              state="readonly", style="Copyable.TEntry")
-            entry.grid(row=i, column=1, sticky=(tk.W, tk.E), pady=2)
-            self._info_vars[key] = var
+        self.status_indicator = QLabel()
+        self.status_indicator.setFixedSize(12, 12)
+        status_layout.addWidget(self.status_indicator)
 
-        self.columnconfigure(1, weight=1)
+        self.status_label = QLineEdit()
+        self.status_label.setReadOnly(True)
+        status_layout.addWidget(self.status_label)
+        status_layout.addStretch()
 
-        # Already-programmed indicator (hidden by default)
-        self._programmed_label = ttk.Label(
-            self, text="", style='Small.TLabel')
+        main_layout.addLayout(status_layout)
+
+        # Card info grid
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        grid.setColumnStretch(1, 1)
+
+        info_labels = [
+            ('Card Type:', 'card_type'),
+            ('IMSI:', 'imsi'),
+            ('ICCID:', 'iccid'),
+            ('ACC:', 'acc'),
+            ('SPN:', 'spn'),
+            ('FPLMN:', 'fplmn'),
+            ('Auth:', 'auth'),
+            ('ADM1 Left:', 'adm1_attempts'),
+            ('Source:', 'source_file'),
+        ]
+
+        for i, (label_text, key) in enumerate(info_labels):
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold;")
+            grid.addWidget(label, i, 0)
+
+            entry = QLineEdit()
+            entry.setReadOnly(True)
+            entry.setText('-')
+            grid.addWidget(entry, i, 1)
+            self._info_vars[key] = entry
 
         self._num_info_rows = len(info_labels)
+        main_layout.addLayout(grid)
 
-        # Buttons — no "Detect Card", detection is automatic
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=self._num_info_rows + 1, column=0, columnspan=2,
-                       sticky=(tk.W, tk.E), pady=(pad_m, 0))
-        # Rows after buttons: +2 = blocked banner, +3 = programmed,
-        # +4 = simulator label
-        _auth_btn = ttk.Button(btn_frame, text="Authenticate",
-                   command=lambda: self.on_authenticate_callback and self.on_authenticate_callback())
-        _auth_btn.pack(side=tk.LEFT)
-        add_tooltip(_auth_btn, "Enter ADM1 to authenticate")
+        # Already-programmed indicator
+        self._programmed_label = QLabel()
+        self._programmed_label.setStyleSheet("color: orange; font-weight: bold;")
+        self._programmed_label.setText("⚠ Already programmed (artifact exists)")
+        self._programmed_label.hide()
+        main_layout.addWidget(self._programmed_label)
+
+        # Authenticate button
+        self._auth_btn = QPushButton("Authenticate")
+        self._auth_btn.clicked.connect(self._on_authenticate_clicked)
+        main_layout.addWidget(self._auth_btn)
+
+        # Blocked indicator
+        self._blocked_label = QLabel("⛔ CARD BLOCKED — Cannot be programmed")
+        self._blocked_label.setStyleSheet("background-color: #CC0000; color: white; font-weight: bold; padding: 8px;")
+        self._blocked_label.hide()
+        main_layout.addWidget(self._blocked_label)
+
+        # Simulator info
+        self._sim_label = QLabel()
+        self._sim_label.setStyleSheet("font-size: 9pt;")
+        self._sim_label.hide()
+        main_layout.addWidget(self._sim_label)
+
+        main_layout.addStretch()
+
+    def _on_authenticate_clicked(self):
+        if self.on_authenticate_callback:
+            self.on_authenticate_callback()
 
     def _on_card_info_changed(self, card_info: CardInfo):
         """Update all labels when CardInfo changes."""
@@ -97,93 +138,79 @@ class CardStatusPanel(ttk.LabelFrame):
 
     def set_status(self, state, message=""):
         colors = {
-            'waiting': ModernTheme.get_color('warning'),
-            'detected': ModernTheme.get_color('accent'),
-            'authenticated': ModernTheme.get_color('success'),
-            'error': ModernTheme.get_color('error'),
-            'blocked': '#CC0000',  # deep red for blocked
+            'waiting': QColor('#FFA500'),
+            'detected': QColor('#0078D4'),
+            'authenticated': QColor('#107C10'),
+            'error': QColor('#E81123'),
+            'blocked': QColor('#CC0000'),
         }
-        color = colors.get(state, ModernTheme.get_color('disabled'))
-        self.status_indicator.delete('all')
-        self.status_indicator.create_oval(2, 2, 10, 10, fill=color, outline=color)
-        self.status_label.configure(text=message)
+        color = colors.get(state, QColor('#CCCCCC'))
+        pixmap = self.status_indicator.pixmap()
+        if pixmap is None or pixmap.isNull():
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap(12, 12)
+        pixmap.fill(color)
+        self.status_indicator.setPixmap(pixmap)
+        self.status_label.setText(message)
 
     def set_card_info(self, card_type=None, imsi=None, iccid=None,
                        acc=None, spn=None, fplmn=None,
                        source_file=None):
         if card_type is not None:
-            self._info_vars['card_type'].set(card_type)
+            self._info_vars['card_type'].setText(card_type)
         if imsi is not None:
-            self._info_vars['imsi'].set(imsi)
+            self._info_vars['imsi'].setText(imsi)
         if iccid is not None:
-            self._info_vars['iccid'].set(iccid)
+            self._info_vars['iccid'].setText(iccid)
         if acc is not None:
-            self._info_vars['acc'].set(acc)
+            self._info_vars['acc'].setText(acc)
         if spn is not None:
-            self._info_vars['spn'].set(spn)
+            self._info_vars['spn'].setText(spn)
         if fplmn is not None:
-            self._info_vars['fplmn'].set(fplmn)
+            self._info_vars['fplmn'].setText(fplmn)
         if source_file is not None:
-            import os
-            self._info_vars['source_file'].set(
+            self._info_vars['source_file'].setText(
                 os.path.basename(source_file) if source_file else '-')
 
     def set_auth_status(self, authenticated):
-        self._info_vars['auth'].set('Yes' if authenticated else 'No')
+        self._info_vars['auth'].setText('Yes' if authenticated else 'No')
 
     def set_adm1_attempts(self, remaining):
         """Update the ADM1 remaining attempts display."""
         if remaining is None:
-            self._info_vars['adm1_attempts'].set('-')
+            self._info_vars['adm1_attempts'].setText('-')
         elif remaining == 0:
-            self._info_vars['adm1_attempts'].set('BLOCKED (0)')
+            self._info_vars['adm1_attempts'].setText('BLOCKED (0)')
         elif remaining <= 1:
-            self._info_vars['adm1_attempts'].set(f'{remaining} (DANGER!)')
+            self._info_vars['adm1_attempts'].setText(f'{remaining} (DANGER!)')
         else:
-            self._info_vars['adm1_attempts'].set(str(remaining))
+            self._info_vars['adm1_attempts'].setText(str(remaining))
 
     def set_blocked_indicator(self, is_blocked):
         """Show or hide the 'CARD BLOCKED' banner."""
-        if not hasattr(self, '_blocked_label'):
-            self._blocked_label = tk.Label(
-                self, text="⛔ CARD BLOCKED — Cannot be programmed",
-                bg='#CC0000', fg='white',
-                font=('TkDefaultFont', 10, 'bold'),
-                padx=8, pady=4, anchor='w')
         if is_blocked:
-            self._blocked_label.grid(
-                row=self._num_info_rows + 2, column=0, columnspan=2,
-                sticky=(tk.W, tk.E), pady=(8, 0))
+            self._blocked_label.show()
         else:
-            self._blocked_label.grid_remove()
+            self._blocked_label.hide()
 
     def set_programmed_indicator(self, already_programmed):
         """Show or hide the 'already programmed' warning."""
         if already_programmed:
-            self._programmed_label.configure(
-                text="⚠ Already programmed (artifact exists)")
-            self._programmed_label.grid(
-                row=self._num_info_rows + 3, column=0, columnspan=2,
-                sticky=tk.W, pady=(4, 0))
+            self._programmed_label.show()
         else:
-            self._programmed_label.grid_remove()
+            self._programmed_label.hide()
 
     def clear_card_info(self):
         """Reset all info fields to defaults (card removed)."""
         for var in self._info_vars.values():
-            var.set('-')
-        self._programmed_label.grid_remove()
-        if hasattr(self, '_blocked_label'):
-            self._blocked_label.grid_remove()
+            var.setText('-')
+        self._programmed_label.hide()
+        self._blocked_label.hide()
 
     def set_simulator_info(self, card_index, total_cards):
         """Show or hide the virtual card indicator below the buttons."""
-        if not hasattr(self, '_sim_label'):
-            self._sim_label = ttk.Label(self, text="", style='Small.TLabel')
         if card_index is not None and total_cards is not None:
-            self._sim_label.configure(
-                text=f"Virtual card {card_index + 1} of {total_cards}")
-            self._sim_label.grid(row=self._num_info_rows + 4, column=0,
-                                 columnspan=2, sticky=tk.W, pady=(4, 0))
+            self._sim_label.setText(f"Virtual card {card_index + 1} of {total_cards}")
+            self._sim_label.show()
         else:
-            self._sim_label.grid_remove()
+            self._sim_label.hide()
