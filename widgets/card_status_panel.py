@@ -18,7 +18,7 @@ from state_manager import StateManager, CardInfo
 class CardStatusPanel(ttk.LabelFrame):
     """Panel showing card detection and status"""
 
-    def __init__(self, parent, state_manager: Optional[StateManager] = None, **kwargs):
+    def __init__(self, parent=None, state_manager: Optional[StateManager] = None, **kwargs):
         padding = ModernTheme.get_padding('medium')
         super().__init__(parent, text="Card Status", padding=padding, **kwargs)
         self.state_manager = state_manager
