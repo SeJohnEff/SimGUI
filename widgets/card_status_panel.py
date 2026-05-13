@@ -44,20 +44,22 @@ class CardStatusPanel(QGroupBox):
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Status row
+        # Status row with indicator and message
         status_layout = QHBoxLayout()
         status_label = QLabel("Status:")
-        status_label.setStyleSheet("font-weight: bold;")
+        status_label.setStyleSheet("font-weight: bold; min-width: 50px;")
         status_layout.addWidget(status_label)
 
         self.status_indicator = QLabel()
-        self.status_indicator.setFixedSize(12, 12)
+        self.status_indicator.setFixedSize(16, 16)
+        self.status_indicator.setStyleSheet("border-radius: 8px;")
         status_layout.addWidget(self.status_indicator)
 
-        self.status_label = QLineEdit()
-        self.status_label.setReadOnly(True)
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("padding: 4px; margin-left: 8px;")
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumHeight(30)
         status_layout.addWidget(self.status_label)
-        status_layout.addStretch()
 
         main_layout.addLayout(status_layout)
 
@@ -85,7 +87,8 @@ class CardStatusPanel(QGroupBox):
 
             entry = QLineEdit()
             entry.setReadOnly(True)
-            entry.setText('-')
+            entry.setText('Not available')
+            entry.setStyleSheet("color: #808080;")
             grid.addWidget(entry, i, 1)
             self._info_vars[key] = entry
 
@@ -137,21 +140,28 @@ class CardStatusPanel(QGroupBox):
         self.set_programmed_indicator(card_info.already_programmed)
 
     def set_status(self, state, message=""):
-        colors = {
-            'waiting': QColor('#FFA500'),
-            'detected': QColor('#0078D4'),
-            'authenticated': QColor('#107C10'),
-            'error': QColor('#E81123'),
-            'blocked': QColor('#CC0000'),
+        status_messages = {
+            'waiting': 'Waiting for card insertion',
+            'no_reader': 'No card reader detected',
+            'reading': 'Reading card data...',
+            'detected': 'Card detected',
+            'authenticated': 'Card authenticated',
+            'error': 'Error reading card',
+            'blocked': 'Card blocked - cannot program',
         }
-        color = colors.get(state, QColor('#CCCCCC'))
-        pixmap = self.status_indicator.pixmap()
-        if pixmap is None or pixmap.isNull():
-            from PyQt6.QtGui import QPixmap
-            pixmap = QPixmap(12, 12)
-        pixmap.fill(color)
-        self.status_indicator.setPixmap(pixmap)
-        self.status_label.setText(message)
+        colors = {
+            'waiting': '#FFA500',
+            'no_reader': '#999999',
+            'reading': '#0078D4',
+            'detected': '#0078D4',
+            'authenticated': '#107C10',
+            'error': '#E81123',
+            'blocked': '#CC0000',
+        }
+        color = colors.get(state, '#CCCCCC')
+        self.status_indicator.setStyleSheet(f"border-radius: 8px; background-color: {color};")
+        display_message = message or status_messages.get(state, 'Unknown state')
+        self.status_label.setText(display_message)
 
     def set_card_info(self, card_type=None, imsi=None, iccid=None,
                        acc=None, spn=None, fplmn=None,
@@ -178,11 +188,11 @@ class CardStatusPanel(QGroupBox):
     def set_adm1_attempts(self, remaining):
         """Update the ADM1 remaining attempts display."""
         if remaining is None:
-            self._info_vars['adm1_attempts'].setText('-')
+            self._info_vars['adm1_attempts'].setText('Not available')
         elif remaining == 0:
-            self._info_vars['adm1_attempts'].setText('BLOCKED (0)')
+            self._info_vars['adm1_attempts'].setText('⛔ BLOCKED (0)')
         elif remaining <= 1:
-            self._info_vars['adm1_attempts'].setText(f'{remaining} (DANGER!)')
+            self._info_vars['adm1_attempts'].setText(f'⚠ {remaining} (DANGER!)')
         else:
             self._info_vars['adm1_attempts'].setText(str(remaining))
 
@@ -203,7 +213,7 @@ class CardStatusPanel(QGroupBox):
     def clear_card_info(self):
         """Reset all info fields to defaults (card removed)."""
         for var in self._info_vars.values():
-            var.setText('-')
+            var.setText('Not available')
         self._programmed_label.hide()
         self._blocked_label.hide()
 
