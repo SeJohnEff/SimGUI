@@ -158,8 +158,8 @@ class ReadSIMPanel(QWidget):
         self._csv_adm_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         auth_input_layout.addWidget(self._csv_adm_btn, 0, 3)
 
-        auth_input_layout.setColumnStretch(1, 1)
-        auth_input_layout.setColumnStretch(2, 0)
+        auth_input_layout.setColumnStretch(1, 2)
+        auth_input_layout.setColumnStretch(2, 1)
         auth_input_layout.setColumnStretch(3, 1)
         auth_layout_outer.addLayout(auth_input_layout)
 
