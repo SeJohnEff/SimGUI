@@ -106,7 +106,6 @@ class CardStatusPanel(QGroupBox):
         # Authenticate button
         self._auth_btn = QPushButton("Authenticate")
         self._auth_btn.clicked.connect(self._on_authenticate_clicked)
-        main_layout.addWidget(self._auth_btn, row, 0, 1, 2)
 
         row += 1
 
