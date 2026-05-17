@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 
 from managers.card_manager import CardManager
 from managers.csv_manager import CSVManager, SIM_DATA_FILETYPES
+from qt_theme import QtTheme
 from state_manager import StateManager, CardInfo, CardState
 from utils import get_browse_initial_dir
 
@@ -208,11 +209,11 @@ class ProgramSIMPanel(QWidget):
         self._action_status.setPlainText(text)
         # Color codes for status
         if style == "success":
-            self._action_status.setStyleSheet("color: #2e7d32;")
+            self._action_status.setStyleSheet(f"color: {QtTheme.get_color('success')};")
         elif style == "warning":
-            self._action_status.setStyleSheet("color: #e65100;")
+            self._action_status.setStyleSheet(f"color: {QtTheme.get_color('warning')};")
         elif style == "error":
-            self._action_status.setStyleSheet("color: #c62828;")
+            self._action_status.setStyleSheet(f"color: {QtTheme.get_color('error')};")
         else:
             self._action_status.setStyleSheet("")
 

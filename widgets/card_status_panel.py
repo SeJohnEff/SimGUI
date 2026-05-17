@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
+from qt_theme import QtTheme
 from state_manager import StateManager, CardInfo
 
 
@@ -88,7 +89,7 @@ class CardStatusPanel(QGroupBox):
             entry = QLineEdit()
             entry.setReadOnly(True)
             entry.setText('Not available')
-            entry.setStyleSheet("color: #808080;")
+            entry.setStyleSheet(f"color: {QtTheme.get_color('muted_text')};")
             main_layout.addWidget(entry, row + visual_row, visual_col * 2 + 1)
             self._info_vars[key] = entry
 
@@ -96,7 +97,7 @@ class CardStatusPanel(QGroupBox):
 
         # Already-programmed indicator
         self._programmed_label = QLabel()
-        self._programmed_label.setStyleSheet("color: orange; font-weight: bold;")
+        self._programmed_label.setStyleSheet(f"color: {QtTheme.get_color('warning')}; font-weight: bold;")
         self._programmed_label.setText("⚠ Already programmed (artifact exists)")
         self._programmed_label.hide()
         main_layout.addWidget(self._programmed_label, row, 0, 1, 4)
@@ -111,7 +112,7 @@ class CardStatusPanel(QGroupBox):
 
         # Blocked indicator
         self._blocked_label = QLabel("⛔ CARD BLOCKED — Cannot be programmed")
-        self._blocked_label.setStyleSheet("background-color: #CC0000; color: white; font-weight: bold; padding: 4px;")
+        self._blocked_label.setStyleSheet(f"background-color: {QtTheme.get_color('error')}; color: white; font-weight: bold; padding: 4px;")
         self._blocked_label.hide()
         main_layout.addWidget(self._blocked_label, row, 0, 1, 4)
 
@@ -164,15 +165,15 @@ class CardStatusPanel(QGroupBox):
             'blocked': 'Card blocked - cannot program',
         }
         colors = {
-            'waiting': '#FFA500',
-            'no_reader': '#999999',
-            'reading': '#0078D4',
-            'detected': '#0078D4',
-            'authenticated': '#107C10',
-            'error': '#E81123',
-            'blocked': '#CC0000',
+            'waiting': QtTheme.get_color('warning'),
+            'no_reader': QtTheme.get_color('disabled'),
+            'reading': QtTheme.get_color('accent'),
+            'detected': QtTheme.get_color('accent'),
+            'authenticated': QtTheme.get_color('success'),
+            'error': QtTheme.get_color('error'),
+            'blocked': QtTheme.get_color('error'),
         }
-        color = colors.get(state, '#CCCCCC')
+        color = colors.get(state, QtTheme.get_color('border'))
         self.status_indicator.setStyleSheet(f"border-radius: 8px; background-color: {color};")
         display_message = message or status_messages.get(state, 'Unknown state')
         self.status_label.setText(display_message)

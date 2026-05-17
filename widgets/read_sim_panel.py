@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from managers.card_manager import CardManager
+from qt_theme import QtTheme
 from state_manager import StateManager, CardInfo, CardState
 
 # Display order and labels for public fields
@@ -164,7 +165,7 @@ class ReadSIMPanel(QWidget):
         auth_layout_outer.addLayout(auth_input_layout)
 
         self._auth_status = QLabel("Enter ADM1 to authenticate")
-        self._auth_status.setStyleSheet("font-size: 9pt; color: #666;")
+        self._auth_status.setStyleSheet(f"font-size: 9pt; color: {QtTheme.get_color('muted_text')};")
         auth_layout_outer.addWidget(self._auth_status)
 
         main_layout.addWidget(auth_group, row, 1)

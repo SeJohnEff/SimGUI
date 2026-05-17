@@ -30,6 +30,7 @@ from typing import Optional, Union, Any
 COLORS: dict[str, str] = {
     "bg":            "#F5F5F7",
     "fg":            "#1D1D1F",
+    "muted_text":    "#6E6E73",
     "accent":        "#007AFF",
     "accent_hover":  "#0051D5",
     "success":       "#34C759",
