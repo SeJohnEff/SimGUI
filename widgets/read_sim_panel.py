@@ -116,7 +116,7 @@ class ReadSIMPanel(QWidget):
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
-            value_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            value_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
             pub_layout.addWidget(label_widget, grid_row, col * 2)
             pub_layout.addWidget(value_field, grid_row, col * 2 + 1)
@@ -134,7 +134,7 @@ class ReadSIMPanel(QWidget):
 
         auth_label = QLabel("ADM1:")
         self._adm1_field = QLineEdit()
-        self._adm1_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._adm1_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._auth_btn = QPushButton("Authenticate")
         self._auth_btn.clicked.connect(self._on_authenticate)
 
@@ -178,7 +178,7 @@ class ReadSIMPanel(QWidget):
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
-            value_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            value_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
             prot_grid.addWidget(label_widget, grid_row, col * 2)
             prot_grid.addWidget(value_field, grid_row, col * 2 + 1)
