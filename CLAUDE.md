@@ -357,3 +357,14 @@ When working on UI/layout tasks:
 - Avoid QScrollArea unless explicitly required
 - Use horizontal space before adding vertical height
 - Keep layouts compact and aligned (macOS-style density)
+
+### Safety Rule (UI)
+
+- Never modify state handling, signals, or logic when doing layout work
+- If layout changes affect behavior, stop and preserve original behavior
+
+### Layout Stability Rule
+
+- Never compress UI to the point of text truncation
+- Always ensure minimum usable width for inputs and labels
+- Balanced layouts are preferred over maximum density
