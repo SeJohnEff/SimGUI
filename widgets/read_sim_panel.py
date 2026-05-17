@@ -124,8 +124,6 @@ class ReadSIMPanel(QWidget):
         pub_layout.setColumnStretch(3, 1)
         main_layout.addWidget(pub_group, row, 0)
 
-        row += 1
-
         # --- Authentication section ---
         auth_group = QGroupBox("Authentication")
         auth_layout = QGridLayout(auth_group)
@@ -148,7 +146,7 @@ class ReadSIMPanel(QWidget):
         auth_layout.addWidget(self._auth_status, 2, 0, 1, 3)
 
         auth_layout.setColumnStretch(1, 1)
-        main_layout.addWidget(auth_group, row, 0)
+        main_layout.addWidget(auth_group, row, 1)
 
         row += 1
 
@@ -171,7 +169,7 @@ class ReadSIMPanel(QWidget):
         prot_grid.setSpacing(6)
 
         for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
-            grid_row, col = divmod(i, 2)
+            grid_row, col = divmod(i, 3)
             label_widget = QLabel(f"{label}:")
             value_field = QLineEdit()
             value_field.setText("-")
@@ -183,8 +181,9 @@ class ReadSIMPanel(QWidget):
 
         prot_grid.setColumnStretch(1, 1)
         prot_grid.setColumnStretch(3, 1)
+        prot_grid.setColumnStretch(5, 1)
         prot_layout_outer.addLayout(prot_grid)
-        main_layout.addWidget(prot_group, row, 0)
+        main_layout.addWidget(prot_group, row, 0, 1, 2)
 
         row += 1
 
@@ -198,7 +197,7 @@ class ReadSIMPanel(QWidget):
         btn_layout.addWidget(self._copy_btn)
         btn_layout.addWidget(self._export_btn)
         btn_layout.addStretch()
-        main_layout.addLayout(btn_layout, row, 0)
+        main_layout.addLayout(btn_layout, row, 0, 1, 2)
 
     def _on_card_state_changed(self, card_state: CardState):
         """Signal handler for card state changes."""
