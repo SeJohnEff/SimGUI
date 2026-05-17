@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QFileDialog,
     QMessageBox,
+    QSizePolicy,
 )
 
 from managers.card_manager import CardManager
@@ -115,6 +116,7 @@ class ReadSIMPanel(QWidget):
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
+            value_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
             pub_layout.addWidget(label_widget, grid_row, col * 2)
             pub_layout.addWidget(value_field, grid_row, col * 2 + 1)
@@ -127,10 +129,12 @@ class ReadSIMPanel(QWidget):
         # --- Authentication section ---
         auth_group = QGroupBox("Authentication")
         auth_layout = QGridLayout(auth_group)
-        auth_layout.setSpacing(6)
+        auth_layout.setSpacing(3)
+        auth_layout.setContentsMargins(4, 4, 4, 4)
 
         auth_label = QLabel("ADM1:")
         self._adm1_field = QLineEdit()
+        self._adm1_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._auth_btn = QPushButton("Authenticate")
         self._auth_btn.clicked.connect(self._on_authenticate)
 
@@ -140,10 +144,10 @@ class ReadSIMPanel(QWidget):
 
         self._csv_adm_btn = QPushButton("Load ADM1 from CSV...")
         self._csv_adm_btn.clicked.connect(self._on_load_adm1_csv)
-        auth_layout.addWidget(self._csv_adm_btn, 1, 1, 1, 2)
+        auth_layout.addWidget(self._csv_adm_btn, 0, 3)
 
         self._auth_status = QLabel("Enter ADM1 to authenticate")
-        auth_layout.addWidget(self._auth_status, 2, 0, 1, 3)
+        auth_layout.addWidget(self._auth_status, 1, 0, 1, 4)
 
         auth_layout.setColumnStretch(1, 1)
         main_layout.addWidget(auth_group, row, 1)
@@ -174,6 +178,7 @@ class ReadSIMPanel(QWidget):
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
+            value_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
             prot_grid.addWidget(label_widget, grid_row, col * 2)
             prot_grid.addWidget(value_field, grid_row, col * 2 + 1)

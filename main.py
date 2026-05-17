@@ -262,7 +262,7 @@ class SimGUIApp(QMainWindow):
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([220, 780])
+        splitter.setSizes([160, 864])
         root_layout.addWidget(splitter)
 
         # Status bar

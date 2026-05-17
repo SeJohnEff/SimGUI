@@ -39,8 +39,8 @@ class CardStatusPanel(QGroupBox):
 
     def _create_widgets(self):
         main_layout = QGridLayout(self)
-        main_layout.setSpacing(8)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(3)
+        main_layout.setContentsMargins(4, 4, 4, 4)
 
         row = 0
 
@@ -55,9 +55,9 @@ class CardStatusPanel(QGroupBox):
         main_layout.addWidget(self.status_indicator, row, 1)
 
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("padding: 4px; margin-left: 8px;")
+        self.status_label.setStyleSheet("padding: 2px; margin-left: 4px;")
         self.status_label.setWordWrap(True)
-        self.status_label.setMinimumHeight(30)
+        self.status_label.setMinimumHeight(20)
         main_layout.addWidget(self.status_label, row, 2, 1, 2)
 
         row += 1
