@@ -36,6 +36,7 @@ class CardStatusPanel(QGroupBox):
 
         if self.state_manager:
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
+            self.state_manager.error_occurred.connect(self._on_error_occurred)
 
     def _create_widgets(self):
         main_layout = QGridLayout(self)
@@ -144,6 +145,14 @@ class CardStatusPanel(QGroupBox):
         )
         self.set_auth_status(card_info.auth_status)
         self.set_programmed_indicator(card_info.already_programmed)
+
+    def _on_error_occurred(self, message: str):
+        """Handle error messages, distinguishing no-reader from other errors."""
+        if "reader" in message.lower():
+            self.set_status("no_reader", message)
+            self.clear_card_info()
+        else:
+            self.set_status("error", message)
 
     def set_status(self, state, message=""):
         status_messages = {

@@ -212,6 +212,7 @@ class SimGUIApp(QMainWindow):
         # Left: card status panel
         self._card_panel = CardStatusPanel(
             state_manager=self.state_manager)
+        self._card_panel.setMaximumWidth(300)
         splitter.addWidget(self._card_panel)
 
         # Right: tab widget
@@ -260,9 +261,9 @@ class SimGUIApp(QMainWindow):
 
         splitter.addWidget(self._tabs)
 
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([160, 864])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([256, 768])
         root_layout.addWidget(splitter)
 
         # Status bar
