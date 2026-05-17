@@ -200,23 +200,21 @@ class SimGUIApp(QMainWindow):
     # ---- Layout -------------------------------------------------------
 
     def _build_layout(self) -> None:
-        """Create the main two-pane layout with status bar."""
+        """Create the main tab layout with status bar."""
         central = QWidget()
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(8, 8, 8, 0)
 
-        # Splitter: left=card status, right=tabs
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left: card status panel
+        # Card status panel
         self._card_panel = CardStatusPanel(
             state_manager=self.state_manager)
-        self._card_panel.setMaximumWidth(300)
-        splitter.addWidget(self._card_panel)
 
-        # Right: tab widget
+        # Tab widget
         self._tabs = QTabWidget()
+
+        # Add Card Status as first tab
+        self._tabs.addTab(self._card_panel, "Card Status")
 
         self._read_panel = ReadSIMPanel(
             self._tabs,
@@ -259,12 +257,7 @@ class SimGUIApp(QMainWindow):
             state_manager=self.state_manager)
         self._tabs.addTab(self._progress_panel, "Progress")
 
-        splitter.addWidget(self._tabs)
-
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 4)
-        splitter.setSizes([205, 819])
-        root_layout.addWidget(splitter)
+        root_layout.addWidget(self._tabs)
 
         # Status bar
         self._status_bar = QStatusBar()
