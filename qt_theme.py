@@ -111,7 +111,6 @@ def _build_stylesheet() -> str:
     return f"""
 /* ---- Global ------------------------------------------------- */
 QWidget {{
-    background-color: {c['bg']};
     color: {c['fg']};
     font-family: "{f['default']['family']}";
     font-size: {f['default']['size']}pt;
@@ -119,6 +118,15 @@ QWidget {{
 
 /* ---- QMainWindow -------------------------------------------- */
 QMainWindow {{
+    background-color: {c['bg']};
+}}
+
+/* ---- Central widget and main containers ---------------------- */
+QMainWindow > QWidget {{
+    background-color: {c['bg']};
+}}
+
+QDialog {{
     background-color: {c['bg']};
 }}
 
