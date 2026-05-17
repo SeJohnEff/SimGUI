@@ -39,8 +39,8 @@ class CardStatusPanel(QGroupBox):
 
     def _create_widgets(self):
         main_layout = QGridLayout(self)
-        main_layout.setSpacing(3)
-        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(2)
+        main_layout.setContentsMargins(2, 2, 2, 2)
 
         row = 0
 
@@ -55,9 +55,9 @@ class CardStatusPanel(QGroupBox):
         main_layout.addWidget(self.status_indicator, row, 1)
 
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("padding: 2px; margin-left: 4px;")
+        self.status_label.setStyleSheet("padding: 1px; margin-left: 2px;")
         self.status_label.setWordWrap(True)
-        self.status_label.setMinimumHeight(20)
+        self.status_label.setMinimumHeight(16)
         main_layout.addWidget(self.status_label, row, 2, 1, 2)
 
         row += 1
@@ -111,7 +111,7 @@ class CardStatusPanel(QGroupBox):
 
         # Blocked indicator
         self._blocked_label = QLabel("⛔ CARD BLOCKED — Cannot be programmed")
-        self._blocked_label.setStyleSheet("background-color: #CC0000; color: white; font-weight: bold; padding: 8px;")
+        self._blocked_label.setStyleSheet("background-color: #CC0000; color: white; font-weight: bold; padding: 4px;")
         self._blocked_label.hide()
         main_layout.addWidget(self._blocked_label, row, 0, 1, 4)
 

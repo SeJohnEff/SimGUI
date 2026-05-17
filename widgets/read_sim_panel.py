@@ -108,7 +108,8 @@ class ReadSIMPanel(QWidget):
         # --- Public Fields section ---
         pub_group = QGroupBox("Public Fields (no auth required)")
         pub_layout = QGridLayout(pub_group)
-        pub_layout.setSpacing(6)
+        pub_layout.setSpacing(4)
+        pub_layout.setContentsMargins(2, 2, 2, 2)
 
         for i, (key, label) in enumerate(_PUBLIC_DISPLAY):
             grid_row, col = divmod(i, 2)
@@ -117,6 +118,7 @@ class ReadSIMPanel(QWidget):
             value_field.setText("-")
             value_field.setReadOnly(True)
             value_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value_field.setMinimumWidth(80)
 
             pub_layout.addWidget(label_widget, grid_row, col * 2)
             pub_layout.addWidget(value_field, grid_row, col * 2 + 1)
@@ -128,28 +130,35 @@ class ReadSIMPanel(QWidget):
 
         # --- Authentication section ---
         auth_group = QGroupBox("Authentication")
-        auth_layout = QGridLayout(auth_group)
-        auth_layout.setSpacing(3)
-        auth_layout.setContentsMargins(4, 4, 4, 4)
+        auth_layout_outer = QVBoxLayout(auth_group)
+        auth_layout_outer.setSpacing(2)
+        auth_layout_outer.setContentsMargins(2, 2, 2, 2)
+
+        auth_input_layout = QGridLayout()
+        auth_input_layout.setSpacing(4)
 
         auth_label = QLabel("ADM1:")
         self._adm1_field = QLineEdit()
         self._adm1_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._adm1_field.setMinimumWidth(100)
         self._auth_btn = QPushButton("Authenticate")
         self._auth_btn.clicked.connect(self._on_authenticate)
 
-        auth_layout.addWidget(auth_label, 0, 0)
-        auth_layout.addWidget(self._adm1_field, 0, 1)
-        auth_layout.addWidget(self._auth_btn, 0, 2)
+        auth_input_layout.addWidget(auth_label, 0, 0)
+        auth_input_layout.addWidget(self._adm1_field, 0, 1)
+        auth_input_layout.addWidget(self._auth_btn, 0, 2)
 
         self._csv_adm_btn = QPushButton("Load ADM1 from CSV...")
         self._csv_adm_btn.clicked.connect(self._on_load_adm1_csv)
-        auth_layout.addWidget(self._csv_adm_btn, 0, 3)
+        auth_input_layout.addWidget(self._csv_adm_btn, 0, 3)
+
+        auth_input_layout.setColumnStretch(1, 1)
+        auth_layout_outer.addLayout(auth_input_layout)
 
         self._auth_status = QLabel("Enter ADM1 to authenticate")
-        auth_layout.addWidget(self._auth_status, 1, 0, 1, 4)
+        self._auth_status.setStyleSheet("font-size: 9pt; color: #666;")
+        auth_layout_outer.addWidget(self._auth_status)
 
-        auth_layout.setColumnStretch(1, 1)
         main_layout.addWidget(auth_group, row, 1)
 
         row += 1
@@ -157,6 +166,8 @@ class ReadSIMPanel(QWidget):
         # --- Protected Fields section ---
         prot_group = QGroupBox("Protected Fields (requires ADM1)")
         prot_layout_outer = QVBoxLayout(prot_group)
+        prot_layout_outer.setSpacing(4)
+        prot_layout_outer.setContentsMargins(2, 2, 2, 2)
 
         prot_top = QHBoxLayout()
         self._read_btn = QPushButton("Read Card")
@@ -170,7 +181,7 @@ class ReadSIMPanel(QWidget):
         prot_layout_outer.addLayout(prot_top)
 
         prot_grid = QGridLayout()
-        prot_grid.setSpacing(6)
+        prot_grid.setSpacing(4)
 
         for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
             grid_row, col = divmod(i, 3)
@@ -179,6 +190,7 @@ class ReadSIMPanel(QWidget):
             value_field.setText("-")
             value_field.setReadOnly(True)
             value_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value_field.setMinimumWidth(80)
 
             prot_grid.addWidget(label_widget, grid_row, col * 2)
             prot_grid.addWidget(value_field, grid_row, col * 2 + 1)
