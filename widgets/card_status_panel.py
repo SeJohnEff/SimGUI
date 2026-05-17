@@ -11,8 +11,6 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QGroupBox,
-    QVBoxLayout,
-    QHBoxLayout,
     QGridLayout,
     QLabel,
     QLineEdit,
@@ -40,34 +38,31 @@ class CardStatusPanel(QGroupBox):
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
 
     def _create_widgets(self):
-        main_layout = QVBoxLayout(self)
+        main_layout = QGridLayout(self)
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Status row with indicator and message
-        status_layout = QHBoxLayout()
+        row = 0
+
+        # Status row (cols 0-5)
         status_label = QLabel("Status:")
         status_label.setStyleSheet("font-weight: bold; min-width: 50px;")
-        status_layout.addWidget(status_label)
+        main_layout.addWidget(status_label, row, 0)
 
         self.status_indicator = QLabel()
         self.status_indicator.setFixedSize(16, 16)
         self.status_indicator.setStyleSheet("border-radius: 8px;")
-        status_layout.addWidget(self.status_indicator)
+        main_layout.addWidget(self.status_indicator, row, 1)
 
         self.status_label = QLabel()
         self.status_label.setStyleSheet("padding: 4px; margin-left: 8px;")
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(30)
-        status_layout.addWidget(self.status_label)
+        main_layout.addWidget(self.status_label, row, 2, 1, 4)
 
-        main_layout.addLayout(status_layout)
+        row += 1
 
-        # Card info grid
-        grid = QGridLayout()
-        grid.setSpacing(4)
-        grid.setColumnStretch(1, 1)
-
+        # Card info in 3 visual columns (label-value pairs horizontally arranged)
         info_labels = [
             ('Card Type:', 'card_type'),
             ('IMSI:', 'imsi'),
@@ -80,46 +75,58 @@ class CardStatusPanel(QGroupBox):
             ('Source:', 'source_file'),
         ]
 
+        items_per_col = 3
         for i, (label_text, key) in enumerate(info_labels):
+            visual_col = i // items_per_col
+            visual_row = i % items_per_col
+
             label = QLabel(label_text)
             label.setStyleSheet("font-weight: bold;")
-            grid.addWidget(label, i, 0)
+            main_layout.addWidget(label, row + visual_row, visual_col * 2)
 
             entry = QLineEdit()
             entry.setReadOnly(True)
             entry.setText('Not available')
             entry.setStyleSheet("color: #808080;")
-            grid.addWidget(entry, i, 1)
+            main_layout.addWidget(entry, row + visual_row, visual_col * 2 + 1)
             self._info_vars[key] = entry
 
-        self._num_info_rows = len(info_labels)
-        main_layout.addLayout(grid)
+        row += 3
 
         # Already-programmed indicator
         self._programmed_label = QLabel()
         self._programmed_label.setStyleSheet("color: orange; font-weight: bold;")
         self._programmed_label.setText("⚠ Already programmed (artifact exists)")
         self._programmed_label.hide()
-        main_layout.addWidget(self._programmed_label)
+        main_layout.addWidget(self._programmed_label, row, 0, 1, 6)
+
+        row += 1
 
         # Authenticate button
         self._auth_btn = QPushButton("Authenticate")
         self._auth_btn.clicked.connect(self._on_authenticate_clicked)
-        main_layout.addWidget(self._auth_btn)
+        main_layout.addWidget(self._auth_btn, row, 0, 1, 2)
+
+        row += 1
 
         # Blocked indicator
         self._blocked_label = QLabel("⛔ CARD BLOCKED — Cannot be programmed")
         self._blocked_label.setStyleSheet("background-color: #CC0000; color: white; font-weight: bold; padding: 8px;")
         self._blocked_label.hide()
-        main_layout.addWidget(self._blocked_label)
+        main_layout.addWidget(self._blocked_label, row, 0, 1, 6)
+
+        row += 1
 
         # Simulator info
         self._sim_label = QLabel()
         self._sim_label.setStyleSheet("font-size: 9pt;")
         self._sim_label.hide()
-        main_layout.addWidget(self._sim_label)
+        main_layout.addWidget(self._sim_label, row, 0, 1, 6)
 
-        main_layout.addStretch()
+        # Column stretches for value fields
+        main_layout.setColumnStretch(1, 1)
+        main_layout.setColumnStretch(3, 1)
+        main_layout.setColumnStretch(5, 1)
 
     def _on_authenticate_clicked(self):
         if self.on_authenticate_callback:

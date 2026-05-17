@@ -330,3 +330,30 @@ Widgets NEVER call managers directly. They read StateManager properties and reac
 - ~48 hours of development across 14 sessions over 21 calendar days
 - 12,600+ lines of application code, 2156+ tests
 - 100+ commits, versions v0.1.0 through v0.5.30
+
+## UI Refactor Mode (Token Efficiency Override)
+
+When working on UI/layout tasks:
+
+### Scope Control (CRITICAL)
+- Only operate on the file explicitly provided in the prompt
+- Do NOT search the repository
+- Do NOT scan or explore other files
+- Do NOT select files automatically
+- If a file is specified, ignore all other files completely
+
+### Task Focus
+- Treat each task as fully self-contained
+- Do NOT infer dependencies unless explicitly stated
+- Do NOT modify other panels or widgets unless instructed
+
+### Output Rules
+- Default to minimal diff output only
+- Do NOT include long explanations unless explicitly requested
+- Prefer direct code changes over analysis
+
+### Layout Guidelines
+- Prefer QGridLayout over deep QVBoxLayout nesting
+- Avoid QScrollArea unless explicitly required
+- Use horizontal space before adding vertical height
+- Keep layouts compact and aligned (macOS-style density)

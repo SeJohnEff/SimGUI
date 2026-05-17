@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QGroupBox,
-    QScrollArea,
     QFileDialog,
     QMessageBox,
 )
@@ -99,17 +98,11 @@ class ReadSIMPanel(QWidget):
 
     def _build_ui(self):
         """Build the main UI layout."""
-        main_layout = QVBoxLayout(self)
+        main_layout = QGridLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # Scrollable area for content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        content_layout = QVBoxLayout(scroll_content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(8)
+        row = 0
 
         # --- Public Fields section ---
         pub_group = QGroupBox("Public Fields (no auth required)")
@@ -117,19 +110,21 @@ class ReadSIMPanel(QWidget):
         pub_layout.setSpacing(6)
 
         for i, (key, label) in enumerate(_PUBLIC_DISPLAY):
-            row, col = divmod(i, 2)
+            grid_row, col = divmod(i, 2)
             label_widget = QLabel(f"{label}:")
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
 
-            pub_layout.addWidget(label_widget, row, col * 2)
-            pub_layout.addWidget(value_field, row, col * 2 + 1)
+            pub_layout.addWidget(label_widget, grid_row, col * 2)
+            pub_layout.addWidget(value_field, grid_row, col * 2 + 1)
             self._pub_fields[key] = value_field
 
         pub_layout.setColumnStretch(1, 1)
         pub_layout.setColumnStretch(3, 1)
-        content_layout.addWidget(pub_group)
+        main_layout.addWidget(pub_group, row, 0)
+
+        row += 1
 
         # --- Authentication section ---
         auth_group = QGroupBox("Authentication")
@@ -153,7 +148,9 @@ class ReadSIMPanel(QWidget):
         auth_layout.addWidget(self._auth_status, 2, 0, 1, 3)
 
         auth_layout.setColumnStretch(1, 1)
-        content_layout.addWidget(auth_group)
+        main_layout.addWidget(auth_group, row, 0)
+
+        row += 1
 
         # --- Protected Fields section ---
         prot_group = QGroupBox("Protected Fields (requires ADM1)")
@@ -174,20 +171,22 @@ class ReadSIMPanel(QWidget):
         prot_grid.setSpacing(6)
 
         for i, (key, label) in enumerate(_PROTECTED_DISPLAY):
-            row, col = divmod(i, 2)
+            grid_row, col = divmod(i, 2)
             label_widget = QLabel(f"{label}:")
             value_field = QLineEdit()
             value_field.setText("-")
             value_field.setReadOnly(True)
 
-            prot_grid.addWidget(label_widget, row, col * 2)
-            prot_grid.addWidget(value_field, row, col * 2 + 1)
+            prot_grid.addWidget(label_widget, grid_row, col * 2)
+            prot_grid.addWidget(value_field, grid_row, col * 2 + 1)
             self._prot_fields[key] = value_field
 
         prot_grid.setColumnStretch(1, 1)
         prot_grid.setColumnStretch(3, 1)
         prot_layout_outer.addLayout(prot_grid)
-        content_layout.addWidget(prot_group)
+        main_layout.addWidget(prot_group, row, 0)
+
+        row += 1
 
         # --- Bottom action buttons ---
         btn_layout = QHBoxLayout()
@@ -199,12 +198,7 @@ class ReadSIMPanel(QWidget):
         btn_layout.addWidget(self._copy_btn)
         btn_layout.addWidget(self._export_btn)
         btn_layout.addStretch()
-        content_layout.addLayout(btn_layout)
-
-        content_layout.addStretch()
-
-        scroll.setWidget(scroll_content)
-        main_layout.addWidget(scroll)
+        main_layout.addLayout(btn_layout, row, 0)
 
     def _on_card_state_changed(self, card_state: CardState):
         """Signal handler for card state changes."""
