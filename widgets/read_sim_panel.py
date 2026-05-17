@@ -150,7 +150,6 @@ class ReadSIMPanel(QWidget):
 
         auth_input_layout.addWidget(auth_label, 0, 0)
         auth_input_layout.addWidget(self._adm1_field, 0, 1)
-        auth_input_layout.addWidget(self._auth_btn, 0, 2)
 
         self._csv_adm_btn = QPushButton("Load ADM1 from CSV...")
         self._csv_adm_btn.clicked.connect(self._on_load_adm1_csv)
