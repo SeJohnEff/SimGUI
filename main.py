@@ -354,8 +354,6 @@ class SimGUIApp(QMainWindow):
         self.state_manager.card_info_changed.connect(self._on_card_info_changed)
         self.state_manager.share_status_changed.connect(self._on_share_status_changed)
         self.state_manager.mode_changed.connect(self._on_mode_changed)
-        self.state_manager.card_programmed.connect(
-            lambda data: self._auto_artifact.save_card_artifact(data))
 
     def _on_status_changed(self, text: str) -> None:
         self._status_label.setText(text)
@@ -527,10 +525,11 @@ class SimGUIApp(QMainWindow):
         dlg = NetworkStorageDialogQt(self, self._ns_manager)
         dlg.exec()
 
-    def _on_card_programmed(self, card_data: dict) -> None:
-        """Store last programmed card and trigger auto-artifact save."""
+    def _on_card_programmed(self, card_data: dict) -> list:
+        """Store last programmed card, save artifact, and return saved paths."""
         self._last_programmed_card = card_data
         self.state_manager.notify_card_programmed(card_data)
+        return self._auto_artifact.save_card_artifact(card_data)
 
     def _on_export_artifacts(self):
         if not self._last_programmed_card:

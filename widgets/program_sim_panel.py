@@ -469,8 +469,10 @@ class ProgramSIMPanel(QWidget):
                 self._card_watcher.resume()
 
         if ok:
-            self._set_action_status(msg, "success")
             if callable(getattr(self, 'on_card_programmed_callback', None)):
-                self.on_card_programmed_callback(card_data)
+                saved_paths = self.on_card_programmed_callback(card_data)
+                if saved_paths:
+                    msg += f"\nArtifact saved: {saved_paths[0]}"
+            self._set_action_status(msg, "success")
         else:
             self._set_action_status(msg, "error")

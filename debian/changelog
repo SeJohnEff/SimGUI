@@ -1,3 +1,10 @@
+simgui (0.5.47) unstable; urgency=medium
+
+  * feat: Program SIM success status now includes artifact save path, e.g.
+    "Card programmed and verified: ...\nArtifact saved: ~/auto-artifact/ICCID_timestamp.csv"
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.46) unstable; urgency=medium
 
   * feat: auto-save artifact to ~/auto-artifact/ on every successful single

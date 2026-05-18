@@ -50,10 +50,10 @@ class TestMenuWiring:
         """ProgramSIMPanel.on_card_programmed_callback is set in _build_layout."""
         assert "on_card_programmed_callback = self._on_card_programmed" in MAIN_SRC
 
-    def test_card_programmed_signal_connected_to_auto_artifact(self):
-        """state_manager.card_programmed signal is connected to save_card_artifact."""
-        assert "card_programmed.connect" in MAIN_SRC
+    def test_on_card_programmed_calls_save_card_artifact(self):
+        """_on_card_programmed calls _auto_artifact.save_card_artifact and returns paths."""
         assert "save_card_artifact" in MAIN_SRC
+        assert "_on_card_programmed" in MAIN_SRC
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +115,19 @@ class TestExportArtifactsHandler:
 
         assert stub._last_programmed_card == card_data
 
-    def test_on_card_programmed_emits_signal(self):
-        """_on_card_programmed calls state_manager.notify_card_programmed."""
+    def test_on_card_programmed_emits_signal_and_saves(self):
+        """_on_card_programmed emits signal, saves artifact, returns paths."""
         stub = self._make_app_stub()
         stub.state_manager = MagicMock()
+        stub._auto_artifact = MagicMock()
+        stub._auto_artifact.save_card_artifact.return_value = ["/home/user/auto-artifact/test.csv"]
         card_data = {"ICCID": "8946001234567890123", "IMSI": "240010123456789"}
 
-        stub._on_card_programmed(card_data)
+        result = stub._on_card_programmed(card_data)
 
         stub.state_manager.notify_card_programmed.assert_called_once_with(card_data)
+        stub._auto_artifact.save_card_artifact.assert_called_once_with(card_data)
+        assert result == ["/home/user/auto-artifact/test.csv"]
 
     def test_export_writes_csv_with_iccid(self, tmp_path):
         """_on_export_artifacts writes a CSV containing ICCID when card exists."""
