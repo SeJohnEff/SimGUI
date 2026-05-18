@@ -122,6 +122,7 @@ _INHERITED_PYQT_METHODS = {
     "addPermanentWidget", "addTab", "setStretchFactor", "setSizes",
     "setContentsMargins", "setAlignment", "setProperty", "setText",
     "setShortcut", "setCheckable", "setChecked",
+    "accept", "reject",  # QDialog methods
 }
 
 # Callback attributes set via assignment (self.on_X = ...) that are later

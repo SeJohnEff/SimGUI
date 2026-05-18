@@ -201,9 +201,18 @@ class ProgramSIMPanel(QWidget):
     def _on_card_state_changed(self, card_state: CardState):
         if card_state == CardState.NO_CARD:
             self.on_card_removed()
+        elif card_state in (CardState.DETECTED, CardState.AUTHENTICATED):
+            self._detected_non_empty = True
+            self._step = 1
+            self._update_program_btn_state()
+        elif card_state == CardState.BLANK:
+            self._detected_non_empty = False
+            self._step = 1
+            self._update_program_btn_state()
 
     def _on_card_info_changed(self, card_info: CardInfo):
-        pass
+        # Re-evaluate button state if card info changes
+        self._update_program_btn_state()
 
     def _set_action_status(self, text: str, style: str = "normal"):
         self._action_status.setPlainText(text)
@@ -222,6 +231,39 @@ class ProgramSIMPanel(QWidget):
         is_csv = mode == "csv"
         # TODO: implement mode switching logic
         self._reset_step()
+
+    def _update_program_btn_state(self):
+        """Update Program Card button state based on current card and CSV row state.
+
+        Button is enabled if:
+        - A card is detected/authenticated (DETECTED or AUTHENTICATED state)
+        - AND there is selected row data (fields have been populated)
+        """
+        if not self.state_manager:
+            return
+
+        card_detected = self.state_manager.card_state in (
+            CardState.DETECTED, CardState.AUTHENTICATED, CardState.BLANK)
+        has_data = self._fields_have_data() or bool(
+            self._field_entries["ICCID"].text().strip())
+
+        if card_detected and has_data:
+            self._prog_btn.setEnabled(True)
+            iccid = self._field_entries["ICCID"].text().strip()
+            if iccid:
+                self._set_action_status(
+                    f"Card detected (ICCID {iccid}) — click Program to continue",
+                    "success")
+            else:
+                self._set_action_status(
+                    "Blank card detected — ready to program",
+                    "success")
+        else:
+            self._prog_btn.setEnabled(False)
+            if not card_detected:
+                self._set_action_status("Insert a SIM card...")
+            else:
+                self._set_action_status("Select a CSV row or enter data")
 
     def _reset_step(self):
         if self._detected_non_empty or self._step >= 1:
@@ -363,12 +405,13 @@ class ProgramSIMPanel(QWidget):
                 val = card.get("OPC", "")
             self._field_entries[key].setText(val)
 
-        if self._step >= 1:
+        # Re-evaluate button state after CSV row is selected
+        self._update_program_btn_state()
+        if self.state_manager and self.state_manager.card_state in (
+                CardState.DETECTED, CardState.AUTHENTICATED, CardState.BLANK):
             self._set_action_status(
                 "CSV row selected — ready to program",
                 "success")
-        else:
-            self._reset_step()
 
     def _on_program(self):
         if self._step < 1:

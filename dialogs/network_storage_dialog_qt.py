@@ -29,12 +29,30 @@ class NetworkStorageDialogQt(QDialog):
     def __init__(self, parent=None, ns_manager: NetworkStorageManager = None):
         super().__init__(parent)
         self.setWindowTitle("Network Storage")
-        self.resize(500, 350)
+        self.resize(500, 500)
         self.ns_manager = ns_manager
+        self._profiles = ns_manager.load_profiles() if ns_manager else []
+        self._current_profile = None
         self._build_ui()
+        self._refresh_saved_list()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+
+        # Saved servers section
+        saved_label = QLabel("Saved Servers:")
+        layout.addWidget(saved_label)
+
+        saved_layout = QHBoxLayout()
+        self.saved_combo = QComboBox()
+        self.saved_combo.currentIndexChanged.connect(self._on_saved_select)
+        saved_layout.addWidget(self.saved_combo)
+
+        self.remove_btn = QPushButton("Remove")
+        self.remove_btn.clicked.connect(self._on_remove_server)
+        saved_layout.addWidget(self.remove_btn)
+
+        layout.addLayout(saved_layout)
 
         # Form grid
         form = QGridLayout()
@@ -139,10 +157,74 @@ class NetworkStorageDialogQt(QDialog):
             else:
                 profiles.append(profile)
             self.ns_manager.save_profiles(profiles)
+            self._profiles = profiles
+            self._refresh_saved_list()
             QMessageBox.information(self, "Success", f"Share mounted and saved:\n{msg}")
             self.accept()
         else:
             QMessageBox.warning(self, "Mount Failed", msg)
+
+    def _refresh_saved_list(self):
+        """Reload saved servers list in the combobox."""
+        self.saved_combo.blockSignals(True)
+        self.saved_combo.clear()
+        self.saved_combo.addItem("— New Connection —", None)
+        for p in self._profiles:
+            self.saved_combo.addItem(p.label, p)
+        self.saved_combo.blockSignals(False)
+        if not self._profiles:
+            self.remove_btn.setEnabled(False)
+
+    def _on_saved_select(self, index: int):
+        """Load the selected saved server into the form."""
+        profile = self.saved_combo.currentData()
+        if profile is None:
+            self._clear_form()
+            self._current_profile = None
+            self.remove_btn.setEnabled(False)
+        else:
+            self._load_profile(profile)
+            self._current_profile = profile
+            self.remove_btn.setEnabled(True)
+
+    def _load_profile(self, profile: StorageProfile):
+        """Populate form fields from a saved profile."""
+        self.protocol_combo.setCurrentText(profile.protocol.upper())
+        self.server_input.setText(profile.server)
+        self.share_input.setText(profile.share)
+        self.username_input.setText(profile.username)
+        self.password_input.setText(profile.password or "")
+        self.label_input.setText(profile.label)
+        self.auto_connect.setChecked(profile.auto_connect)
+
+    def _clear_form(self):
+        """Clear all form fields."""
+        self.protocol_combo.setCurrentIndex(0)
+        self.server_input.clear()
+        self.share_input.clear()
+        self.username_input.clear()
+        self.password_input.clear()
+        self.label_input.clear()
+        self.auto_connect.setChecked(False)
+
+    def _on_remove_server(self):
+        """Remove the selected saved server."""
+        if self._current_profile is None:
+            QMessageBox.warning(self, "Error", "No server selected")
+            return
+
+        reply = QMessageBox.question(
+            self, "Remove Server",
+            f"Remove '{self._current_profile.label}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self._profiles = [p for p in self._profiles if p.label != self._current_profile.label]
+            if self.ns_manager:
+                self.ns_manager.save_profiles(self._profiles)
+            self._refresh_saved_list()
+            self._clear_form()
+            self._current_profile = None
 
     def _build_profile(self) -> StorageProfile:
         """Build a StorageProfile from form inputs."""
