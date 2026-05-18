@@ -204,6 +204,8 @@ class ProgramSIMPanel(QWidget):
     def _on_card_state_changed(self, card_state: CardState):
         if card_state == CardState.NO_CARD:
             self.on_card_removed()
+        elif card_state == CardState.ERROR:
+            self.on_card_removed()
         elif card_state in (CardState.DETECTED, CardState.AUTHENTICATED):
             self._detected_non_empty = True
             self._step = 1
