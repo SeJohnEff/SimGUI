@@ -1,3 +1,12 @@
+simgui (0.5.41) unstable; urgency=medium
+
+  * fix: sync Program SIM card status with global detected-card state; panel
+    now shows detected-card status immediately when opened after card detection,
+    and enables programming when valid data is selected — works for all card
+    types (blank, non-empty, detected) without requiring ICCID/IMSI
+
+ -- Claude Code <noreply@anthropic.com>  Sun, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.40) unstable; urgency=medium
 
   * fix: enable Program Card button when any detected SIM is present and

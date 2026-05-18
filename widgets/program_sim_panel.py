@@ -92,6 +92,8 @@ class ProgramSIMPanel(QWidget):
         if self.state_manager:
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.card_state_changed.connect(self._on_card_state_changed)
+            # Initialize from current state in case card was detected before this panel was created
+            self._on_card_state_changed(self.state_manager.card_state)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -263,7 +265,12 @@ class ProgramSIMPanel(QWidget):
             if not card_detected:
                 self._set_action_status("Insert a SIM card...")
             else:
-                self._set_action_status("Select a CSV row or enter data")
+                # Card is detected but no form data selected yet
+                iccid = self._field_entries["ICCID"].text().strip()
+                if iccid:
+                    self._set_action_status(f"Card detected (ICCID {iccid}) — select data to program")
+                else:
+                    self._set_action_status("Blank card detected — select data or enter form data")
 
     def _reset_step(self):
         if self._detected_non_empty or self._step >= 1:
