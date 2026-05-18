@@ -411,13 +411,19 @@ class SimGUIApp(QMainWindow):
         def on_error(msg):
             current = self.state_manager.card_state
             # Only set ERROR when the reader is genuinely absent.
-            # Transient PCSC errors (e.g. CardConnectionException after pySim-read
-            # releases the reader) must not overwrite an established card-present
-            # state — doing so causes Program SIM to flash "Insert a SIM card..."
-            # even though the card is still physically in the reader.
+            # Two guard layers:
+            # 1. StateManager layer: if current state is already a card-present state
+            #    (BLANK/DETECTED/AUTHENTICATED), don't demote to ERROR.
+            # 2. Watcher layer: _card_present is set True by the PCSC probe BEFORE
+            #    pySim-read starts.  During the window when _card_present=True but
+            #    card_state is still NO_CARD (pySim-read running), a transient probe
+            #    failure must NOT set ERROR — the card is physically present.
             is_no_reader = 'No smart-card reader' in msg
-            if is_no_reader or current not in (
-                    CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED):
+            card_physically_present = self._card_watcher._card_present
+            if is_no_reader or (
+                    current not in (
+                        CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED)
+                    and not card_physically_present):
                 self.state_manager.card_state = CardState.ERROR
             self.state_manager.report_error(msg)
 

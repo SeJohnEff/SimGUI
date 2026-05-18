@@ -1,3 +1,19 @@
+simgui (0.5.44) unstable; urgency=medium
+
+  * doc: add docs/reference/state-machine.md as authoritative source of truth
+    for reader/card/read state dimensions, invariants, signal mapping, and
+    the Program SIM enablement rule; includes Mermaid state diagram
+  * fix: on_error() now checks _card_watcher._card_present in addition to
+    card_state — prevents CardState.ERROR being set during the race window
+    when PCSC probe has confirmed a physical card (ATR seen) but pySim-read
+    has not yet finished and card_state is still NO_CARD
+  * fix: Program SIM panel preserves card-present display on CardState.ERROR
+    when card presence was already established (_step >= 1); only resets to
+    "Insert a SIM card..." on confirmed card removal (NO_CARD) or on initial
+    ERROR before any card has been detected
+
+ -- Claude Code <noreply@anthropic.com>  Mon, 19 May 2026 00:00:00 +0000
+
 simgui (0.5.43) unstable; urgency=medium
 
   * fix: Program SIM tab no longer shows "Insert a SIM card..." when a blank

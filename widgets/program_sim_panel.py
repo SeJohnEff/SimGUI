@@ -205,7 +205,13 @@ class ProgramSIMPanel(QWidget):
         if card_state == CardState.NO_CARD:
             self.on_card_removed()
         elif card_state == CardState.ERROR:
-            self.on_card_removed()
+            # ERROR is set for no-reader conditions or transient PCSC failures
+            # during initial detection.  Only reset to "Insert a SIM card..." if
+            # card presence was never established in this session (_step < 1).
+            # If we already reached step 1, a transient error is not a card
+            # removal — preserve the card-present display.
+            if not (self._detected_non_empty or self._step >= 1):
+                self.on_card_removed()
         elif card_state in (CardState.DETECTED, CardState.AUTHENTICATED):
             self._detected_non_empty = True
             self._step = 1
