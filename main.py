@@ -9,9 +9,11 @@ together managers, panels, and state management.
 
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import sys
+from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
@@ -29,7 +31,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from managers.auto_artifact_manager import AutoArtifactManager
+from managers.auto_artifact_manager import AutoArtifactManager, DEFAULT_ARTIFACT_FIELDS
 from managers.card_manager import CardManager, CLIBackend
 from managers.card_watcher import CardWatcher
 from managers.iccid_index import IccidIndex
@@ -147,6 +149,7 @@ class SimGUIApp(QMainWindow):
 
         # Shared state
         self.last_read_data: dict[str, str] = {}
+        self._last_programmed_card: Optional[dict] = None
         self._startup_worker_thread: Optional[QThread] = None
 
         # ---- Build UI ----
@@ -233,6 +236,7 @@ class SimGUIApp(QMainWindow):
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
+        self._program_panel.on_card_programmed_callback = self._on_card_programmed
         self._tabs.addTab(self._program_panel, "Program SIM")
 
         self._batch_panel = BatchProgramPanel(
@@ -350,6 +354,8 @@ class SimGUIApp(QMainWindow):
         self.state_manager.card_info_changed.connect(self._on_card_info_changed)
         self.state_manager.share_status_changed.connect(self._on_share_status_changed)
         self.state_manager.mode_changed.connect(self._on_mode_changed)
+        self.state_manager.card_programmed.connect(
+            lambda data: self._auto_artifact.save_card_artifact(data))
 
     def _on_status_changed(self, text: str) -> None:
         self._status_label.setText(text)
@@ -521,8 +527,42 @@ class SimGUIApp(QMainWindow):
         dlg = NetworkStorageDialogQt(self, self._ns_manager)
         dlg.exec()
 
+    def _on_card_programmed(self, card_data: dict) -> None:
+        """Store last programmed card and trigger auto-artifact save."""
+        self._last_programmed_card = card_data
+        self.state_manager.notify_card_programmed(card_data)
+
     def _on_export_artifacts(self):
-        self.state_manager.status_text = "Export Artifacts action"
+        if not self._last_programmed_card:
+            QMessageBox.information(
+                self, "Export Artifacts",
+                "No recently programmed SIM found.\n"
+                "Program a SIM card first, then use File → Export Artifacts.")
+            return
+
+        iccid = self._last_programmed_card.get("ICCID", "unknown")
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Artifact CSV",
+            f"sim_artifact_{iccid}.csv",
+            "CSV Files (*.csv);;All Files (*)")
+
+        if not filename:
+            return
+
+        row = {f: self._last_programmed_card.get(
+                   f, self._last_programmed_card.get(f.upper(), ""))
+               for f in DEFAULT_ARTIFACT_FIELDS}
+        row["programmed_at"] = datetime.now().isoformat()
+        try:
+            with open(filename, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(row.keys()))
+                writer.writeheader()
+                writer.writerow(row)
+            QMessageBox.information(
+                self, "Export Complete", f"Artifact saved to:\n{filename}")
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Export Error", f"Could not write file:\n{exc}")
 
     def _on_about(self):
         QMessageBox.information(

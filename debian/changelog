@@ -1,3 +1,12 @@
+simgui (0.5.45) unstable; urgency=medium
+
+  * fix: restore File → Export Artifacts for the most recently programmed SIM;
+    wire ProgramSIMPanel.on_card_programmed_callback → _on_card_programmed,
+    connect state_manager.card_programmed signal to auto_artifact save, and
+    implement _on_export_artifacts with QFileDialog + clear no-card dialog
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.44) unstable; urgency=medium
 
   * doc: add docs/reference/state-machine.md as authoritative source of truth
