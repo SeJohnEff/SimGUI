@@ -409,7 +409,16 @@ class SimGUIApp(QMainWindow):
             self.state_manager.status_text = "Card removed"
 
         def on_error(msg):
-            self.state_manager.card_state = CardState.ERROR
+            current = self.state_manager.card_state
+            # Only set ERROR when the reader is genuinely absent.
+            # Transient PCSC errors (e.g. CardConnectionException after pySim-read
+            # releases the reader) must not overwrite an established card-present
+            # state — doing so causes Program SIM to flash "Insert a SIM card..."
+            # even though the card is still physically in the reader.
+            is_no_reader = 'No smart-card reader' in msg
+            if is_no_reader or current not in (
+                    CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED):
+                self.state_manager.card_state = CardState.ERROR
             self.state_manager.report_error(msg)
 
         self._card_watcher.on_card_detected = on_detected

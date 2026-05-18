@@ -298,7 +298,22 @@ class CardWatcher:
                         pass
 
         else:
-            # No reader connected or reader error
+            # No reader connected or transient PCSC error.
+            # Only 'No smart-card reader' means the reader hardware is gone.
+            # Other errors (CardConnectionException, PC/SC error, etc.) are
+            # transient — they can occur while pySim-read is releasing the reader
+            # and do NOT mean the card was removed.
+            is_no_reader = 'No smart-card reader' in msg
+            if self._card_present and not is_no_reader:
+                # Transient error — card is still physically present.
+                # Preserve _card_present so the next 'No card in reader' probe
+                # correctly fires on_card_removed via the blank-card debounce path.
+                if self.on_error:
+                    try:
+                        self.on_error(msg)
+                    except Exception:
+                        pass
+                return
             if self._card_present:
                 self._card_present = False
                 self._last_iccid = None

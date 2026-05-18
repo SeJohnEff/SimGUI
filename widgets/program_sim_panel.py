@@ -202,9 +202,6 @@ class ProgramSIMPanel(QWidget):
         main_layout.addWidget(splitter)
 
     def _on_card_state_changed(self, card_state: CardState):
-        import traceback as _tb
-        print(f"SIMGUI_DEBUG PSIM._on_card_state_changed called with {card_state}")
-        _tb.print_stack(limit=6)
         if card_state == CardState.NO_CARD:
             self.on_card_removed()
         elif card_state == CardState.ERROR:
@@ -250,13 +247,10 @@ class ProgramSIMPanel(QWidget):
         if not self.state_manager:
             return
 
-        import traceback as _tb
         _current = self.state_manager.card_state
         card_detected = _current in (
             CardState.DETECTED, CardState.AUTHENTICATED, CardState.BLANK)
         has_data = self._fields_have_data()
-        print(f"SIMGUI_DEBUG PSIM._update_program_btn_state: sm.card_state={_current} card_detected={card_detected} has_data={has_data}")
-        _tb.print_stack(limit=6)
 
         if card_detected and has_data:
             self._prog_btn.setEnabled(True)
@@ -272,7 +266,6 @@ class ProgramSIMPanel(QWidget):
         else:
             self._prog_btn.setEnabled(False)
             if not card_detected:
-                print(f"SIMGUI_DEBUG PSIM writing INSERT-A-SIM-CARD from _update_program_btn_state (card_state={_current})")
                 self._set_action_status("Insert a SIM card...")
             else:
                 # Card is detected but no form data selected yet
@@ -283,9 +276,6 @@ class ProgramSIMPanel(QWidget):
                     self._set_action_status("Blank card detected — select data or enter form data")
 
     def _reset_step(self):
-        import traceback as _tb
-        print(f"SIMGUI_DEBUG PSIM._reset_step: _detected_non_empty={self._detected_non_empty} _step={self._step}")
-        _tb.print_stack(limit=6)
         if self._detected_non_empty or self._step >= 1:
             self._step = 1
             self._prog_btn.setEnabled(True)
@@ -301,7 +291,6 @@ class ProgramSIMPanel(QWidget):
         else:
             self._step = 0
             self._prog_btn.setEnabled(False)
-            print(f"SIMGUI_DEBUG PSIM writing INSERT-A-SIM-CARD from _reset_step")
             self._set_action_status("Insert a SIM card...")
 
     def _fields_have_data(self) -> bool:
@@ -353,9 +342,6 @@ class ProgramSIMPanel(QWidget):
             self._field_entries["ICCID"].setReadOnly(False)
 
     def on_card_removed(self):
-        import traceback as _tb
-        print("SIMGUI_DEBUG PSIM.on_card_removed called")
-        _tb.print_stack(limit=6)
         self._detected_non_empty = False
         self._step = 0
         self._reset_step()

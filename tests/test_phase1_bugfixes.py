@@ -52,24 +52,61 @@ class TestAtrCacheClearedOnRemoval(unittest.TestCase):
         return watcher
 
     def test_cache_cleared_on_card_removal_fast_path(self):
-        """ATR cache must be empty after _handle_probe_result(False, '')."""
+        """ATR cache must be empty after card removal via 'No card in reader'.
+
+        Blank-card removal requires two consecutive 'No card in reader' probes
+        (debounce). After the second probe the cache must be cleared.
+        """
         watcher = self._make_card_watcher()
+        watcher._no_card_streak = 0
         watcher._atr_iccid_cache['AABBCCDD'] = '8946000000000000001'
         watcher._card_present = True
         watcher._last_atr = 'AABBCCDD'
-        # Simulate card removal via fast probe
-        watcher._handle_probe_result(False, '')
+        # Blank card — debounce requires two consecutive absent probes
+        watcher._handle_probe_result(False, 'No card in reader')
+        # After first probe: debounce, no removal yet
+        self.assertEqual(len(watcher._atr_iccid_cache), 1)
+        watcher._handle_probe_result(False, 'No card in reader')
+        # After second probe: card confirmed removed, cache cleared
         self.assertEqual(len(watcher._atr_iccid_cache), 0,
                          "ATR cache must be cleared on card removal")
 
-    def test_cache_cleared_on_card_removal_slow_path(self):
-        """ATR cache must be empty after slow-path card removal."""
+    def test_cache_cleared_on_reader_disconnect(self):
+        """ATR cache must be cleared when the reader is disconnected."""
         watcher = self._make_card_watcher()
+        watcher._no_card_streak = 0
         watcher._atr_iccid_cache['AABBCCDD'] = '8946000000000000001'
         watcher._card_present = True
-        # Simulate card removal via the same probe interface
-        watcher._handle_probe_result(False, '')
+        # 'No smart-card reader detected' = reader hardware gone
+        watcher._handle_probe_result(False, 'No smart-card reader detected')
+        self.assertEqual(len(watcher._atr_iccid_cache), 0,
+                         "ATR cache must be cleared when reader disconnects")
+
+    def test_cache_cleared_on_card_removal_slow_path(self):
+        """ATR cache must be empty after slow-path card removal (two probes)."""
+        watcher = self._make_card_watcher()
+        watcher._no_card_streak = 0
+        watcher._atr_iccid_cache['AABBCCDD'] = '8946000000000000001'
+        watcher._card_present = True
+        watcher._handle_probe_result(False, 'No card in reader')
+        watcher._handle_probe_result(False, 'No card in reader')
         self.assertEqual(len(watcher._atr_iccid_cache), 0)
+
+    def test_cache_not_cleared_on_transient_pcsc_error(self):
+        """ATR cache must NOT be cleared for a transient PCSC error.
+
+        A CardConnectionException after pySim-read releases the reader is
+        a transient error — the card is still physically present.
+        """
+        watcher = self._make_card_watcher()
+        watcher._no_card_streak = 0
+        watcher._atr_iccid_cache['AABBCCDD'] = '8946000000000000001'
+        watcher._card_present = True
+        watcher._last_atr = 'AABBCCDD'
+        # Transient PCSC error — not 'No smart-card reader'
+        watcher._handle_probe_result(False, 'PC/SC error: Connection reset')
+        self.assertEqual(len(watcher._atr_iccid_cache), 1,
+                         "Transient PCSC error must not clear ATR cache")
 
     def test_cache_not_cleared_when_card_still_present(self):
         """Cache should NOT be cleared when a card is still there."""

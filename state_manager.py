@@ -210,7 +210,6 @@ class StateManager(QObject):
     def card_state(self, value: CardState) -> None:
         if self._card_state is value:
             return
-        import traceback as _tb; print(f"SIMGUI_DEBUG SM.card_state {self._card_state.name} → {value.name}"); _tb.print_stack(limit=5)
         self._card_state = value
         self.card_state_changed.emit(value)
         logger.debug("card_state → %s", value.name)
