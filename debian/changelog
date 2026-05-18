@@ -1,3 +1,11 @@
+simgui (0.5.40) unstable; urgency=medium
+
+  * fix: enable Program Card button when any detected SIM is present and
+    valid form data is selected — now works for all card types (blank,
+    non-empty, detected); button state updates reactively on field edits
+
+ -- Claude Code <noreply@anthropic.com>  Sun, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.39) unstable; urgency=medium
 
   * fix: restore Qt Network Storage saved-server list and last-used

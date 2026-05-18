@@ -132,6 +132,7 @@ class ProgramSIMPanel(QWidget):
             label_widget = QLabel(f"{label}:")
             entry = QLineEdit()
             entry.setText("")
+            entry.textChanged.connect(self._update_program_btn_state)
             data_layout.addWidget(label_widget, i, 0)
             data_layout.addWidget(entry, i, 1)
             self._field_vars[key] = ""
@@ -236,16 +237,15 @@ class ProgramSIMPanel(QWidget):
         """Update Program Card button state based on current card and CSV row state.
 
         Button is enabled if:
-        - A card is detected/authenticated (DETECTED or AUTHENTICATED state)
-        - AND there is selected row data (fields have been populated)
+        - A card is detected/readable (DETECTED, AUTHENTICATED, or BLANK state)
+        - AND there is form data selected (at least one field populated)
         """
         if not self.state_manager:
             return
 
         card_detected = self.state_manager.card_state in (
             CardState.DETECTED, CardState.AUTHENTICATED, CardState.BLANK)
-        has_data = self._fields_have_data() or bool(
-            self._field_entries["ICCID"].text().strip())
+        has_data = self._fields_have_data()
 
         if card_detected and has_data:
             self._prog_btn.setEnabled(True)
@@ -284,9 +284,8 @@ class ProgramSIMPanel(QWidget):
             self._set_action_status("Insert a SIM card...")
 
     def _fields_have_data(self) -> bool:
+        """Check if any form field has data (any field, including ICCID)."""
         for key, _, _ in _FORM_FIELDS:
-            if key == "ICCID":
-                continue
             if self._field_entries[key].text().strip():
                 return True
         return False
