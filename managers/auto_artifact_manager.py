@@ -1,13 +1,13 @@
 """
 Auto-Artifact Manager — Automatically save one CSV per programmed card.
 
-After each successful ``program_card()`` while a network share is
-connected, this manager writes a single-row CSV to the
-``auto-artifact/`` directory on the share.
+After each successful ``program_card()``, this manager writes a single-row
+CSV to ``~/auto-artifact/`` (always) and to the ``auto-artifact/``
+directory on every connected network share.
 
 File naming: ``{ICCID}_{YYYYMMDD_HHMMSS}.csv``
 
-The directory is created automatically on first write.  One file per
+The directories are created automatically on first write.  One file per
 card gives a complete audit trail with no operator action required.
 """
 
@@ -27,10 +27,11 @@ DEFAULT_ARTIFACT_FIELDS = [
 ]
 
 AUTO_ARTIFACT_DIR = "auto-artifact"
+LOCAL_ARTIFACT_DIR = os.path.join(os.path.expanduser("~"), AUTO_ARTIFACT_DIR)
 
 
 class AutoArtifactManager:
-    """Writes per-card artifact CSVs to network shares.
+    """Writes per-card artifact CSVs to ~/auto-artifact/ and any network shares.
 
     Parameters
     ----------
@@ -38,14 +39,30 @@ class AutoArtifactManager:
         The ``NetworkStorageManager`` instance (for finding mount paths).
     """
 
-    def __init__(self, ns_manager=None):
+    def __init__(self, ns_manager=None, local_dir=None):
         self._ns = ns_manager
+        self._local_dir = local_dir if local_dir is not None else LOCAL_ARTIFACT_DIR
+
+    def _artifact_dirs(self) -> list[str]:
+        """Return all directories to write artifacts to.
+
+        Always includes the local directory target.  Network share
+        directories are appended when shares are active.
+        """
+        dirs = [self._local_dir]
+        if self._ns:
+            for _label, mount_path in self._ns.get_active_mount_paths():
+                dirs.append(os.path.join(mount_path, AUTO_ARTIFACT_DIR))
+        return dirs
 
     def save_card_artifact(self, card_data: dict[str, str],
                            *, fields: Optional[list[str]] = None,
                            extra_meta: Optional[dict[str, str]] = None,
                            ) -> list[str]:
-        """Write an artifact CSV for a single card to all connected shares.
+        """Write an artifact CSV for a single card.
+
+        Always saves to ``~/auto-artifact/``.  Also saves to every connected
+        network share's ``auto-artifact/`` directory.
 
         Parameters
         ----------
@@ -61,9 +78,6 @@ class AutoArtifactManager:
         list[str]
             Paths where artifacts were successfully saved.
         """
-        if not self._ns:
-            return []
-
         iccid = card_data.get("ICCID", "").strip()
         if not iccid:
             logger.warning("Cannot save artifact: no ICCID in card data")
@@ -79,7 +93,6 @@ class AutoArtifactManager:
             # Try exact key, then uppercase, then lowercase
             row[f] = card_data.get(f, card_data.get(f.upper(),
                                    card_data.get(f.lower(), "")))
-        # Add timestamp and extra metadata
         row["programmed_at"] = datetime.now().isoformat()
         if extra_meta:
             row.update(extra_meta)
@@ -87,9 +100,7 @@ class AutoArtifactManager:
         all_fields = list(row.keys())
         saved_paths = []
 
-        # Write to every connected share
-        for label, mount_path in self._ns.get_active_mount_paths():
-            artifact_dir = os.path.join(mount_path, AUTO_ARTIFACT_DIR)
+        for artifact_dir in self._artifact_dirs():
             try:
                 os.makedirs(artifact_dir, exist_ok=True)
                 path = os.path.join(artifact_dir, filename)
@@ -109,7 +120,7 @@ class AutoArtifactManager:
     def save_batch_summary(self, records: list[dict[str, str]],
                            batch_results: list,
                            ) -> list[str]:
-        """Write a batch summary CSV to all connected shares.
+        """Write a batch summary CSV to ~/auto-artifact/ and connected shares.
 
         The summary includes one row per successfully programmed card
         with fields: ICCID, ADM1, IMSI, Ki, OPc.
@@ -128,9 +139,6 @@ class AutoArtifactManager:
         list[str]
             Paths where summaries were successfully saved.
         """
-        if not self._ns:
-            return []
-
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"batch_summary_{timestamp}.csv"
 
@@ -141,8 +149,7 @@ class AutoArtifactManager:
             rows.append({f: rec.get(f, "") for f in fields})
 
         saved_paths = []
-        for label, mount_path in self._ns.get_active_mount_paths():
-            artifact_dir = os.path.join(mount_path, AUTO_ARTIFACT_DIR)
+        for artifact_dir in self._artifact_dirs():
             try:
                 os.makedirs(artifact_dir, exist_ok=True)
                 path = os.path.join(artifact_dir, filename)
@@ -162,15 +169,11 @@ class AutoArtifactManager:
     def find_existing_artifacts(self, iccid: str) -> list[str]:
         """Find existing auto-artifact files for a given ICCID.
 
-        Returns a list of file paths across all connected shares.
+        Searches ``~/auto-artifact/`` and every connected network share.
         """
-        if not self._ns:
-            return []
-
         found = []
         prefix = f"{iccid}_"
-        for _label, mount_path in self._ns.get_active_mount_paths():
-            artifact_dir = os.path.join(mount_path, AUTO_ARTIFACT_DIR)
+        for artifact_dir in self._artifact_dirs():
             if not os.path.isdir(artifact_dir):
                 continue
             try:
