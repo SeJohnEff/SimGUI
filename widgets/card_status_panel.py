@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from qt_theme import QtTheme
-from state_manager import StateManager, CardInfo
+from state_manager import StateManager, CardInfo, CardState
 
 
 class CardStatusPanel(QGroupBox):
@@ -36,6 +36,7 @@ class CardStatusPanel(QGroupBox):
         self.set_status("waiting", "Insert a SIM card...")
 
         if self.state_manager:
+            self.state_manager.card_state_changed.connect(self._on_card_state_changed)
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.error_occurred.connect(self._on_error_occurred)
 
@@ -132,6 +133,21 @@ class CardStatusPanel(QGroupBox):
         if self.on_authenticate_callback:
             self.on_authenticate_callback()
 
+    def _on_card_state_changed(self, state: CardState):
+        """Update display when card state changes (detected, blank, authenticated, etc)."""
+        if state == CardState.NO_CARD:
+            self.set_status("waiting", "Insert a SIM card...")
+            self.clear_card_info()
+        elif state == CardState.BLANK:
+            self.set_status("detected", "Blank card detected")
+        elif state == CardState.DETECTED:
+            self.set_status("detected", "Card detected")
+        elif state == CardState.AUTHENTICATED:
+            self.set_status("authenticated", "Card authenticated")
+        elif state == CardState.ERROR:
+            # Error message will be set by _on_error_occurred
+            pass
+
     def _on_card_info_changed(self, card_info: CardInfo):
         """Update all labels when CardInfo changes."""
         self.set_card_info(
@@ -147,7 +163,14 @@ class CardStatusPanel(QGroupBox):
         self.set_programmed_indicator(card_info.already_programmed)
 
     def _on_error_occurred(self, message: str):
-        """Handle error messages, distinguishing no-reader from other errors."""
+        """Handle error messages, but suppress if we're in BLANK state.
+
+        Blank cards may trigger read errors (6f00 on auth attempts), but
+        we want to show them as detected/readable, not as errors.
+        """
+        if self.state_manager and self.state_manager.card_state == CardState.BLANK:
+            # Suppress error display for blank cards — they're readable but have no ICCID
+            return
         if "reader" in message.lower():
             self.set_status("no_reader", message)
             self.clear_card_info()
