@@ -422,6 +422,13 @@ class CardManager:
                 if self.card_info.get('ICCID'):
                     self._original_card_data = dict(self.card_info)
                     return True, "Card detected via pySim"
+                # Blank/gialersim: pySim-read detected the card type but exited
+                # non-zero because unprogrammed EFs cannot be read. card_type was
+                # set by _parse_pysim_output. Treat as successful detection so
+                # _read_and_notify takes the ICCID-absent path (no on_error call).
+                if self.card_type != CardType.UNKNOWN:
+                    self._original_card_data = dict(self.card_info)  # {} or partial
+                    return True, "Card detected via pySim (blank)"
             return False, self._clean_pysim_error(stderr) or "No card detected"
 
         # sysmo-usim-tool: try each card type script

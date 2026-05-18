@@ -431,7 +431,13 @@ class TestReadAndNotifyWithCache:
         callback.assert_called_once_with("89999880000000000200001")
 
     def test_pysim_fails_no_cache_fires_unknown(self):
-        """pySim-read fails, no cache → fire on_card_unknown("")."""
+        """pySim-read fails, no cache → fire on_card_unknown(""), NOT on_error.
+
+        PCSC already confirmed the card is physically present before
+        _read_and_notify is called.  A card that pySim-read cannot fully
+        parse is treated as blank/BLANK state, not ERROR.  Calling on_error
+        would overwrite BLANK with ERROR, breaking Program SIM status display.
+        """
         fcm = FakeCardManager()
         fcm.detect_ok = False
         w = CardWatcher(fcm)
@@ -446,7 +452,7 @@ class TestReadAndNotifyWithCache:
         w._read_and_notify()
 
         callback.assert_called_once_with("")
-        error_callback.assert_called_once()
+        error_callback.assert_not_called()
         assert w._last_iccid is None
 
     def test_cache_survives_card_removal_and_reinsertion(self):

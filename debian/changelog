@@ -1,3 +1,19 @@
+simgui (0.5.43) unstable; urgency=medium
+
+  * fix: Program SIM tab no longer shows "Insert a SIM card..." when a blank
+    or gialersim card is inserted at startup. Root cause: CardWatcher called
+    on_error() after on_card_unknown() for cards that pySim-read detected but
+    couldn't fully parse (blank gialersim with no ICCID). The ERROR state from
+    on_error() overwrote the BLANK state before the main thread processed the
+    card_state_changed(BLANK) signal, so _update_program_btn_state() read ERROR
+    and displayed the waiting message. Fix: (1) _read_and_notify() no longer
+    calls on_error after on_card_unknown — PCSC confirmed the card is present,
+    blank/unreadable is a valid BLANK state. (2) detect_card() returns True when
+    pySim-read autodetected a card type despite non-zero exit code, so the blank
+    gialersim case takes the clean ICCID-absent path with no on_error possible.
+
+ -- Claude Code <noreply@anthropic.com>  Mon, 19 May 2026 00:00:00 +0000
+
 simgui (0.5.42) unstable; urgency=medium
 
   * fix: handle ERROR state in Program SIM card detection; status no longer

@@ -359,11 +359,11 @@ class CardWatcher:
                 self.on_card_unknown("")
             except Exception:
                 pass
-        if not ok and self.on_error:
-            try:
-                self.on_error(msg)
-            except Exception:
-                pass
+        # Do NOT call on_error here. PCSC confirmed the card is physically present;
+        # a card that pySim-read cannot fully parse is a blank/gialersim card
+        # (BLANK state), not an error. Calling on_error would overwrite the BLANK
+        # state with ERROR before the main thread processes the BLANK signal,
+        # causing Program SIM to show "Insert a SIM card..." despite a card present.
 
     def _check_once_slow(self):
         """Slow polling path — full pySim-read every cycle."""

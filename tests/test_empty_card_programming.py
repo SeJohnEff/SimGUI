@@ -366,6 +366,38 @@ class TestCardTypeDetection:
         cm._parse_pysim_output(output)
         assert cm.card_type == CardType.UNKNOWN
 
+    def test_detect_card_returns_true_for_gialersim_nonzero_exit(self, tmp_path):
+        """detect_card returns True when pySim-read autodetects gialersim even
+        if pySim-read exits non-zero (blank gialersim: no EFs to read → error
+        exit but card IS detected).  This prevents BLANK→ERROR state flip in
+        CardWatcher._read_and_notify which causes 'Insert a SIM card...' in
+        Program SIM tab despite a card being present."""
+        cm = _make_hw_manager(tmp_path)
+        stdout = (
+            "Reading ...\n"
+            "Autodetected card type: gialersim\n"
+            "ACC: ffff\n"
+        )
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout=stdout, stderr="Some EF read error")
+            ok, msg = cm.detect_card()
+
+        assert ok is True, f"detect_card should succeed for blank gialersim; got: {msg}"
+        assert cm.card_type == CardType.GIALERSIM
+        assert cm._original_card_data is not None
+
+    def test_detect_card_returns_false_no_card_type_in_stdout(self, tmp_path):
+        """detect_card returns False when pySim-read fails and output has no
+        recognisable card type (genuine reader error, not blank card)."""
+        cm = _make_hw_manager(tmp_path)
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="No card detected")
+            ok, _msg = cm.detect_card()
+
+        assert ok is False
+
 
 # ---------------------------------------------------------------------------
 # _is_empty_card routing (gialersim-aware)
