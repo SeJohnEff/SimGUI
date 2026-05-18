@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from managers.card_manager import CardManager
+from managers.card_manager import CardManager, CLIBackend
 from simulator.card_deck import generate_deck
 from simulator.settings import SimulatorSettings
 from simulator.simulator_backend import SimulatorBackend
@@ -352,9 +352,11 @@ class TestCardManagerSimulator:
         assert mgr.get_simulator_info() is None
 
     def test_operations_use_cli_when_disabled(self, mgr):
-        """Without simulator, operations fall back to CLI path (which is None in tests)."""
+        """Without simulator, operations fall back to CLI path and fail when no tool present."""
+        mgr.cli_path = None
+        mgr.cli_backend = CLIBackend.NONE
         ok, msg = mgr.detect_card()
-        assert ok is False  # No CLI tool available in test env
+        assert ok is False
 
     def test_iccid_mismatch_blocks_auth(self, mgr):
         mgr.enable_simulator(SimulatorSettings(delay_ms=0))
