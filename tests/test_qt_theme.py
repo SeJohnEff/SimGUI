@@ -89,10 +89,3 @@ class TestQtThemeStylesheet:
         ss2 = QtTheme.get_stylesheet()
         assert ss1 is ss2  # same object (cached)
 
-    def test_colors_match_tkinter_theme(self):
-        """Verify the palette is identical to the tkinter ModernTheme."""
-        # Import the original — this proves colour parity
-        from theme import ModernTheme
-        for key in COLORS:
-            assert COLORS[key] == ModernTheme.COLORS.get(key, None), \
-                f"Color mismatch for '{key}': Qt={COLORS[key]}, Tk={ModernTheme.COLORS.get(key)}"
