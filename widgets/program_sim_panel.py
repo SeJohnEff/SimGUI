@@ -203,7 +203,10 @@ class ProgramSIMPanel(QWidget):
 
     def _on_card_state_changed(self, card_state: CardState):
         if card_state == CardState.NO_CARD:
-            self.on_card_removed()
+            self._detected_non_empty = False
+            self._step = 0
+            self._clear_form_fields()
+            self._update_program_btn_state()
         elif card_state in (CardState.DETECTED, CardState.AUTHENTICATED):
             self._detected_non_empty = True
             self._step = 1
@@ -233,7 +236,7 @@ class ProgramSIMPanel(QWidget):
         mode = self._mode_var
         is_csv = mode == "csv"
         # TODO: implement mode switching logic
-        self._reset_step()
+        self._update_program_btn_state()
 
     def _update_program_btn_state(self):
         """Update Program Card button state based on current card and CSV row state.
@@ -297,6 +300,13 @@ class ProgramSIMPanel(QWidget):
                 return True
         return False
 
+    def _clear_form_fields(self) -> None:
+        """Clear all form fields and reset ICCID to editable."""
+        for key, _, _ in _FORM_FIELDS:
+            self._field_entries[key].setText("")
+        self._field_entries["ICCID"].setReadOnly(False)
+        self._original_form_data = {}
+
     def on_card_detected(self, iccid, card_data=None, file_path=None):
         self._step = 1
         self._prog_btn.setEnabled(True)
@@ -341,11 +351,8 @@ class ProgramSIMPanel(QWidget):
     def on_card_removed(self):
         self._detected_non_empty = False
         self._step = 0
-        self._reset_step()
-        self._original_form_data = {}
-        for key, _, _ in _FORM_FIELDS:
-            self._field_entries[key].setText("")
-        self._field_entries["ICCID"].setReadOnly(False)
+        self._clear_form_fields()
+        self._update_program_btn_state()
 
     def _on_browse_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager, self._last_browse_dir)
