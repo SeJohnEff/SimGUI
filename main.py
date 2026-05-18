@@ -40,6 +40,7 @@ from qt_theme import QtTheme
 from state_manager import StateManager, CardState, AppMode, CardInfo
 from utils import get_browse_initial_dir
 from version import __version__
+from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
 from widgets.card_status_panel import CardStatusPanel
 from widgets.read_sim_panel import ReadSIMPanel
 from widgets.program_sim_panel import ProgramSIMPanel
@@ -501,7 +502,9 @@ class SimGUIApp(QMainWindow):
         self.state_manager.mode = AppMode.SIMULATOR
 
     def _on_network_storage(self):
-        self.state_manager.status_text = "Network Storage action"
+        """Open the Network Storage configuration dialog."""
+        dlg = NetworkStorageDialogQt(self, self._ns_manager)
+        dlg.exec()
 
     def _on_export_artifacts(self):
         self.state_manager.status_text = "Export Artifacts action"
