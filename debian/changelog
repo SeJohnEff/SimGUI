@@ -1,3 +1,11 @@
+simgui (0.5.39) unstable; urgency=medium
+
+  * fix: restore Qt Network Storage saved-server list and last-used
+    auto-connect behavior — dialog now displays dropdown of saved servers,
+    auto-fills fields when selected, and allows removal of profiles
+
+ -- Claude Code <noreply@anthropic.com>  Sun, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.38) unstable; urgency=medium
 
   * refactor: background startup tasks now use QThread worker pattern for
