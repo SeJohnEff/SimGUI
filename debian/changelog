@@ -1,3 +1,14 @@
+simgui (0.5.42) unstable; urgency=medium
+
+  * fix: handle ERROR state in Program SIM card detection; status no longer
+    stuck at initial message if pySim-read fails. Root cause: missing handler
+    for CardState.ERROR in _on_card_state_changed() caused status to remain
+    'Insert a SIM card...' when detection error occurred.
+  * fix: restore SMB auto-reconnect behavior by reverting network storage dialog
+    changes that interfered with startup reconnect flow
+
+ -- Claude Code <noreply@anthropic.com>  Sun, 18 May 2026 00:00:00 +0000
+
 simgui (0.5.41) unstable; urgency=medium
 
   * fix: sync Program SIM card status with global detected-card state; panel
