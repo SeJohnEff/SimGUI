@@ -1,3 +1,17 @@
+simgui (0.5.48) unstable; urgency=medium
+
+  * fix: restore network-share SIM data discovery and autofill in Program SIM
+    and Batch Program tabs after Tkinter→Qt migration regression:
+    wire on_card_detected to Program SIM panel in CardWatcher callbacks,
+    connect iccid_index_updated signal to retry autofill for cards already
+    in reader, rescan shares after Network Storage dialog closes,
+    load StandardsManager from share dirs at startup and after rescan,
+    refresh Batch Program SPN dropdown on index update,
+    fix File > Scan Directory to actually index files,
+    fix File > Open CSV to load file into Program SIM panel
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 19 May 2026 00:00:00 +0000
+
 simgui (0.5.47) unstable; urgency=medium
 
   * feat: Program SIM success status now includes artifact save path, e.g.

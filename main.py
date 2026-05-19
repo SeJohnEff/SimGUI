@@ -70,10 +70,11 @@ class BackgroundStartupWorker(QObject):
     mounts_updated = pyqtSignal(list)
     index_updated = pyqtSignal()
 
-    def __init__(self, ns_manager, iccid_index) -> None:
+    def __init__(self, ns_manager, iccid_index, standards_mgr=None) -> None:
         super().__init__()
         self._ns_manager = ns_manager
         self._iccid_index = iccid_index
+        self._standards_mgr = standards_mgr
 
     def run(self) -> None:
         """Execute startup tasks and emit signals."""
@@ -102,7 +103,42 @@ class BackgroundStartupWorker(QObject):
             except Exception as exc:
                 logger.warning("ICCID scan failed for %s: %s",
                                mount_path, exc)
+            if self._standards_mgr:
+                try:
+                    self._standards_mgr.load_from_directory(mount_path)
+                except Exception as exc:
+                    logger.warning("Standards load failed for %s: %s",
+                                   mount_path, exc)
 
+        self.index_updated.emit()
+        self.finished.emit()
+
+
+class _ScanSharesWorker(QObject):
+    """Lightweight worker: scan share directories and reload standards."""
+
+    index_updated = pyqtSignal()
+    finished = pyqtSignal()
+
+    def __init__(self, mounts, iccid_index, standards_mgr=None) -> None:
+        super().__init__()
+        self._mounts = mounts
+        self._iccid_index = iccid_index
+        self._standards_mgr = standards_mgr
+
+    def run(self) -> None:
+        for _label, mount_path in self._mounts:
+            try:
+                self._iccid_index.scan_directory(mount_path)
+            except Exception as exc:
+                logger.warning("ICCID scan failed for %s: %s",
+                               mount_path, exc)
+            if self._standards_mgr:
+                try:
+                    self._standards_mgr.load_from_directory(mount_path)
+                except Exception as exc:
+                    logger.warning("Standards load failed for %s: %s",
+                                   mount_path, exc)
         self.index_updated.emit()
         self.finished.emit()
 
@@ -354,6 +390,7 @@ class SimGUIApp(QMainWindow):
         self.state_manager.card_info_changed.connect(self._on_card_info_changed)
         self.state_manager.share_status_changed.connect(self._on_share_status_changed)
         self.state_manager.mode_changed.connect(self._on_mode_changed)
+        self.state_manager.iccid_index_updated.connect(self._on_index_updated)
 
     def _on_status_changed(self, text: str) -> None:
         self._status_label.setText(text)
@@ -394,6 +431,7 @@ class SimGUIApp(QMainWindow):
                 auth_status=False,
             )
             self.state_manager.status_text = f"Card detected: {iccid}"
+            self._program_panel.on_card_detected(iccid, card_data, file_path)
 
         def on_unknown(iccid):
             if iccid:
@@ -406,6 +444,7 @@ class SimGUIApp(QMainWindow):
                 iccid=iccid or "(blank)",
                 auth_status=False,
             )
+            self._program_panel.on_card_detected(iccid, None, None)
 
         def on_removed():
             self.state_manager.card_state = CardState.NO_CARD
@@ -453,7 +492,8 @@ class SimGUIApp(QMainWindow):
         if self._startup_worker_thread is not None:
             return
 
-        worker = BackgroundStartupWorker(self._ns_manager, self._iccid_index)
+        worker = BackgroundStartupWorker(
+            self._ns_manager, self._iccid_index, self._standards_mgr)
         self._startup_worker_thread = QThread()
         worker.moveToThread(self._startup_worker_thread)
 
@@ -479,6 +519,7 @@ class SimGUIApp(QMainWindow):
 
     def _on_worker_index_updated(self) -> None:
         self.state_manager.notify_index_updated()
+        self._batch_panel.refresh_standards()
 
     def _on_thread_finished(self) -> None:
         self._startup_worker_thread = None
@@ -491,6 +532,7 @@ class SimGUIApp(QMainWindow):
             self, "Open SIM Data File", init_dir or "",
             "CSV files (*.csv);;EML files (*.eml);;Text files (*.txt);;All files (*.*)")
         if path:
+            self._program_panel.load_csv_file(path)
             self.state_manager.status_text = f"Loaded {path}"
             self._settings.set("last_csv_path", path)
 
@@ -499,7 +541,12 @@ class SimGUIApp(QMainWindow):
         path = QFileDialog.getExistingDirectory(
             self, "Select directory with SIM data files", init_dir or "")
         if path:
-            self.state_manager.status_text = f"Scanned {path}"
+            result = self._iccid_index.scan_directory(path)
+            self._standards_mgr.load_from_directory(path)
+            self._batch_panel.refresh_standards()
+            self.state_manager.status_text = (
+                f"Scanned: {result.total_cards} cards in {result.files_scanned} file(s)")
+            self.state_manager.notify_index_updated()
 
     def _on_save_csv(self):
         init_dir = get_browse_initial_dir(self._ns_manager)
@@ -524,6 +571,38 @@ class SimGUIApp(QMainWindow):
         """Open the Network Storage configuration dialog."""
         dlg = NetworkStorageDialogQt(self, self._ns_manager)
         dlg.exec()
+        # Rescan any newly mounted shares for SIM data and standards
+        self._rescan_shares_background()
+
+    def _rescan_shares_background(self) -> None:
+        """Scan all mounted share directories in a background thread."""
+        mounts = self._ns_manager.get_active_mount_paths()
+        if not mounts:
+            return
+        worker = _ScanSharesWorker(mounts, self._iccid_index, self._standards_mgr)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        worker.index_updated.connect(self._on_worker_index_updated)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.started.connect(worker.run)
+        thread.start()
+
+    def _on_index_updated(self) -> None:
+        """When the ICCID index refreshes, try to autofill if card already in reader."""
+        if self.state_manager.card_state not in (
+                CardState.DETECTED, CardState.AUTHENTICATED):
+            return
+        iccid = self.state_manager.card_info.iccid
+        if not iccid or iccid == "(blank)":
+            return
+        card_data = self._iccid_index.load_card(iccid)
+        if card_data:
+            entry = self._iccid_index.lookup(iccid)
+            self._program_panel.on_card_detected(
+                iccid, card_data,
+                entry.file_path if entry else None)
 
     def _on_card_programmed(self, card_data: dict) -> list:
         """Store last programmed card, save artifact, and return saved paths."""

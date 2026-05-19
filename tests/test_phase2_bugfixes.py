@@ -39,8 +39,8 @@ def ns_manager(tmp_share):
 
 
 @pytest.fixture
-def auto_artifact(ns_manager):
-    return AutoArtifactManager(ns_manager)
+def auto_artifact(ns_manager, tmp_path):
+    return AutoArtifactManager(ns_manager, local_dir=str(tmp_path / "local"))
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ class TestPerCardArtifact:
             "ADM1": "3838383838383838",
         }
         paths = auto_artifact.save_card_artifact(card_data)
-        assert len(paths) == 1
+        assert len(paths) == 2
         assert os.path.exists(paths[0])
         # Check file content
         with open(paths[0], newline="", encoding="utf-8") as fh:
@@ -227,9 +227,9 @@ class TestPerCardArtifact:
         for card in cards:
             paths = auto_artifact.save_card_artifact(card)
             all_paths.extend(paths)
-        assert len(all_paths) == 3
+        assert len(all_paths) == 6
         # All files exist and are distinct
-        assert len(set(all_paths)) == 3
+        assert len(set(all_paths)) == 6
         for p in all_paths:
             assert os.path.exists(p)
 
@@ -264,7 +264,7 @@ class TestBatchSummaryArtifact:
             CardResult(1, "8999988000100000038", True, "Programmed successfully"),
         ]
         paths = auto_artifact.save_batch_summary(records, results)
-        assert len(paths) == 1
+        assert len(paths) == 2
         assert os.path.exists(paths[0])
         assert "batch_summary_" in os.path.basename(paths[0])
 
@@ -281,16 +281,16 @@ class TestBatchSummaryArtifact:
         assert rows[0]["OPc"] == "11223344" * 4
         assert rows[1]["ICCID"] == "8999988000100000038"
 
-    def test_save_batch_summary_no_ns_manager(self):
-        """Returns empty list when no network storage manager."""
-        mgr = AutoArtifactManager(ns_manager=None)
+    def test_save_batch_summary_no_ns_manager(self, tmp_path):
+        """Returns one local artifact even when no network storage manager."""
+        mgr = AutoArtifactManager(ns_manager=None, local_dir=str(tmp_path / "local"))
         paths = mgr.save_batch_summary([], [])
-        assert paths == []
+        assert len(paths) == 1
 
     def test_save_batch_summary_empty_results(self, auto_artifact, tmp_share):
         """Empty results produce an empty (header-only) CSV."""
         paths = auto_artifact.save_batch_summary([], [])
-        assert len(paths) == 1
+        assert len(paths) == 2
         with open(paths[0], newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
             rows = list(reader)
