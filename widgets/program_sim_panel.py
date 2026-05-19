@@ -49,6 +49,29 @@ _FORM_FIELDS = [
     ("FPLMN", "FPLMN", True),
 ]
 
+# Canonical names for all known share/index fields (lowercase key → canonical)
+_KNOWN_FIELD_NAMES = {
+    'iccid': 'ICCID', 'imsi': 'IMSI', 'old_imsi': 'OLD_IMSI',
+    'acc': 'ACC', 'pin1': 'PIN1', 'puk1': 'PUK1',
+    'pin2': 'PIN2', 'puk2': 'PUK2',
+    'ki': 'Ki', 'opc': 'OPc', 'adm1': 'ADM1', 'adm': 'ADM1',
+    'kic1': 'KIC1', 'kid1': 'KID1', 'kik1': 'KIK1',
+    'kic2': 'KIC2', 'kid2': 'KID2', 'kik2': 'KIK2',
+    'kic3': 'KIC3', 'kid3': 'KID3', 'kik3': 'KIK3',
+    'spn': 'SPN', 'fplmn': 'FPLMN',
+}
+
+_FORM_FIELD_KEYS = frozenset(k for k, _, _ in _FORM_FIELDS)
+
+
+def _normalize_card_data(data: dict) -> dict:
+    """Normalize card data keys to canonical field names."""
+    result = {}
+    for k, v in data.items():
+        norm = _KNOWN_FIELD_NAMES.get(k.strip().lower(), k.strip().upper())
+        result[norm] = v
+    return result
+
 
 class ProgramSIMPanel(QWidget):
     """Tab for programming a single SIM card."""
@@ -82,6 +105,7 @@ class ProgramSIMPanel(QWidget):
         self._step = 0
         self._original_form_data: dict[str, str] = {}
         self._detected_non_empty: bool = False
+        self._extra_card_data: dict = {}
 
         self.on_csv_loaded_callback = None
         self.on_file_browsed_callback = None
@@ -312,11 +336,14 @@ class ProgramSIMPanel(QWidget):
         self._detected_non_empty = bool(iccid)
 
         if card_data:
+            normalized = _normalize_card_data(card_data)
             for key, _, _ in _FORM_FIELDS:
-                val = card_data.get(key, card_data.get(key.upper(), ""))
-                if key == "OPc" and not val:
-                    val = card_data.get("OPC", "")
-                self._field_entries[key].setText(val)
+                self._field_entries[key].setText(normalized.get(key, ""))
+            # Store full normalized record so non-displayed fields (PIN1/PUK1,
+            # KIC/KID/KIK, OLD_IMSI, etc.) pass through to programming.
+            # Network-share data is authoritative — it is not overwritten by
+            # card-read values from StateManager signals.
+            self._extra_card_data = normalized
             self._original_form_data = {
                 k: self._field_entries[k].text() for k, _, _ in _FORM_FIELDS
             }
@@ -325,11 +352,13 @@ class ProgramSIMPanel(QWidget):
                 f"Card detected — data loaded from {src}",
                 "success")
         elif not iccid and self._fields_have_data():
+            self._extra_card_data = {}
             self._original_form_data = {}
             self._set_action_status(
                 "Blank card detected — ready to program",
                 "success")
         else:
+            self._extra_card_data = {}
             if iccid:
                 self._field_entries["ICCID"].setText(iccid)
             self._original_form_data = {}
@@ -351,6 +380,7 @@ class ProgramSIMPanel(QWidget):
         self._detected_non_empty = False
         self._step = 0
         self._reset_step()
+        self._extra_card_data = {}
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_entries[key].setText("")
@@ -414,11 +444,11 @@ class ProgramSIMPanel(QWidget):
         card = self._csv.get_card(current_row)
         if not card:
             return
+        normalized = _normalize_card_data(card)
         for key, _, _ in _FORM_FIELDS:
-            val = card.get(key, card.get(key.upper(), ""))
-            if key == "OPc" and not val:
-                val = card.get("OPC", "")
-            self._field_entries[key].setText(val)
+            self._field_entries[key].setText(normalized.get(key, ""))
+        # Preserve extra fields (PIN1/PUK1, KIC/KID/KIK, etc.) from CSV row
+        self._extra_card_data = normalized
 
         # Re-evaluate button state after CSV row is selected
         self._update_program_btn_state()
@@ -436,8 +466,12 @@ class ProgramSIMPanel(QWidget):
             self._set_action_status("ADM1 is required", "warning")
             return
         expected_iccid = self._field_entries["ICCID"].text().strip() or None
-        card_data = {k: self._field_entries[k].text().strip()
-                     for k, _, _ in _FORM_FIELDS}
+        # Non-displayed share fields (OLD_IMSI, PIN1/PUK1, KIC/KID/KIK, etc.)
+        # pass through unchanged; displayed/editable fields always win.
+        card_data = {k: v for k, v in self._extra_card_data.items()
+                     if k not in _FORM_FIELD_KEYS}
+        card_data.update({k: self._field_entries[k].text().strip()
+                          for k, _, _ in _FORM_FIELDS})
 
         if self._card_watcher:
             self._card_watcher.pause()

@@ -1,3 +1,19 @@
+simgui (0.5.49) unstable; urgency=medium
+
+  * feat: preserve all known share fields (OLD_IMSI, PIN1/PUK1, PIN2/PUK2,
+    KIC1/KID1/KIK1, KIC2/KID2/KIK2, KIC3/KID3/KIK3) when autofilling Program SIM
+    from network share or index — non-displayed fields pass through to program_card()
+  * feat: network-share data has explicit precedence; displayed fields always
+    reflect form values (user edits win for displayed fields; hidden extras pass
+    through unchanged from share source)
+  * feat: _normalize_card_data() canonicalises field names on load from any source
+    (handles case variants: opc→OPc, adm→ADM1, ki→Ki, lowercase, uppercase)
+  * feat: CSV row selection via _on_card_select also preserves extra fields
+  * refactor: ProgramSIMPanel stores _extra_card_data and _FORM_FIELD_KEYS for
+    clean separation between displayed and passthrough fields
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 19 May 2026 00:00:00 +0000
+
 simgui (0.5.48) unstable; urgency=medium
 
   * fix: restore network-share SIM data discovery and autofill in Program SIM
