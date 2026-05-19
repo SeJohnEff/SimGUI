@@ -94,12 +94,24 @@ class BackgroundStartupWorker(QObject):
                 self.status_requested.emit(
                     f"Network share connected: {names}")
 
+        # Adopt shares mounted externally or left from a prior session
+        try:
+            self._ns_manager.sync_os_mounts()
+        except Exception as exc:
+            logger.warning("sync_os_mounts failed: %s", exc)
+
         mounts = self._ns_manager.get_active_mount_paths()
         self.mounts_updated.emit(mounts or [])
 
-        for _label, mount_path in (mounts or []):
+        for label, mount_path in (mounts or []):
             try:
-                self._iccid_index.scan_directory(mount_path)
+                result = self._iccid_index.scan_directory(mount_path)
+                logger.info("Startup ICCID scan [%s]: %d cards in %d file(s), "
+                            "%d skipped, %d error(s)",
+                            label, result.total_cards, result.files_scanned,
+                            result.files_skipped, len(result.errors))
+                for err in result.errors:
+                    logger.warning("Scan error [%s]: %s", label, err)
             except Exception as exc:
                 logger.warning("ICCID scan failed for %s: %s",
                                mount_path, exc)
@@ -127,9 +139,15 @@ class _ScanSharesWorker(QObject):
         self._standards_mgr = standards_mgr
 
     def run(self) -> None:
-        for _label, mount_path in self._mounts:
+        for label, mount_path in self._mounts:
             try:
-                self._iccid_index.scan_directory(mount_path)
+                result = self._iccid_index.scan_directory(mount_path)
+                logger.info("ICCID rescan [%s]: %d cards in %d file(s), "
+                            "%d skipped, %d error(s)",
+                            label, result.total_cards, result.files_scanned,
+                            result.files_skipped, len(result.errors))
+                for err in result.errors:
+                    logger.warning("Scan error [%s]: %s", label, err)
             except Exception as exc:
                 logger.warning("ICCID scan failed for %s: %s",
                                mount_path, exc)
@@ -187,6 +205,7 @@ class SimGUIApp(QMainWindow):
         self.last_read_data: dict[str, str] = {}
         self._last_programmed_card: Optional[dict] = None
         self._startup_worker_thread: Optional[QThread] = None
+        self._rescan_timer: Optional[QTimer] = None
 
         # ---- Build UI ----
         self._build_menu()
@@ -213,6 +232,14 @@ class SimGUIApp(QMainWindow):
             QTimer.singleShot(100, self._startup_detect_card)
 
         QTimer.singleShot(0, self._background_startup)
+
+        # Periodic background rescan: refresh ICCID index every 5 minutes
+        # while shares are connected, so cards inserted after startup are
+        # found without requiring a manual "Scan Directory" or app restart.
+        self._rescan_timer = QTimer(self)
+        self._rescan_timer.setInterval(5 * 60 * 1000)  # 5 min
+        self._rescan_timer.timeout.connect(self._rescan_shares_background)
+        self._rescan_timer.start()
 
     @staticmethod
     def _get_git_hash() -> str:
@@ -576,6 +603,10 @@ class SimGUIApp(QMainWindow):
 
     def _rescan_shares_background(self) -> None:
         """Scan all mounted share directories in a background thread."""
+        try:
+            self._ns_manager.sync_os_mounts()
+        except Exception as exc:
+            logger.warning("sync_os_mounts failed: %s", exc)
         mounts = self._ns_manager.get_active_mount_paths()
         if not mounts:
             return
@@ -600,9 +631,11 @@ class SimGUIApp(QMainWindow):
         card_data = self._iccid_index.load_card(iccid)
         if card_data:
             entry = self._iccid_index.lookup(iccid)
-            self._program_panel.on_card_detected(
-                iccid, card_data,
-                entry.file_path if entry else None)
+            file_path = entry.file_path if entry else None
+            self._program_panel.on_card_detected(iccid, card_data, file_path)
+            src = os.path.basename(file_path) if file_path else "index"
+            self.state_manager.status_text = (
+                f"Card data loaded from {src}: {iccid}")
 
     def _on_card_programmed(self, card_data: dict) -> list:
         """Store last programmed card, save artifact, and return saved paths."""

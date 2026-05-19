@@ -1,3 +1,22 @@
+simgui (0.5.50) unstable; urgency=medium
+
+  * fix: restore network-share ICCID index refresh after share connection
+    and add periodic background scans:
+    - bug A: _on_index_updated updated the Program SIM panel but never
+      updated state_manager.status_text, so the main status bar permanently
+      showed "Card: {iccid} (not in index)" even after the index refreshed;
+      fixed by setting status_text when a card is found post-scan
+    - bug B: sync_os_mounts() existed but was never called; shares mounted
+      externally or left from a prior session were invisible to the scanner;
+      now called in BackgroundStartupWorker and _rescan_shares_background
+    - bug C: no periodic rescan timer; if the share was connected after
+      app startup the index never refreshed; added 5-minute QTimer driving
+      _rescan_shares_background so cards inserted later are found
+    - add per-share scan result logging (card count, file count, errors)
+      so scan failures are diagnosable without enabling debug logging
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 19 May 2026 00:00:00 +0000
+
 simgui (0.5.49) unstable; urgency=medium
 
   * feat: preserve all known share fields (OLD_IMSI, PIN1/PUK1, PIN2/PUK2,
