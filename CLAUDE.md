@@ -279,6 +279,117 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - Toast notifications should track state to prevent repeated display on every poll cycle — when CardWatcher polls at 1.5s intervals and encounters the same error repeatedly, naive toast display creates popup spam. Solution: add a flag (e.g., `_no_reader_toast_shown`) that is set when the toast is shown and reset only when the error condition clears. For dismissal, store the returned Toplevel widget from `show_toast()` and programmatically destroy it when the condition resolves (e.g., when reader is detected). Fixed in v0.5.36.
 - Blocking I/O on event loop freezes the UI — Initial implementation of background startup tasks used `QTimer.singleShot(0, lambda: blocking_work())`. This schedules blocking work on the main thread, freezing the UI. Solution: use `QThread` worker pattern (v0.5.38). Worker class emits signals, main window connects them to slots. Slots call StateManager methods. No lambdas with direct state manipulation, no blocking on event loop. See `docs/explanation/architecture.md` for the pattern.
 
+## Platform Refactoring Ground Rules
+
+These rules are non-negotiable. They apply to every task, every commit, and every agent
+that touches this repository. They exist because macOS work in versions after v0.5.50
+accidentally broke Ubuntu application logic, requiring a full rollback.
+
+### The Baseline
+
+**Rule 1 — Ubuntu v0.5.50 is the baseline.**
+Ubuntu behavior as shipped in v0.5.50 is correct and must be preserved exactly. Any
+change that alters Ubuntu test results, changes Ubuntu card programming behavior, changes
+Ubuntu authentication behavior, or changes Ubuntu state transitions is invalid — regardless
+of how useful it might be for macOS. There are no exceptions.
+
+### Common Logic Must Stay Common
+
+**Rule 2 — Common logic must remain common.**
+Business logic, state transitions, SIM programming logic (card detection, authentication,
+programming flows), CSV parsing, and network-share mount logic must NOT be duplicated
+across platforms. If two platforms need the same behavior, that behavior lives in exactly
+one shared location.
+
+**Rule 3 — Only true platform-specific behavior may be split.**
+Platform-specific code is limited to: filesystem paths, packaging conventions, permissions
+models, process invocation differences (e.g. pySim path resolution), UI integration
+differences (e.g. macOS-specific Qt quirks), or OS-specific dependency handling (e.g.
+`pcscd` vs `PCSC.framework`). If you are considering splitting something that does the
+same thing on both platforms, it must stay common.
+
+**Rule 4 — Do not duplicate the following across platforms under any circumstances:**
+- Business logic
+- State transitions (`CardState`, `CardWatcher`, `StateManager`)
+- SIM programming logic (`_program_via_pysim_prog`, `_run_pysim_prog`, delta-write vs full-write)
+- Card detection logic (`detect_card`, `probe_card_presence`, `_parse_pysim_output`)
+- Authentication logic (`authenticate`, `check_adm1_retry_counter`, ADM1 format handling)
+- CSV parsing and network-share logic (`csv_manager.py`, `network_storage_manager.py`)
+
+**Rule 5 — Platform-specific code must be thin adapters only.**
+An adapter wraps one call, translates one path, or handles one import difference. It must
+not contain SIM card logic, state machine logic, ADM1 handling, or any business rule. If
+an adapter is growing complex, the abstraction is wrong — stop and redesign.
+
+**Rule 5a — No new platform branching in `card_manager.py` or `card_watcher.py`.**
+These files are platform-free. The only permitted platform-specific code in
+`card_manager.py` is the already-existing `_find_cli_tool()` path lookup adapter. No
+platform branching (`if sys.platform`, `if _MACOS`, `if darwin`, etc.) is allowed inside
+SIM logic, authentication logic, card detection logic, programming flows, or state
+transitions in either file — without exception.
+
+### The State Machine Is Holy
+
+**Rule 6 — `docs/reference/state-machine.md` is authoritative.**
+Every state, every transition, and every invariant defined in `state-machine.md` is a hard
+constraint on the implementation. Nothing may contradict it. Read it before touching any
+state-related code.
+
+**Rule 7 — Check `state-machine.md` before touching logic or state.**
+Before writing any code that involves `CardState`, `CardWatcher`, `StateManager`, card
+detection, authentication, or programming flows, re-read `state-machine.md` and confirm
+the change conforms to every relevant invariant.
+
+**Rule 8 — If code and `state-machine.md` disagree, stop and report.**
+Do not guess. Do not silently pick one. Do not paper over the conflict. Report: "Code at
+`<file>:<line>` does `<X>`; `state-machine.md` says `<Y>`. These conflict." Then stop and
+wait for explicit resolution. Only after the conflict is resolved in writing may coding
+continue.
+
+### Refactoring Process
+
+**Rule 9 — Ubuntu baseline must be verified before adding macOS support.**
+The mandatory sequence for any platform refactor is:
+1. Confirm all Ubuntu tests pass unchanged on the current baseline.
+2. Extract shared logic (no behavior change — tests must still pass).
+3. Add the platform adapter.
+4. Add macOS-specific tests.
+
+Never add macOS support before the Ubuntu baseline is verified. Never combine steps.
+
+Test baselines must be platform-labelled. A test run on macOS is a macOS baseline only;
+it does not substitute for the authoritative Ubuntu baseline. The production baseline that
+must be protected first is Ubuntu v0.5.50. Any baseline document must state the exact
+platform and OS version it was recorded on.
+
+**Rule 10 — Small, reviewable commits; tests after every behavioral change.**
+No large combined refactor+feature commits. Each commit must be independently
+understandable and verifiable. Run the full test suite (`python3 -m pytest tests/ -x -q`)
+after every commit that touches behavior. No opportunistic changes: do not fix unrelated
+bugs, rename variables, clean up formatting, or add features in a refactoring commit.
+One concern per commit.
+
+### Quarantine Zones
+
+**`qt_main.py` is quarantined.**
+This file has a Python syntax error and is described in its own docstring as a "Phase 0
+stub." It cannot be imported without crashing. It is not the entry point for any platform.
+Do not fix it, extend it, reference it, or use it as a basis for architecture decisions.
+Do not delete it without first verifying it is unreferenced by packaging, scripts, docs,
+and tests. Treat it as non-existent until an explicit decision is made about its fate.
+
+**Post-v0.5.50 git history is tainted.**
+All commits, branches, and tags after v0.5.50 were rolled back because macOS work
+accidentally broke Ubuntu application logic. Use post-v0.5.50 history only for forensic
+comparison — never as a source of logic to copy. If a post-rollback branch is needed for
+reference, use `backup-before-rollback-0.5.50` (if present), `git reflog`, or `dist.old/`.
+Do not import any logic from those versions without explicit written approval.
+
+**`main.py` is the canonical entry point for all platforms.**
+Both Ubuntu and macOS run `python3 main.py`. No other entry point is authoritative.
+
+---
+
 ## StateManager Signal Architecture
 
 ```
