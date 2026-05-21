@@ -1,7 +1,10 @@
 """Tests for network_scanner — SMB/NFS network discovery utilities."""
 
 import subprocess
+import sys
 from unittest.mock import patch
+
+import pytest
 
 from utils.network_scanner import (
     DiscoveredServer,
@@ -12,6 +15,8 @@ from utils.network_scanner import (
     list_smb_shares,
     scan_smb_servers,
 )
+
+_MACOS = sys.platform == "darwin"
 
 # ---------------------------------------------------------------------------
 # Sample command outputs for mocking
@@ -331,6 +336,7 @@ class TestRunCmd:
 class TestScanSmbServers:
     """Tests for scan_smb_servers."""
 
+    @pytest.mark.skipif(_MACOS, reason="avahi-browse is Linux-only; macOS uses dns-sd")
     @patch("utils.network_scanner._run_cmd")
     def test_avahi_only(self, mock_cmd):
         """avahi-browse succeeds, nmblookup also called."""
@@ -343,6 +349,7 @@ class TestScanSmbServers:
         servers = scan_smb_servers(timeout=5)
         assert len(servers) == 2
 
+    @pytest.mark.skipif(_MACOS, reason="avahi-browse is Linux-only; macOS uses dns-sd")
     @patch("utils.network_scanner._run_cmd")
     def test_avahi_uses_resolve_flag(self, mock_cmd):
         """Bug fix: avahi-browse must include -r for resolution."""
@@ -393,18 +400,35 @@ class TestScanSmbServers:
 
     @patch("utils.network_scanner._run_cmd")
     def test_nmblookup_adds_new_server(self, mock_cmd):
-        """nmblookup finds a server not seen by avahi."""
-        avahi_single = (
-            "=;eth0;IPv4;NAS;_smb._tcp;local;nas.local;192.168.1.10;445\n"
-        )
+        """nmblookup finds a server not seen by the first-pass discovery tool."""
         nmb_different = "192.168.1.99 OTHERBOX<00>\n"
 
-        def side_effect(cmd, timeout=10):
-            if cmd[0] == "avahi-browse":
-                return (True, avahi_single)
-            if cmd[0] == "nmblookup":
-                return (True, nmb_different)
-            return (False, "")
+        if _MACOS:
+            # macOS uses dns-sd for first-pass discovery (avahi-browse is not called)
+            dns_sd_single = (
+                "   Instance Name: NAS\n"
+                "   Extra: [nas.local 192.168.1.10:445]\n"
+            )
+
+            def side_effect(cmd, timeout=10):
+                if cmd[0] == "dns-sd":
+                    return (True, dns_sd_single)
+                if cmd[0] == "nmblookup":
+                    return (True, nmb_different)
+                return (False, "")
+        else:
+            # Linux uses avahi-browse for first-pass discovery
+            avahi_single = (
+                "=;eth0;IPv4;NAS;_smb._tcp;local;nas.local;192.168.1.10;445\n"
+            )
+
+            def side_effect(cmd, timeout=10):
+                if cmd[0] == "avahi-browse":
+                    return (True, avahi_single)
+                if cmd[0] == "nmblookup":
+                    return (True, nmb_different)
+                return (False, "")
+
         mock_cmd.side_effect = side_effect
 
         servers = scan_smb_servers(timeout=5)

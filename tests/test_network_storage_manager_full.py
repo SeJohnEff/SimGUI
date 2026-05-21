@@ -32,6 +32,8 @@ from managers.network_storage_manager import (
 )
 from managers.settings_manager import SettingsManager
 
+_MACOS = sys.platform == "darwin"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -214,6 +216,7 @@ class TestBuildMountCmd:
         assert "hard" in opts
         assert "intr" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_uses_cifs_type(self):
         """SMB command uses -t cifs."""
         ns = NetworkStorageManager()
@@ -221,6 +224,7 @@ class TestBuildMountCmd:
         cmd = ns._build_mount_cmd(p)
         assert "cifs" in cmd
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_guest_when_no_username(self):
         """SMB guest mount when no username provided."""
         ns = NetworkStorageManager()
@@ -230,6 +234,7 @@ class TestBuildMountCmd:
         opts = cmd[cmd.index("-o") + 1]
         assert "guest" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_username_in_opts_when_no_cred_file(self):
         """SMB with username uses username= in opts when no cred file exists."""
         ns = NetworkStorageManager()
@@ -243,6 +248,7 @@ class TestBuildMountCmd:
         assert "username=user1" in opts
         assert "password=pass1" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_domain_in_opts(self):
         """SMB with domain includes domain= in opts."""
         ns = NetworkStorageManager()
@@ -254,6 +260,7 @@ class TestBuildMountCmd:
         opts = cmd[cmd.index("-o") + 1]
         assert "domain=CORP" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_cred_file_used_when_present(self, tmp_path):
         """SMB uses credentials= option when cred file exists."""
         ns = NetworkStorageManager()
@@ -267,6 +274,7 @@ class TestBuildMountCmd:
         opts = cmd[cmd.index("-o") + 1]
         assert "credentials=" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_extra_mount_options_appended(self):
         """Extra mount_options are appended to SMB opts."""
         ns = NetworkStorageManager()
@@ -275,6 +283,7 @@ class TestBuildMountCmd:
         opts = cmd[cmd.index("-o") + 1]
         assert "vers=3.0" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_uid_gid_in_opts(self):
         """SMB mount options include uid and gid."""
         ns = NetworkStorageManager()
@@ -284,6 +293,7 @@ class TestBuildMountCmd:
         assert "uid=" in opts
         assert "gid=" in opts
 
+    @pytest.mark.skipif(_MACOS, reason="Linux CIFS behavior; macOS SMB tested in TestBuildMountCmdMacOS")
     def test_smb_file_dir_mode_in_opts(self):
         """SMB mount options include file_mode and dir_mode."""
         ns = NetworkStorageManager()
@@ -1040,20 +1050,28 @@ class TestSudoPermissionDetection:
                        stdout="")):
             ok, msg = ns.mount(p)
         assert ok is False
-        assert "simgui-setup-mount" in msg
+        if _MACOS:
+            # macOS fix message directs users to System Settings and Finder
+            assert "mount_smbfs" in msg or "Finder" in msg
+        else:
+            # Linux fix message directs users to run simgui-setup-mount
+            assert "simgui-setup-mount" in msg
 
+    @pytest.mark.skipif(_MACOS, reason="Linux sudoers check; macOS always returns True (tested in macOS branch below)")
     def test_check_sudo_mount_success(self):
         """check_sudo_mount() returns True when sudoers file exists."""
         ns = NetworkStorageManager()
         with patch("os.path.isfile", return_value=True):
             assert ns.check_sudo_mount() is True
 
+    @pytest.mark.skipif(_MACOS, reason="Linux sudoers check; macOS always returns True (tested in macOS branch below)")
     def test_check_sudo_mount_failure(self):
         """check_sudo_mount() returns False when sudoers file is missing."""
         ns = NetworkStorageManager()
         with patch("os.path.isfile", return_value=False):
             assert ns.check_sudo_mount() is False
 
+    @pytest.mark.skipif(_MACOS, reason="Linux sudoers check; macOS always returns True (tested in macOS branch below)")
     def test_check_sudo_mount_os_error(self):
         """check_sudo_mount() returns False on OSError."""
         ns = NetworkStorageManager()

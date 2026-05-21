@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 
 import pytest
@@ -12,6 +13,8 @@ from managers.network_storage_manager import (
     StorageProfile,
 )
 from managers.settings_manager import SettingsManager
+
+_MACOS = sys.platform == "darwin"
 
 
 class TestStorageProfile:
@@ -134,9 +137,15 @@ class TestNetworkStorageManager:
         p = StorageProfile(label="smb-test", protocol="smb",
                            server="nas.local", share="simdata")
         cmd = ns._build_mount_cmd(p)
-        assert "cifs" in cmd
-        opts = cmd[cmd.index("-o") + 1]
-        assert "guest" in opts
+        if _MACOS:
+            # macOS uses mount_smbfs with the share URL; no -t cifs, no -o guest
+            assert "mount_smbfs" in " ".join(cmd)
+            assert "//nas.local/simdata" in cmd
+        else:
+            # Linux uses mount -t cifs with -o guest
+            assert "cifs" in cmd
+            opts = cmd[cmd.index("-o") + 1]
+            assert "guest" in opts
 
     def test_build_mount_cmd_smb_with_username(self):
         ns = NetworkStorageManager()
@@ -144,8 +153,14 @@ class TestNetworkStorageManager:
                            server="nas.local", share="simdata",
                            username="admin", password="pass123")
         cmd = ns._build_mount_cmd(p)
-        opts = cmd[cmd.index("-o") + 1]
-        assert "username=admin" in opts
+        if _MACOS:
+            # macOS embeds credentials in the URL: //user:pass@server/share
+            assert "mount_smbfs" in " ".join(cmd)
+            assert "admin" in " ".join(cmd)
+        else:
+            # Linux passes credentials via -o username=
+            opts = cmd[cmd.index("-o") + 1]
+            assert "username=admin" in opts
 
 
 class TestSyncOsMounts:
