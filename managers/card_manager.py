@@ -154,29 +154,68 @@ def _find_venv_python(tool_path: str) -> Optional[str]:
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     """Locate sysmo-usim-tool or pySim repo on the system.
 
-    Returns:
-        (path, backend) -- path to the tool directory and which backend it is.
+    Returns (path, backend) where path is the tool directory and backend
+    is the corresponding CLIBackend enum value.  Returns (None, NONE) if
+    no tool is found.
+
+    This function is the ONLY permitted platform-specific code in
+    card_manager.py.  All SIM card logic, authentication, card detection,
+    programming flows, and state transitions in this module are
+    platform-free.  This function is a thin path-lookup adapter: it
+    resolves a directory and returns it; it contains no SIM logic.
+
+    Search priority (first match wins):
+
+    1. PyInstaller bundle (``sys._MEIPASS/pysim``)
+       macOS .app bundles created with PyInstaller embed pySim here.
+       This path is only active when running as a frozen executable.
+
+    2. ``SYSMO_USIM_TOOL_PATH`` environment variable
+       Explicit override for the legacy sysmo-usim-tool backend.
+
+    3. ``PYSIM_PATH`` environment variable
+       Explicit override for pySim.  Set this to use a non-standard
+       install location on any platform.
+
+    4. Relative sibling path (``../../sysmo-usim-tool``)
+       Finds sysmo-usim-tool if both repos are checked out side-by-side.
+
+    5. ``~/sysmo-usim-tool`` — user home directory
+    6. ``/opt/sysmo-usim-tool`` — system-wide install (Linux/Ubuntu)
+
+    7. Relative sibling path (``../../pysim``)
+       Finds pySim if both repos are checked out side-by-side.
+
+    8. ``~/pysim`` — user home directory
+       Default macOS source install location.
+
+    9. ``/opt/pysim`` — system-wide install
+       Default Ubuntu install location (created by scripts/install.sh).
+
+    Do NOT add platform branches (``if sys.platform``, ``if _MACOS``,
+    etc.) anywhere else in this module.  Path differences belong here
+    only; SIM logic must remain unconditional.
     """
-    # Check for pySim inside a PyInstaller .app bundle (macOS)
+    # 1. PyInstaller bundle — active only in frozen .app executables
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         bundle_pysim = os.path.join(sys._MEIPASS, 'pysim')
         if os.path.isdir(bundle_pysim):
             logger.info("Found pySim in PyInstaller bundle: %s", bundle_pysim)
             return bundle_pysim, CLIBackend.PYSIM
 
-    # Check environment variable first (sysmo-usim-tool)
+    # 2. SYSMO_USIM_TOOL_PATH env var — explicit sysmo-usim-tool override
     env_path = os.environ.get('SYSMO_USIM_TOOL_PATH')
     if env_path and os.path.isdir(env_path):
         logger.info("Found sysmo-usim-tool via env var: %s", env_path)
         return env_path, CLIBackend.SYSMO
 
-    # Check environment variable for pySim
+    # 3. PYSIM_PATH env var — explicit pySim override (any platform)
     pysim_path = os.environ.get('PYSIM_PATH')
     if pysim_path and os.path.isdir(pysim_path):
         logger.info("Found pySim via env var: %s", pysim_path)
         return pysim_path, CLIBackend.PYSIM
 
-    # Check common relative paths for sysmo-usim-tool
+    # 4–6. Common sysmo-usim-tool locations
     for candidate in [
         os.path.join(os.path.dirname(__file__), '..', '..', 'sysmo-usim-tool'),
         os.path.expanduser('~/sysmo-usim-tool'),
@@ -186,7 +225,7 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
             logger.info("Found sysmo-usim-tool at %s", candidate)
             return os.path.abspath(candidate), CLIBackend.SYSMO
 
-    # Check common relative paths for pySim
+    # 7–9. Common pySim locations (~/pysim = macOS default, /opt/pysim = Ubuntu default)
     for candidate in [
         os.path.join(os.path.dirname(__file__), '..', '..', 'pysim'),
         os.path.expanduser('~/pysim'),
