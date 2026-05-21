@@ -4,6 +4,7 @@
 	python3 -m venv .venv
 
 test: .venv
+	.venv/bin/python -m pip install -r requirements.txt
 	.venv/bin/python -m pip install -r requirements-dev.txt
 	.venv/bin/python -m pytest -x -q --cov=. --cov-report=term
 
