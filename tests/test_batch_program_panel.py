@@ -19,7 +19,6 @@ pytestmark = pytest.mark.skipif(
 def panel(qtbot, tmp_path):
     settings = SettingsManager(path=str(tmp_path / "settings.json"))
     cm = CardManager()
-    cm.enable_simulator()
     p = BatchProgramPanel(None, cm, settings)
     qtbot.addWidget(p)
     return p
