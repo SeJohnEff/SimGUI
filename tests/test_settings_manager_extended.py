@@ -79,11 +79,6 @@ class TestSettingsManagerExtended:
         mgr = SettingsManager()
         assert str(tmp_path) in mgr._path
 
-    def test_simulator_mode_default_false(self, tmp_path):
-        """simulator_mode defaults to False."""
-        mgr = SettingsManager(path=str(tmp_path / "s.json"))
-        assert mgr.get("simulator_mode") is False
-
     def test_last_batch_size_default(self, tmp_path):
         """last_batch_size defaults to 20."""
         mgr = SettingsManager(path=str(tmp_path / "s.json"))

@@ -47,10 +47,6 @@ class TestSettingsGetSet:
         settings.set("last_batch_size", 50)
         assert settings.get("last_batch_size") == 50
 
-    def test_set_bool(self, settings):
-        settings.set("simulator_mode", True)
-        assert settings.get("simulator_mode") is True
-
     def test_overwrite(self, settings):
         settings.set("last_spn", "Alpha")
         settings.set("last_spn", "Beta")

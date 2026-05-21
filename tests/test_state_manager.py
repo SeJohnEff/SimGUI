@@ -26,7 +26,6 @@ import pytest
 from PyQt6.QtCore import QCoreApplication
 
 from state_manager import (
-    AppMode,
     CardInfo,
     CardState,
     ShareStatus,
@@ -204,42 +203,6 @@ class TestCardInfo:
         assert sm.card_info.acc == "0004"
         assert sm.card_info.spn == "Operator"
         assert sm.card_info.auth_status is True
-
-
-# ---------------------------------------------------------------------------
-# Mode
-# ---------------------------------------------------------------------------
-
-class TestMode:
-
-    def test_initial_mode(self, sm):
-        assert sm.mode is AppMode.HARDWARE
-
-    def test_set_mode_emits(self, sm):
-        spy = SignalSpy()
-        sm.mode_changed.connect(spy.slot)
-        sm.mode = AppMode.SIMULATOR
-        assert spy.count == 1
-        assert spy.last == (AppMode.SIMULATOR,)
-        assert sm.mode is AppMode.SIMULATOR
-
-    def test_idempotent(self, sm):
-        spy = SignalSpy()
-        sm.mode_changed.connect(spy.slot)
-        sm.mode = AppMode.HARDWARE  # same as default
-        assert spy.count == 0
-
-    def test_toggle(self, sm):
-        spy = SignalSpy()
-        sm.mode_changed.connect(spy.slot)
-        sm.mode = AppMode.SIMULATOR
-        sm.mode = AppMode.HARDWARE
-        sm.mode = AppMode.SIMULATOR
-        assert spy.count == 3
-
-    def test_enum_values(self):
-        assert AppMode.HARDWARE.value == "hardware"
-        assert AppMode.SIMULATOR.value == "simulator"
 
 
 # ---------------------------------------------------------------------------
