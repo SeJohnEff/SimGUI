@@ -388,6 +388,66 @@ Do not import any logic from those versions without explicit written approval.
 **`main.py` is the canonical entry point for all platforms.**
 Both Ubuntu and macOS run `python3 main.py`. No other entry point is authoritative.
 
+### Forensic Guardrails (Phase 4)
+
+These prohibitions are derived from `docs/reference/post-v0.5.50-forensic-report.md`,
+which documents the exact change categories that broke Ubuntu in the tainted history.
+They are concrete, unconditional rules — not guidelines.
+
+**Prohibition 1 — No mandatory top-level platform runtime imports in common modules.**
+Do not add `from platform_runtime import …` or any equivalent at the top level of
+`card_manager.py`, `card_watcher.py`, `network_storage_manager.py`, `csv_manager.py`,
+or any other shared manager module. A module-level import that fails on Ubuntu kills
+every test that touches the importing module. Any platform runtime abstraction must be
+optional (checked with `try/except ImportError` or guarded by a flag) or locally imported
+inside the one function that needs it — never at module scope in a common file.
+
+**Prohibition 2 — No shadow state machines.**
+Do not create a parallel card-detection algorithm (`_macos_check_with_pysim()` or
+equivalent) alongside the standard `CardWatcher` detection path. There is exactly one
+card detection algorithm. macOS-specific constraints (PCSC contention, no-ATR probe,
+settle delays) must be expressed as constructor parameters or narrowly-scoped adapter
+calls that feed the same state machine — not as a second algorithm that redefines
+removal semantics and runs on a separate code path.
+
+**Prohibition 3 — Do not reimplement card detection outside `CardWatcher`.**
+All card presence, card removal, and card-type detection logic lives in `CardWatcher`
+and `CardManager.detect_card()`. Do not add detection loops, cooldown counters, or
+fail-streak trackers anywhere else. If the existing detection path cannot accommodate
+a platform constraint, fix the existing path — do not bypass it.
+
+**Prohibition 4 — Do not bypass `state-machine.md`.**
+This is a restatement of Rules 6–8, added here because the tainted history shows that
+state-machine violations were introduced incrementally (one commit introducing them, the
+next "fixing" two of them) without ever resolving all of them before rollback. The
+correct response to discovering a state-machine violation is to stop coding and report —
+not to issue a follow-up commit that fixes some violations while leaving others open.
+
+**Prohibition 5 — No platform branches inside `card_watcher.py`.**
+This is a restatement of Rule 5a, added here as a Forensic Guardrail because
+`card_watcher.py` was the file most changed by the tainted history (new `sys.platform`
+branches, new instance variables initialised on all platforms, new dispatch logic). The
+file must remain a platform-free implementation of the state machine.
+
+**Prohibition 6 — Do not partially fix known state-machine violations.**
+If a code change introduces a state-machine violation, the commit that introduces it
+must not be pushed. If a violation is discovered in an already-pushed commit, stop all
+further work on that branch and report the violation with the exact file, line, and
+conflicting `state-machine.md` invariant. Do not push a follow-up "fix two violations"
+commit and continue as if the issue is resolved. Partial fixes mask the true scope of
+the problem and leave the codebase in an unknown state.
+
+**Prohibition 7 — Any macOS runtime abstraction must be optional, thin, and Ubuntu-safe.**
+If a `platform_runtime.py` (or equivalent) module is introduced in a future phase:
+
+- It must be imported locally (inside the one function that needs it), not at module scope.
+- It must return correct Linux/Ubuntu values on Ubuntu — verified by the Ubuntu test suite.
+- It must not change any hardcoded Linux path (e.g. `/tmp/simgui-mounts`,
+  `~/.config/simgui`) without verifying that the new value is identical to the original
+  on Linux.
+- Its test suite must include Ubuntu-path assertions, not only macOS-path assertions.
+- Ubuntu imports of all common modules must succeed without it being present.
+
 ---
 
 ## StateManager Signal Architecture
