@@ -23,7 +23,7 @@ def pysim_search_dirs() -> list:
 
 def sysmo_search_dirs() -> list:
     """Directories to search for sysmocom tools, in priority order."""
-    return ["/opt/pysim"]
+    return ["/opt/sysmo-usim-tool"]
 
 
 def config_dir() -> str:
