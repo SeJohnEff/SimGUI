@@ -202,7 +202,9 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 ## Testing
 
 - Framework: pytest
-- ~2200 passed, 14 skipped (Qt/GUI tests needing display, hardware-gated)
+- Active Ubuntu baseline: **2123 passed, 0 failed, 323 skipped** (v0.5.54, post qt_main removal)
+- See `docs/reference/test-baseline-ubuntu-post-qt-main-removal.md` for the authoritative count.
+- Prior counts (2140, 2051) are historical — do not use them as the current regression guard.
 - Hardware-gated tests: `SIMGUI_HW_TEST=1 python3 -m pytest tests/test_e2e_contracts.py::TestHardwareGated -v`
 - Run: `python3 -m pytest tests/ -x -q`
 - Key test files:
@@ -287,11 +289,18 @@ accidentally broke Ubuntu application logic, requiring a full rollback.
 
 ### The Baseline
 
-**Rule 1 — Ubuntu v0.5.50 is the baseline.**
-Ubuntu behavior as shipped in v0.5.50 is correct and must be preserved exactly. Any
-change that alters Ubuntu test results, changes Ubuntu card programming behavior, changes
-Ubuntu authentication behavior, or changes Ubuntu state transitions is invalid — regardless
-of how useful it might be for macOS. There are no exceptions.
+**Rule 1 — Ubuntu behavior is the baseline; active test-count guard is v0.5.54.**
+Ubuntu application behavior as shipped in v0.5.50 is correct and must be preserved exactly.
+Any change that alters Ubuntu card programming behavior, authentication behavior, or state
+transitions is invalid — regardless of how useful it might be for macOS. There are no
+exceptions.
+
+The active Ubuntu test-count regression guard is **2123 passed, 0 failed, 323 skipped**
+(recorded at tag `v0.5.54-post-qt-main-baseline` after intentional removal of the
+quarantined `qt_main.py` stub). Any future Ubuntu run that drops below this count without
+an approved explanation is a regression and must be reverted. The historical v0.5.50 count
+(2051 passed) is preserved in `docs/reference/test-baseline-ubuntu-v0.5.50.md` but is
+superseded by `docs/reference/test-baseline-ubuntu-post-qt-main-removal.md`.
 
 ### Common Logic Must Stay Common
 
