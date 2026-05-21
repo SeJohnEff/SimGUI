@@ -263,8 +263,16 @@ class CardManager:
     # ADM1 key reference byte for VERIFY APDU on SIM/USIM cards.
     # Standard value for sysmocom cards (ETSI TS 102.221, key ref 0x0A).
     _ADM1_KEY_REF = 0x0A
+    # Class-level default so __new__-based test fixtures see index 0.
+    # Overridden per-instance by __init__.
+    _pcsc_reader_index: int = 0
 
-    def __init__(self):
+    def __init__(self, *, pcsc_reader_index: int = 0):
+        if not isinstance(pcsc_reader_index, int) or pcsc_reader_index < 0:
+            raise ValueError(
+                f"pcsc_reader_index must be a non-negative integer, got {pcsc_reader_index!r}"
+            )
+        self._pcsc_reader_index: int = pcsc_reader_index
         self.cli_path: Optional[str]
         self.cli_backend: CLIBackend
         self.cli_path, self.cli_backend = _find_cli_tool()
@@ -413,7 +421,12 @@ class CardManager:
         if not rlist:
             return False, 'No smart-card reader detected'
 
-        reader = rlist[0]
+        if self._pcsc_reader_index >= len(rlist):
+            return False, (
+                f'PCSC reader index {self._pcsc_reader_index} out of range '
+                f'({len(rlist)} reader(s) detected)'
+            )
+        reader = rlist[self._pcsc_reader_index]
         try:
             conn = reader.createConnection()
             conn.connect()
@@ -464,11 +477,11 @@ class CardManager:
                            "pySim and set the appropriate environment variable.")
 
         if self.cli_backend == CLIBackend.PYSIM:
-            ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
             if not ok and 'protocolerror' in stderr.lower():
                 # Transient PCSC lock contention — retry once after a short delay.
                 time.sleep(1.0)
-                ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+                ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
             if ok:
                 self._parse_pysim_output(stdout)
                 self._original_card_data = dict(self.card_info)  # snapshot
@@ -613,7 +626,7 @@ class CardManager:
             return False, "", "pySim-shell.py not found"
 
         python_exe = self._venv_python or sys.executable
-        cmd = [python_exe, script_path, '-p0']
+        cmd = [python_exe, script_path, f'-p{self._pcsc_reader_index}']
         if adm1_hex and self.card_type != CardType.GIALERSIM:
             # Gialersim cards: standard VERIFY ADM1 (CHV 0x0A) fails
             # with 6f00 — auth for those cards goes through pySim-prog.
@@ -708,7 +721,7 @@ class CardManager:
         elif self.card_type == CardType.SJS1:
             pysim_type = 'sysmoUSIM-SJS1'
 
-        cmd = [python_exe, script_path, '-p0', '-t', pysim_type]
+        cmd = [python_exe, script_path, f'-p{self._pcsc_reader_index}', '-t', pysim_type]
 
         # Gialersim cards: pass ADM1 as ASCII (-a) because the
         # gialersim driver handles its own internal auth and uses
@@ -798,7 +811,13 @@ class CardManager:
             rlist = _smartcard_readers()
             if not rlist:
                 return None
-            reader = rlist[0]
+            if self._pcsc_reader_index >= len(rlist):
+                logger.warning(
+                    "check_adm1_retry_counter: reader index %d out of range "
+                    "(%d reader(s))", self._pcsc_reader_index, len(rlist)
+                )
+                return None
+            reader = rlist[self._pcsc_reader_index]
             conn = reader.createConnection()
             conn.connect()
 
@@ -1269,7 +1288,7 @@ class CardManager:
                 time.sleep(self._VERIFY_DELAY_S)
                 logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
-            ok, stdout, stderr = self._run_cli('pySim-read.py', '-p0')
+            ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
             logger.info("Verify read-back (attempt %d): ok=%s, "
                         "stdout_lines=%d, stderr_lines=%d",
                         attempt, ok,

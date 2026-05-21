@@ -1,5 +1,7 @@
 """Tests for managers.card_manager module."""
 
+import textwrap
+
 import pytest
 
 from managers.card_manager import CardManager, CardType, CLIBackend
@@ -110,3 +112,123 @@ class TestSetCliPath:
     def test_set_path_explicit_backend(self, card_manager, tmp_path):
         card_manager.set_cli_path(str(tmp_path), backend=CLIBackend.PYSIM)
         assert card_manager.cli_backend == CLIBackend.PYSIM
+
+
+class TestPcscReaderIndex:
+    """Tests for the pcsc_reader_index constructor parameter (S3-B seam)."""
+
+    def test_default_index_is_zero(self):
+        cm = CardManager()
+        assert cm._pcsc_reader_index == 0
+
+    def test_explicit_zero(self):
+        cm = CardManager(pcsc_reader_index=0)
+        assert cm._pcsc_reader_index == 0
+
+    def test_non_default_index_stored(self):
+        cm = CardManager(pcsc_reader_index=1)
+        assert cm._pcsc_reader_index == 1
+
+    def test_invalid_negative_raises(self):
+        with pytest.raises(ValueError):
+            CardManager(pcsc_reader_index=-1)
+
+    def test_invalid_float_raises(self):
+        with pytest.raises((ValueError, TypeError)):
+            CardManager(pcsc_reader_index=1.5)  # type: ignore[arg-type]
+
+    def test_invalid_string_raises(self):
+        with pytest.raises((ValueError, TypeError)):
+            CardManager(pcsc_reader_index="0")  # type: ignore[arg-type]
+
+    def test_positional_arg_not_accepted(self):
+        with pytest.raises(TypeError):
+            CardManager(1)  # type: ignore[call-arg]
+
+    def test_detect_card_uses_reader_index_0_by_default(self, tmp_path):
+        calls_file = tmp_path / "calls.txt"
+        script = tmp_path / "pySim-read.py"
+        script.write_text(textwrap.dedent(f"""\
+            import sys
+            with open({str(calls_file)!r}, 'w') as f:
+                f.write(' '.join(sys.argv[1:]))
+            print("ICCID: 8988211000000123456")
+            print("IMSI: 001010000012345")
+        """))
+        cm = CardManager(pcsc_reader_index=0)
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.detect_card()
+        recorded = calls_file.read_text().strip()
+        assert recorded == "-p0", f"Expected -p0, got {recorded!r}"
+
+    def test_detect_card_uses_reader_index_1(self, tmp_path):
+        calls_file = tmp_path / "calls.txt"
+        script = tmp_path / "pySim-read.py"
+        script.write_text(textwrap.dedent(f"""\
+            import sys
+            with open({str(calls_file)!r}, 'w') as f:
+                f.write(' '.join(sys.argv[1:]))
+            print("ICCID: 8988211000000123456")
+            print("IMSI: 001010000012345")
+        """))
+        cm = CardManager(pcsc_reader_index=1)
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.detect_card()
+        recorded = calls_file.read_text().strip()
+        assert recorded == "-p1", f"Expected -p1, got {recorded!r}"
+
+    def test_pysim_shell_uses_reader_index_1(self, tmp_path, monkeypatch):
+        calls_file = tmp_path / "calls.txt"
+        script = tmp_path / "pySim-shell.py"
+        script.write_text(textwrap.dedent(f"""\
+            import sys
+            with open({str(calls_file)!r}, 'w') as f:
+                f.write(' '.join(sys.argv[1:]))
+        """))
+        cm = CardManager(pcsc_reader_index=1)
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.SJA5
+        cm._run_pysim_shell_impl("3838383838383838", "")
+        recorded = calls_file.read_text().strip()
+        assert "-p1" in recorded, f"Expected -p1 in args, got {recorded!r}"
+
+    def test_pysim_prog_uses_reader_index_1(self, tmp_path):
+        calls_file = tmp_path / "calls.txt"
+        script = tmp_path / "pySim-prog.py"
+        script.write_text(textwrap.dedent(f"""\
+            import sys
+            with open({str(calls_file)!r}, 'w') as f:
+                f.write(' '.join(sys.argv[1:]))
+        """))
+        cm = CardManager(pcsc_reader_index=1)
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.SJA5
+        cm.authenticated = True
+        cm._authenticated_adm1_hex = "3838383838383838"
+        cm._run_pysim_prog(
+            {"IMSI": "001010000012345", "Ki": "A" * 32, "OPc": "B" * 32},
+            adm1_hex="3838383838383838",
+        )
+        recorded = calls_file.read_text().strip()
+        assert "-p1" in recorded, f"Expected -p1 in pySim-prog args, got {recorded!r}"
+
+    def test_probe_card_presence_out_of_range_returns_error(self, monkeypatch):
+        import managers.card_manager as cm_mod
+        monkeypatch.setattr(cm_mod, "_pyscard_available", True)
+        monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: ["reader0"])
+        cm = CardManager(pcsc_reader_index=99)
+        ok, reason = cm.probe_card_presence()
+        assert ok is False
+        assert "99" in reason or "out of range" in reason.lower()
+
+    def test_check_adm1_retry_counter_out_of_range_returns_none(self, monkeypatch):
+        import managers.card_manager as cm_mod
+        monkeypatch.setattr(cm_mod, "_pyscard_available", True)
+        monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: ["reader0"])
+        cm = CardManager(pcsc_reader_index=99)
+        result = cm.check_adm1_retry_counter()
+        assert result is None
