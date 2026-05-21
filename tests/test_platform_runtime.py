@@ -65,9 +65,11 @@ class TestPlatformRuntimeLinuxDefaults:
     """platform_runtime.py must return correct Linux/Ubuntu values."""
 
     @pytest.fixture(autouse=True)
-    def _import_module(self):
+    def _force_linux(self):
         import platform_runtime as pr
-        self.pr = pr
+        with mock.patch.object(pr, "_MACOS", False):
+            self.pr = pr
+            yield
 
     def test_pysim_search_dirs_includes_opt_pysim(self):
         dirs = self.pr.pysim_search_dirs()
@@ -434,3 +436,134 @@ class TestNoTopLevelPlatformRuntimeImport:
             f"must be local imports only:\n" +
             "\n".join(f"  line {ln}: {txt}" for ln, txt in violations)
         )
+
+
+# ---------------------------------------------------------------------------
+# 6. macOS-specific platform_runtime values
+#
+# Verifies macOS values are correct when _MACOS=True, and that Linux values
+# remain unchanged when _MACOS=False (belt-and-suspenders for S2-E).
+# ---------------------------------------------------------------------------
+
+
+class TestPlatformRuntimeMacOSValues:
+    """platform_runtime.py must return correct macOS values when _MACOS=True."""
+
+    @pytest.fixture(autouse=True)
+    def _force_macos(self):
+        import platform_runtime as pr
+        with mock.patch.object(pr, "_MACOS", True):
+            self.pr = pr
+            yield
+
+    def test_pysim_search_dirs_includes_home_pysim(self):
+        dirs = self.pr.pysim_search_dirs()
+        home = os.path.expanduser("~")
+        assert any(d.startswith(home) and "pysim" in d for d in dirs), (
+            f"pysim_search_dirs() on macOS must include ~/pysim; got {dirs}"
+        )
+
+    def test_pysim_search_dirs_does_not_include_opt_pysim(self):
+        dirs = self.pr.pysim_search_dirs()
+        assert "/opt/pysim" not in dirs, (
+            "pysim_search_dirs() on macOS must not return /opt/pysim "
+            "(Ubuntu-only path)"
+        )
+
+    def test_pysim_search_dirs_returns_list(self):
+        assert isinstance(self.pr.pysim_search_dirs(), list)
+
+    def test_mount_cmd_nfs_returns_absolute_binary_path(self):
+        cmd = self.pr.mount_cmd_nfs("server:/share", "/mnt/dst")
+        assert cmd, "mount_cmd_nfs() must return a non-empty list on macOS"
+        assert os.path.isabs(cmd[0]), (
+            f"mount_cmd_nfs()[0] must be an absolute path on macOS; got '{cmd[0]}'"
+        )
+
+    def test_mount_cmd_nfs_absolute_path_guard_passes(self):
+        """The absolute-path guard in _build_mount_cmd() must pass for macOS NFS."""
+        cmd = self.pr.mount_cmd_nfs("server:/share", "/mnt/dst")
+        guard = isinstance(cmd, list) and bool(cmd) and os.path.isabs(cmd[0])
+        assert guard, (
+            "macOS mount_cmd_nfs() must satisfy the absolute-path guard so "
+            "platform_runtime hook fires; got cmd={cmd!r}"
+        )
+
+    def test_mount_cmd_nfs_contains_nfs_and_addresses(self):
+        cmd = self.pr.mount_cmd_nfs("server:/share", "/mnt/dst")
+        assert "nfs" in cmd
+        assert "server:/share" in cmd
+        assert "/mnt/dst" in cmd
+
+    def test_mount_cmd_smb_returns_empty_on_macos(self):
+        """macOS mount_cmd_smb() returns [] so the caller's _MACOS branch handles creds."""
+        cmd = self.pr.mount_cmd_smb("//server/share", "/mnt/dst", ["-o", "vers=3.0"])
+        assert cmd == [], (
+            "mount_cmd_smb() on macOS must return [] to defer to the "
+            "_MACOS credential-embedding branch; got {cmd!r}"
+        )
+
+    def test_mount_cmd_smb_guard_fails_so_macos_branch_runs(self):
+        """Empty list fails the absolute-path guard, ensuring _MACOS branch handles SMB."""
+        cmd = self.pr.mount_cmd_smb("//server/share", "/mnt/dst", [])
+        guard = isinstance(cmd, list) and bool(cmd) and os.path.isabs(cmd[0])
+        assert not guard, (
+            "macOS mount_cmd_smb() must fail the absolute-path guard so the "
+            "_MACOS credential branch runs; guard was True for cmd={cmd!r}"
+        )
+
+    def test_config_dir_uses_library_application_support(self):
+        d = self.pr.config_dir()
+        assert "Library/Application Support" in d, (
+            f"config_dir() on macOS must use ~/Library/Application Support; got '{d}'"
+        )
+
+    def test_config_dir_contains_simgui(self):
+        d = self.pr.config_dir()
+        assert "simgui" in d.lower(), (
+            f"config_dir() on macOS '{d}' must reference simgui"
+        )
+
+    def test_config_dir_under_home(self):
+        d = self.pr.config_dir()
+        home = os.path.expanduser("~")
+        assert d.startswith(home), (
+            f"config_dir() on macOS '{d}' must be under home '{home}'"
+        )
+
+    def test_config_dir_returns_str(self):
+        assert isinstance(self.pr.config_dir(), str)
+
+
+class TestPlatformRuntimeLinuxValuesUnchangedByS2E:
+    """Belt-and-suspenders: Linux values must be identical after S2-E changes."""
+
+    @pytest.fixture(autouse=True)
+    def _force_linux(self):
+        import platform_runtime as pr
+        with mock.patch.object(pr, "_MACOS", False):
+            self.pr = pr
+            yield
+
+    def test_pysim_search_dirs_still_opt_pysim(self):
+        assert "/opt/pysim" in self.pr.pysim_search_dirs()
+
+    def test_sysmo_search_dirs_still_opt_sysmo(self):
+        assert "/opt/sysmo-usim-tool" in self.pr.sysmo_search_dirs()
+
+    def test_config_dir_still_dotconfig(self):
+        d = self.pr.config_dir()
+        assert ".config/simgui" in d
+
+    def test_mount_cmd_nfs_still_bare_mount(self):
+        cmd = self.pr.mount_cmd_nfs("server:/share", "/mnt/dst")
+        assert cmd[0] == "mount"
+        assert not os.path.isabs(cmd[0]), (
+            "Linux NFS mount_cmd_nfs()[0] must be bare 'mount' (relative) so "
+            "absolute-path guard fails and existing Linux path runs"
+        )
+
+    def test_mount_cmd_smb_still_cifs(self):
+        cmd = self.pr.mount_cmd_smb("//server/share", "/mnt/dst", [])
+        assert "-t" in cmd
+        assert cmd[cmd.index("-t") + 1] == "cifs"
