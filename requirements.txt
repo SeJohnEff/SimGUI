@@ -3,8 +3,7 @@
 # tkinter is part of the Python standard library (no pip install needed).
 # On Debian/Ubuntu you may need: sudo apt install python3-tk
 #
-# PyQt6 is required for the upcoming Qt-based UI (qt_main.py).
-# The tkinter UI (main.py) still works without PyQt6.
+# PyQt6 is required for the Qt-based UI (main.py).
 PyQt6>=6.6        # Qt6 bindings for the new UI
 Pillow>=10.0      # Image support for tkinter (required for PNG icons in PyInstaller bundle)
 #

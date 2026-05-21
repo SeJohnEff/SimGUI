@@ -371,12 +371,10 @@ One concern per commit.
 
 ### Quarantine Zones
 
-**`qt_main.py` is quarantined.**
-This file has a Python syntax error and is described in its own docstring as a "Phase 0
-stub." It cannot be imported without crashing. It is not the entry point for any platform.
-Do not fix it, extend it, reference it, or use it as a basis for architecture decisions.
-Do not delete it without first verifying it is unreferenced by packaging, scripts, docs,
-and tests. Treat it as non-existent until an explicit decision is made about its fate.
+**`qt_main.py` has been permanently removed (v0.5.53).**
+This file was a Phase 0 stub with a Python syntax error. It was never an entry point for
+any platform. It has been deleted from the repository and removed from `debian/rules`.
+Do not reintroduce it. `main.py` is and remains the only canonical entry point.
 
 **Post-v0.5.50 git history is tainted.**
 All commits, branches, and tags after v0.5.50 were rolled back because macOS work
