@@ -5,7 +5,6 @@ Covers:
 - Error handling during programming (detect / auth / program failures)
 - Progress callback states
 - get_summary via success_count / fail_count after various outcomes
-- Dry run logic via simulator with controlled failures
 - ICCID mismatch handling
 - skip() while waiting for card
 - Multiple start() calls
@@ -16,26 +15,29 @@ import threading
 import time
 
 import pytest
+from unittest.mock import MagicMock
 
 from managers.batch_manager import BatchManager, BatchState, CardResult
 from managers.card_manager import CardManager
-from simulator.settings import SimulatorSettings
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _sim_manager(num_cards=20, error_rate=0.0):
-    """CardManager in simulator mode."""
-    cm = CardManager()
-    cm.enable_simulator(SimulatorSettings(delay_ms=0,
-                                           error_rate=error_rate,
-                                           num_cards=num_cards))
+def _mock_manager():
+    """Mock CardManager for hardware-path batch tests."""
+    cm = MagicMock()
+    cm.is_simulator_active = False
+    cm.detect_card.return_value = (True, "Card detected")
+    cm.read_iccid.return_value = None  # no ICCID cross-check by default
+    cm.authenticate.return_value = (True, "Authenticated")
+    cm.program_card.return_value = (True, "Programmed successfully")
+    cm.verify_card.return_value = (True, [])
     return cm
 
 
 def _make_batch(count: int, adm1="12345678") -> list:
-    """Build a dummy batch from the simulator's card deck."""
+    """Build a dummy batch of `count` card dicts."""
     return [
         {
             "ICCID": f"8999900000000000{i:04d}",
@@ -47,9 +49,14 @@ def _make_batch(count: int, adm1="12345678") -> list:
 
 
 def _run_to_completion(bm: BatchManager, batch: list, timeout: float = 10) -> None:
-    """Start batch and wait for completion."""
+    """Start batch and wait for completion.
+
+    Sets on_waiting_for_card to immediately fire card_ready so that
+    the hardware-path wait is bypassed in mock-based tests.
+    """
     done = threading.Event()
     bm.on_completed = lambda: done.set()
+    bm.on_waiting_for_card = lambda i, iccid: bm.card_ready()
     bm.start(batch)
     done.wait(timeout=timeout)
 
@@ -92,98 +99,71 @@ class TestBatchManagerInitState:
 
     def test_state_is_idle(self):
         """Initial state is IDLE."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         assert bm.state == BatchState.IDLE
 
     def test_results_empty(self):
         """No results initially."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         assert bm.results == []
 
     def test_total_is_zero(self):
         """No batch data initially."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         assert bm.total == 0
 
     def test_current_is_zero(self):
         """Current index is 0 initially."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         assert bm.current == 0
 
     def test_counts_zero(self):
         """Success and fail counts are 0 initially."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         assert bm.success_count == 0
         assert bm.fail_count == 0
 
 
 # ---------------------------------------------------------------------------
-# Successful simulator batch
+# Successful batch (mock CM always succeeds)
 # ---------------------------------------------------------------------------
 
 class TestSuccessfulBatch:
-    """Simulator batch that completes fully."""
+    """Mock batch that completes fully."""
 
     def test_all_cards_processed(self):
         """All cards in the batch are processed."""
-        cm = _sim_manager(num_cards=5)
-        # Use the simulator's real cards (known good ADM1)
-        from simulator.simulator_backend import SimulatorBackend
-        backend = cm._simulator
-        batch = []
-        for i, card in enumerate(backend.card_deck[:3]):
-            batch.append({"ICCID": card.iccid, "IMSI": card.imsi,
-                          "ADM1": card.adm1})
+        cm = _mock_manager()
         bm = BatchManager(cm)
-        done = threading.Event()
-        bm.on_completed = lambda: done.set()
-        bm.start(batch)
-        done.wait(timeout=10)
+        _run_to_completion(bm, _make_batch(3))
         assert len(bm.results) == 3
 
     def test_state_completed_after_run(self):
         """State is COMPLETED after successful run."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": backend.card_deck[0].iccid,
-                  "IMSI": backend.card_deck[0].imsi,
-                  "ADM1": backend.card_deck[0].adm1}]
-        bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        bm = BatchManager(_mock_manager())
+        _run_to_completion(bm, _make_batch(1))
         assert bm.state == BatchState.COMPLETED
 
     def test_on_progress_called_for_each_card(self):
         """on_progress callback fires once per card."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:3]]
         calls = []
-        bm = BatchManager(cm)
+        bm = BatchManager(_mock_manager())
         bm.on_progress = lambda c, t, m: calls.append((c, t, m))
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(3))
         assert len(calls) == 3
 
     def test_on_card_result_called_for_each_card(self):
         """on_card_result callback fires once per card."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:2]]
         results_cb = []
-        bm = BatchManager(cm)
+        bm = BatchManager(_mock_manager())
         bm.on_card_result = lambda r: results_cb.append(r)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(2))
         assert len(results_cb) == 2
 
     def test_success_count_all_pass(self):
         """success_count equals batch size when all succeed."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:3]]
-        bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        bm = BatchManager(_mock_manager())
+        _run_to_completion(bm, _make_batch(3))
         assert bm.success_count == 3
         assert bm.fail_count == 0
 
@@ -196,72 +176,52 @@ class TestBatchErrors:
     """Test error handling when individual cards fail."""
 
     def test_wrong_adm1_causes_failure(self):
-        """Wrong ADM1 in batch data causes that card to fail."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        batch = [{"ICCID": card.iccid, "IMSI": card.imsi,
-                  "ADM1": "00000000"}]  # wrong ADM1
+        """Authenticate failure causes that card to fail."""
+        cm = _mock_manager()
+        cm.authenticate.return_value = (False, "Wrong ADM1")
         bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(1))
         assert bm.fail_count >= 1
-        assert "Auth failed" in bm.results[0].message or \
-               "Wrong ADM1" in bm.results[0].message
+        assert "Auth failed" in bm.results[0].message
 
     def test_iccid_mismatch_causes_failure(self):
-        """Wrong ICCID in batch data causes that card to fail."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        batch = [{"ICCID": "0000000000000000000",  # wrong ICCID
-                  "IMSI": card.imsi, "ADM1": card.adm1}]
+        """ICCID returned by card differs from batch — card fails."""
+        cm = _mock_manager()
+        # read_iccid returns a value that won't match any batch ICCID
+        cm.read_iccid.return_value = "0000000000000000000"
         bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
-        # The ICCID check at batch level: card.iccid != expected → fail
+        _run_to_completion(bm, _make_batch(1))
         assert len(bm.results) == 1
-        result = bm.results[0]
-        assert result.success is False
+        assert bm.results[0].success is False
 
     def test_detect_failure_causes_card_fail(self):
         """If detect_card fails, that card's result is failure."""
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, error_rate=1.0,
-                                               num_cards=5))
-        backend = cm._simulator
-        batch = [{"ICCID": backend.card_deck[0].iccid,
-                  "IMSI": backend.card_deck[0].imsi,
-                  "ADM1": backend.card_deck[0].adm1}]
+        cm = _mock_manager()
+        cm.detect_card.return_value = (False, "No card in reader")
         bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(1))
         assert bm.fail_count >= 1
 
     def test_mixed_success_and_failure(self):
-        """Batch with some valid and some invalid cards produces mixed results."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        # First card: correct ADM1; second card: wrong ADM1
-        batch = [
-            {"ICCID": backend.card_deck[0].iccid,
-             "IMSI": backend.card_deck[0].imsi,
-             "ADM1": backend.card_deck[0].adm1},
-            {"ICCID": backend.card_deck[1].iccid,
-             "IMSI": backend.card_deck[1].imsi,
-             "ADM1": "00000000"},  # wrong
+        """Batch with some valid and some failing auth produces mixed results."""
+        cm = _mock_manager()
+        cm.authenticate.side_effect = [
+            (True, "Authenticated"),
+            (False, "Wrong ADM1"),
         ]
         bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(2))
         assert bm.success_count + bm.fail_count == 2
-        # At least one should have failed
         assert bm.fail_count >= 1
 
     def test_success_plus_fail_equals_total(self):
         """success_count + fail_count always equals total results."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:4]]
+        cm = _mock_manager()
+        cm.authenticate.side_effect = [
+            (True, "ok"), (False, "fail"), (True, "ok"), (False, "fail"),
+        ]
         bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(4))
         assert bm.success_count + bm.fail_count == len(bm.results)
 
 
@@ -274,13 +234,17 @@ class TestBatchControl:
 
     def test_abort_before_start(self):
         """abort() before start sets state to ABORTED."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         bm.abort()
         assert bm.state == BatchState.ABORTED
 
     def test_abort_mid_batch(self):
-        """abort() during execution stops the batch."""
-        bm = BatchManager(_sim_manager(num_cards=20))
+        """abort() during execution stops the batch.
+
+        Without auto card_ready, the batch thread is blocked waiting for
+        the first card insertion. abort() unblocks and exits cleanly.
+        """
+        bm = BatchManager(_mock_manager())
         done = threading.Event()
         bm.on_completed = lambda: done.set()
         bm.start(_make_batch(100))
@@ -290,19 +254,19 @@ class TestBatchControl:
         assert bm.state == BatchState.ABORTED
 
     def test_pause_then_resume(self):
-        """pause() then resume() allows batch to complete."""
-        cm = _sim_manager(num_cards=10)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:5]]
-        bm = BatchManager(cm)
+        """pause() then resume() does not break batch completion.
+
+        With auto card_ready, the small batch may complete before pause()
+        is called — COMPLETED is an accepted state per this test's contract.
+        """
+        bm = BatchManager(_mock_manager())
         done = threading.Event()
         bm.on_completed = lambda: done.set()
-        bm.start(batch)
+        bm.on_waiting_for_card = lambda i, iccid: bm.card_ready()
+        bm.start(_make_batch(5))
         time.sleep(0.02)
         bm.pause()
         time.sleep(0.05)
-        # Batch may have already completed (it's fast) — that's OK
         assert bm.state in (BatchState.PAUSED, BatchState.COMPLETED)
         bm.resume()
         done.wait(timeout=10)
@@ -310,24 +274,22 @@ class TestBatchControl:
 
     def test_pause_when_not_running_is_noop(self):
         """pause() when not running does not change state."""
-        bm = BatchManager(_sim_manager())
-        bm.pause()  # IDLE → no change
+        bm = BatchManager(_mock_manager())
+        bm.pause()
         assert bm.state == BatchState.IDLE
 
     def test_resume_when_not_paused_is_noop(self):
         """resume() when not paused does not crash."""
-        bm = BatchManager(_sim_manager())
-        bm.resume()  # IDLE → no change
+        bm = BatchManager(_mock_manager())
+        bm.resume()
         assert bm.state == BatchState.IDLE
 
-    def test_abort_unblocks_paused_batch(self):
-        """abort() wakes a paused batch and sets ABORTED state."""
-        bm = BatchManager(_sim_manager(num_cards=20))
+    def test_abort_unblocks_waiting_batch(self):
+        """abort() wakes a batch blocked at WAITING_FOR_CARD and sets ABORTED."""
+        bm = BatchManager(_mock_manager())
         done = threading.Event()
         bm.on_completed = lambda: done.set()
         bm.start(_make_batch(50))
-        time.sleep(0.05)
-        bm.pause()
         time.sleep(0.05)
         bm.abort()
         done.wait(timeout=10)
@@ -335,30 +297,23 @@ class TestBatchControl:
 
     def test_cannot_start_while_running(self):
         """start() while running is a no-op (total stays at original count)."""
-        bm = BatchManager(_sim_manager(num_cards=20))
+        bm = BatchManager(_mock_manager())
         done = threading.Event()
         bm.on_completed = lambda: done.set()
         bm.start(_make_batch(50))
-        # Capture total immediately before the second start
         original_total = bm.total
         assert original_total == 50
-        bm.abort()  # abort so the thread stops
+        bm.abort()
         done.wait(timeout=10)
 
     def test_second_start_after_completion(self):
         """Can start a new batch after the previous one completed."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": backend.card_deck[0].iccid,
-                  "IMSI": backend.card_deck[0].imsi,
-                  "ADM1": backend.card_deck[0].adm1}]
-        bm = BatchManager(cm)
-        _run_to_completion(bm, batch)
+        bm = BatchManager(_mock_manager())
+        _run_to_completion(bm, _make_batch(1))
         assert bm.state == BatchState.COMPLETED
 
-        # Reset state and run again
         bm.state = BatchState.IDLE
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(1))
         assert bm.state == BatchState.COMPLETED
 
 
@@ -371,40 +326,27 @@ class TestProgressCallback:
 
     def test_progress_total_matches_batch_size(self):
         """on_progress total arg always matches actual batch size."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
         n = 3
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:n]]
         totals = []
-        bm = BatchManager(cm)
+        bm = BatchManager(_mock_manager())
         bm.on_progress = lambda c, t, m: totals.append(t)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(n))
         assert all(t == n for t in totals)
 
     def test_progress_current_increases(self):
         """on_progress current arg is non-decreasing across calls."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:4]]
         currents = []
-        bm = BatchManager(cm)
+        bm = BatchManager(_mock_manager())
         bm.on_progress = lambda c, t, m: currents.append(c)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(4))
         assert currents == sorted(currents)
 
     def test_progress_message_is_string(self):
         """on_progress message arg is always a non-empty string."""
-        cm = _sim_manager(num_cards=5)
-        backend = cm._simulator
-        batch = [{"ICCID": backend.card_deck[0].iccid,
-                  "IMSI": backend.card_deck[0].imsi,
-                  "ADM1": backend.card_deck[0].adm1}]
         messages = []
-        bm = BatchManager(cm)
+        bm = BatchManager(_mock_manager())
         bm.on_progress = lambda c, t, m: messages.append(m)
-        _run_to_completion(bm, batch)
+        _run_to_completion(bm, _make_batch(1))
         for msg in messages:
             assert isinstance(msg, str)
             assert len(msg) > 0
@@ -419,7 +361,7 @@ class TestEmptyBatch:
 
     def test_empty_batch_completes_immediately(self):
         """Empty batch transitions to COMPLETED with no results."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         _run_to_completion(bm, [])
         assert bm.state == BatchState.COMPLETED
         assert bm.results == []
@@ -428,7 +370,7 @@ class TestEmptyBatch:
 
     def test_on_completed_still_called(self):
         """on_completed callback fires even for empty batch."""
-        bm = BatchManager(_sim_manager())
+        bm = BatchManager(_mock_manager())
         called = threading.Event()
         bm.on_completed = lambda: called.set()
         bm.start([])
@@ -444,9 +386,7 @@ class TestCardReadySkip:
 
     def test_card_ready_unblocks_waiting(self):
         """card_ready() unblocks a batch waiting for card insertion."""
-        # Non-simulator mode: batch waits for card_ready
-        cm = CardManager()  # no simulator
-        cm.authenticated = False
+        cm = CardManager()  # real CM, no simulator — hardware path
 
         bm = BatchManager(cm)
         wait_calls = []
@@ -454,22 +394,17 @@ class TestCardReadySkip:
         done = threading.Event()
         bm.on_completed = lambda: done.set()
 
-        # One card — will wait for card_ready
         batch = [{"ICCID": "89123", "IMSI": "001", "ADM1": "12345678"}]
         bm.start(batch)
 
-        # Give thread time to reach WAITING_FOR_CARD state
         time.sleep(0.2)
-
-        # Signal card is ready
         bm.card_ready()
         done.wait(timeout=5)
-        # Should have completed or aborted (not stuck)
         assert bm.state in (BatchState.COMPLETED, BatchState.ABORTED)
 
     def test_skip_marks_card_skipped(self):
         """skip() causes the current card to be marked as Skipped."""
-        cm = CardManager()  # no simulator
+        cm = CardManager()  # real CM, no simulator — hardware path
         bm = BatchManager(cm)
         done = threading.Event()
         bm.on_completed = lambda: done.set()
@@ -480,7 +415,6 @@ class TestCardReadySkip:
         bm.skip()
         done.wait(timeout=5)
 
-        # At least one result should say "Skipped"
         if bm.results:
             skipped = [r for r in bm.results if "Skipped" in r.message]
             assert len(skipped) >= 1

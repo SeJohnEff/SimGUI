@@ -767,19 +767,22 @@ class TestAuthLockoutContract:
         assert "locked" in msg.lower()
 
     def test_iccid_mismatch_does_not_count_as_attempt(self):
-        """ICCID mismatch must NOT decrement the ADM1 attempt counter.
+        """ICCID mismatch must NOT trigger a pySim-shell VERIFY call.
 
         An operator might accidentally scan the wrong card then correct
         themselves; the ADM1 counter must not be consumed in that case.
         """
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        before = card.adm1_attempts_remaining
-        # 5 ICCID mismatches
-        for _ in range(5):
-            cm.authenticate(card.adm1, expected_iccid="999999999999999")
-        assert card.adm1_attempts_remaining == before, (
-            "ICCID mismatch must not consume ADM1 attempts"
+        from unittest.mock import patch
+        cm = CardManager()
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001"}
+        with patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            for _ in range(5):
+                ok, msg = cm.authenticate("88888888", expected_iccid="999999999999999")
+                assert ok is False, "ICCID mismatch must return False"
+                assert "ICCID mismatch" in msg
+        mock_shell.assert_not_called(), (
+            "ICCID mismatch must not trigger a VERIFY call"
         )
 
     def test_correct_adm1_does_not_decrement_counter(self):
@@ -952,25 +955,24 @@ class TestRegressions:
     """Regression tests — each test documents a specific bug that was fixed."""
 
     def test_iccid_mismatch_not_counted_as_failed_attempt_regression(self):
-        """Regression: ICCID check must gate before the attempt counter decrement.
+        """Regression: ICCID check must gate before any VERIFY attempt.
 
         In an early version of authenticate(), the ICCID check was performed
         AFTER the ADM1 was sent to the card, consuming an attempt even on
         mismatch. The correct behaviour: reject immediately before any attempt.
         """
-        from simulator.settings import SimulatorSettings
+        from unittest.mock import patch
         cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=1))
-        card = cm._simulator._current_card()
-        before = card.adm1_attempts_remaining
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001"}
 
-        # Force 10 ICCID mismatches with correct ADM1
-        for _ in range(10):
-            cm.authenticate(card.adm1, expected_iccid="WRONG_ICCID")
+        with patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            for _ in range(10):
+                cm.authenticate("88888888", expected_iccid="WRONG_ICCID")
 
-        assert card.adm1_attempts_remaining == before, (
-            "Regression: ICCID mismatch must not decrement ADM1 counter. "
-            f"Expected {before}, got {card.adm1_attempts_remaining}"
+        mock_shell.assert_not_called(), (
+            "Regression: ICCID mismatch must not trigger pySim-shell VERIFY. "
+            f"mock_shell was called {mock_shell.call_count} time(s)"
         )
 
     def test_run_cli_path_traversal_blocked_regression(self, tmp_path):

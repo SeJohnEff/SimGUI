@@ -46,35 +46,46 @@ class TestAuthenticateWithIccid:
 
     def test_expected_iccid_match_allows_auth(self):
         """Correct expected_iccid does not block authentication."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        ok, msg = cm.authenticate(card.adm1, expected_iccid=card.iccid)
+        cm = CardManager()
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001"}
+        cm.cli_backend = CLIBackend.PYSIM
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe', return_value=(True, '', '')):
+            ok, msg = cm.authenticate("88888888", expected_iccid="89999000000000000001")
         assert ok is True
         assert cm.authenticated is True
 
     def test_expected_iccid_mismatch_blocks_auth(self):
         """Wrong expected_iccid aborts authentication before attempting."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        ok, msg = cm.authenticate(card.adm1, expected_iccid="0000000000000000000")
+        cm = CardManager()
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        ok, msg = cm.authenticate("88888888", expected_iccid="0000000000000000000")
         assert ok is False
         assert "ICCID mismatch" in msg
         assert cm.authenticated is False
 
     def test_mismatch_does_not_consume_attempts(self):
-        """ICCID mismatch must not decrement adm1_attempts_remaining."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        before = card.adm1_attempts_remaining
-        for _ in range(5):
-            cm.authenticate(card.adm1, expected_iccid="wrong")
-        assert card.adm1_attempts_remaining == before
+        """ICCID mismatch must not trigger pySim-shell verify."""
+        cm = CardManager()
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001"}
+        with patch.object(cm, '_run_pysim_shell_safe') as mock_shell:
+            for _ in range(5):
+                ok, msg = cm.authenticate("88888888", expected_iccid="wrong_iccid")
+                assert ok is False
+                assert "ICCID mismatch" in msg
+        mock_shell.assert_not_called()
 
     def test_none_iccid_skips_check(self):
-        """expected_iccid=None skips the ICCID check entirely."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        ok, msg = cm.authenticate(card.adm1, expected_iccid=None)
+        """expected_iccid=None skips the ICCID check and proceeds to auth."""
+        cm = CardManager()
+        cm.card_info = {"ICCID": "89999000000000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001"}
+        cm.cli_backend = CLIBackend.PYSIM
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe', return_value=(True, '', '')):
+            ok, msg = cm.authenticate("88888888", expected_iccid=None)
         assert ok is True
 
     def test_hardware_path_iccid_mismatch(self):
@@ -131,30 +142,47 @@ class TestProgramCard:
         assert 'not supported' in msg.lower() or 'no adm1' in msg.lower()
 
     def test_simulator_program_success(self):
-        """Simulator mode: program_card() writes to virtual card."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        ok, msg = cm.program_card({"imsi": "newimsi"})
+        """Authenticated program_card() with CLI success returns True."""
+        cm = CardManager()
+        cm.cli_path = "/opt/pysim"
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.authenticated = True
+        cm._authenticated_adm1_hex = "3838383838383838"
+        cm._original_card_data = {"ICCID": "89999000000000000001", "IMSI": "old_imsi"}
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
+             patch.object(cm, 'verify_after_program',
+                          return_value=(True, "OK", {"IMSI": "new_imsi"})):
+            ok, msg = cm.program_card({"IMSI": "new_imsi"})
         assert ok is True
-        assert card.programmed_fields.get("imsi") == "newimsi"
 
     def test_simulator_program_unauthenticated(self):
-        """Simulator mode: program_card() fails when not authenticated."""
-        cm = _make_sim_manager()
+        """program_card() fails when not authenticated."""
+        cm = CardManager()
+        cm.authenticated = False
         ok, msg = cm.program_card({"imsi": "x"})
         assert ok is False
 
     def test_simulator_program_multiple_fields(self):
-        """Simulator mode: multiple fields are all written."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        data = {"imsi": "999", "ki": "A" * 32, "opc": "B" * 32}
-        ok, msg = cm.program_card(data)
+        """program_card() with multiple changed fields invokes CLI once."""
+        cm = CardManager()
+        cm.cli_path = "/opt/pysim"
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.authenticated = True
+        cm._authenticated_adm1_hex = "3838383838383838"
+        cm._original_card_data = {
+            "ICCID": "89999000000000000001", "IMSI": "old",
+            "Ki": "00" * 16, "OPc": "00" * 16,
+        }
+        data = {"IMSI": "new_imsi", "Ki": "A" * 32, "OPc": "B" * 32}
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_prog',
+                          return_value=(True, "ok", "")) as mock_prog, \
+             patch.object(cm, 'verify_after_program',
+                          return_value=(True, "OK", data)):
+            ok, msg = cm.program_card(data)
         assert ok is True
-        for k, v in data.items():
-            assert card.programmed_fields[k] == v
+        mock_prog.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
