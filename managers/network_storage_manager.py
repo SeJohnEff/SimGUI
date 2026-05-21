@@ -391,28 +391,26 @@ class NetworkStorageManager:
 
         if profile.protocol == "nfs":
             opts = profile.mount_options or "soft,timeo=50,retrans=3"
+            # platform_runtime hook: use when it returns an absolute-path command.
+            # The Ubuntu stub returns bare "mount" (relative) so the guard always
+            # falls through, preserving v0.5.50 NFS behavior unchanged on Linux.
+            try:
+                import platform_runtime as _pr
+                _base = _pr.mount_cmd_nfs(src, mp)
+                if isinstance(_base, list) and len(_base) >= 4 and os.path.isabs(_base[0]):
+                    # Splice -o opts before the trailing [src, mountpoint].
+                    return [_SUDO] + _base[:-2] + ["-o", opts] + _base[-2:]
+            except Exception:
+                pass
             return [_SUDO, _MOUNT, "-t", "nfs",
                     "-o", opts, src, mp]
 
-        # SMB / CIFS — command structure differs by platform
-        if _MACOS:
-            # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
-            if profile.username:
-                user = quote(profile.username, safe="")
-                if profile.password:
-                    pwd = quote(profile.password, safe="")
-                    url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
-                else:
-                    url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
-            else:
-                url = f"//{profile.server}/{profile.share.lstrip('/')}"
-            cmd = [_SUDO, _MOUNT_SMB_FS]
-            if profile.mount_options:
-                cmd.extend(["-o", profile.mount_options])
-            cmd.extend([url, mp])
-            return cmd
-
-        # Linux CIFS: mount -t cifs with uid/gid/credentials options
+        # SMB / CIFS — command structure differs by platform.
+        #
+        # Compute CIFS options before the platform_runtime probe so they are
+        # available to both the hook call and the Linux fallback.  The
+        # computation is side-effect-free and harmless when run on macOS even
+        # though the macOS branch below does not use opts_parts.
         opts_parts = [
             f"uid={os.getuid()}",
             f"gid={os.getgid()}",
@@ -431,10 +429,40 @@ class NetworkStorageManager:
                     opts_parts.append(f"domain={profile.domain}")
         else:
             opts_parts.append("guest")
-
         if profile.mount_options:
             opts_parts.append(profile.mount_options)
 
+        # platform_runtime hook: use when it returns an absolute-path command.
+        # The Ubuntu stub returns bare "mount" (relative) so the guard always
+        # falls through, preserving v0.5.50 SMB behavior unchanged on Linux and
+        # macOS.  In S2-E, platform_runtime returns an absolute-path macOS
+        # command (e.g. /sbin/mount_smbfs) and the hook takes effect.
+        try:
+            import platform_runtime as _pr
+            _cmd = _pr.mount_cmd_smb(src, mp, ["-o", ",".join(opts_parts)])
+            if isinstance(_cmd, list) and _cmd and os.path.isabs(_cmd[0]):
+                return [_SUDO] + _cmd
+        except Exception:
+            pass
+
+        if _MACOS:
+            # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
+            if profile.username:
+                user = quote(profile.username, safe="")
+                if profile.password:
+                    pwd = quote(profile.password, safe="")
+                    url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
+                else:
+                    url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
+            else:
+                url = f"//{profile.server}/{profile.share.lstrip('/')}"
+            cmd = [_SUDO, _MOUNT_SMB_FS]
+            if profile.mount_options:
+                cmd.extend(["-o", profile.mount_options])
+            cmd.extend([url, mp])
+            return cmd
+
+        # Linux CIFS: mount -t cifs with uid/gid/credentials options
         return [_SUDO, _MOUNT_SMB_FS, "-t", "cifs",
                 "-o", ",".join(opts_parts), src, mp]
 
