@@ -184,6 +184,23 @@ on Linux. These tests must pass on Ubuntu before the adapter is wired into any m
 Note: `test_import_without_platform_runtime_*` tests must pass even before S2-C wires
 the local imports, because the managers must already be importable without the adapter.
 
+**Regression-prevention tests — Phase 4 mandatory import guard:**
+
+These three additional test cases exist specifically to prevent a repeat of the
+Phase 4 failure pattern in which a mandatory top-level `from platform_runtime import …`
+in a shared manager caused `ModuleNotFoundError` on Ubuntu and killed the entire test
+suite at collection time. They must all pass on Ubuntu.
+
+| Test name | How to exercise | Assertion |
+|---|---|---|
+| `test_managers_importable_when_adapter_absent` | Remove `platform_runtime` from `sys.path` and `sys.modules` before importing | `import managers.card_manager` and `import managers.network_storage_manager` both succeed without raising any exception |
+| `test_managers_importable_when_adapter_raises_import_error` | Insert a fake `platform_runtime` module into `sys.modules` whose every attribute raises `ImportError` on access | Both managers import cleanly; no exception escapes the `try/except ImportError` guards |
+| `test_managers_importable_when_adapter_returns_invalid_data` | Insert a fake `platform_runtime` whose functions return `None` or `[]` instead of valid paths | Both managers import and their path-search logic falls back to the hardcoded Linux defaults without raising |
+
+These tests must be written before S2-C (wiring) begins. If any of them cannot be made
+to pass without modifying application code, S2-C is blocked until the root cause is
+resolved.
+
 **Before tests (Ubuntu):**
 ```
 python3 -m pytest tests/ -x -q
@@ -408,20 +425,32 @@ and approved before S3-B work begins.
 
 ---
 
-### Commit S3-B — (Tentative) Express PCSC constraint as constructor parameter
+### Commit S3-B — (Blocked) Express PCSC constraint as constructor parameter
 
-> This commit plan is a placeholder. Replace with the concrete plan after S3-A is
-> approved.
+> **This commit is blocked. It may not begin from this checklist entry alone.**
+>
+> S3-B requires a separate, human-approved S3-A design note that:
+> 1. Identifies the exact PCSC constraint observed on macOS hardware.
+> 2. Proposes a specific constructor/API change with its complete signature.
+> 3. Demonstrates that the proposed change leaves every `state-machine.md` invariant
+>    intact.
+> 4. Has received explicit written approval recorded in the Approval Log below.
+>
+> Constructor and method-signature changes to `CardWatcher` are high risk: any default
+> value error or signature mismatch silently changes polling behaviour and can violate
+> state-machine invariants in ways that do not immediately surface in unit tests. Do not
+> treat this entry as a green light to begin coding. The concrete plan written in S3-A
+> and approved by the human is the authoritative specification for this commit.
 
-**Tentative purpose:** Add a constructor parameter to `CardWatcher` (e.g.
-`pcsc_settle_ms: int = 0`) that accommodates the macOS PCSC settle delay without
-adding a platform branch inside the class. The parameter default must leave Ubuntu
-behaviour unchanged.
+**Tentative purpose (subject to revision in S3-A):** Add a constructor parameter to
+`CardWatcher` (e.g. `pcsc_settle_ms: int = 0`) that accommodates the macOS PCSC settle
+delay without adding a platform branch inside the class. The parameter default must
+leave Ubuntu behaviour byte-for-byte identical to the pre-S3-B state.
 
-**Tentative allowed files:**
-- `managers/card_watcher.py` (constructor and one call site only)
-- `main.py` (pass the parameter at construction time on macOS)
-- `tests/test_card_watcher.py` (add test for new parameter default)
+**Tentative allowed files (subject to revision in S3-A):**
+- `managers/card_watcher.py` (constructor signature and one internal use site only)
+- `main.py` (pass the parameter at construction time, macOS path only)
+- `tests/test_card_watcher.py` (add test that default value reproduces current behaviour)
 
 **Prohibited files under all circumstances:**
 - `card_watcher.py` state transition logic (transitions themselves must not change)
@@ -437,10 +466,12 @@ Expected: identical to post-Stage-2 count.
 
 **After tests (Ubuntu):**
 Same command — identical count. The new parameter must have a default that leaves all
-existing `CardWatcher` tests passing without modification.
+existing `CardWatcher` tests passing without modification. Diff `card_watcher.py`
+against the v0.5.50 tag and verify no transition logic changed.
 
 **Rollback condition:** Any `test_card_watcher.py` test that changes from pass to fail;
-any state-machine invariant violation identified in the diff.
+any state-machine invariant violation identified in the diff; any change to transition
+logic beyond the constructor signature.
 
 ---
 
