@@ -26,6 +26,10 @@ from urllib.parse import quote
 logger = logging.getLogger(__name__)
 
 MOUNT_BASE = "/tmp/simgui-mounts"
+
+# Platform detection — used only in this module for mount command assembly
+# and sudo permission checking.  All SIM card logic, authentication, and
+# state machine code is platform-free; this is the thin adapter boundary.
 _MACOS = sys.platform == "darwin"
 
 # Absolute paths for system commands — critical for desktop-launcher
@@ -35,6 +39,9 @@ _MACOS = sys.platform == "darwin"
 _SUDO = "/usr/bin/sudo"
 _MOUNT = "/usr/bin/mount"
 _UMOUNT = "/usr/bin/umount"
+# SMB mount binary differs by platform:
+#   macOS  → /sbin/mount_smbfs  (built-in, URL-based credential syntax)
+#   Linux  → /usr/bin/mount     (used with -t cifs and -o options)
 _MOUNT_SMB_FS = "/sbin/mount_smbfs" if _MACOS else "/usr/bin/mount"
 
 
@@ -312,7 +319,14 @@ class NetworkStorageManager:
 
     @staticmethod
     def _sudo_fix_message() -> str:
-        """User-friendly message explaining how to fix sudo permissions."""
+        """Return a user-friendly message explaining how to fix sudo permissions.
+
+        The message is platform-specific:
+        - macOS: instructs the user to check admin group membership and use
+          Finder as an alternative.
+        - Linux: instructs the user to run ``simgui-setup-mount`` to install
+          the sudoers drop-in rule.
+        """
         if _MACOS:
             return (
                 "SimGUI needs permission to mount network shares.\n\n"
@@ -335,12 +349,16 @@ class NetworkStorageManager:
     def check_sudo_mount(self) -> bool:
         """Return True if passwordless sudo mount is available.
 
-        On Linux, checks for a sudoers drop-in file. On macOS, assumes
-        the user is in the admin group and has sudo access (mount_smbfs
-        requires sudo, but macOS typically grants it to admin users).
+        Platform behaviour:
+        - macOS: always returns True.  ``mount_smbfs`` requires sudo, but
+          macOS grants passwordless sudo to members of the ``admin`` group
+          by default, so no sudoers drop-in file is needed.
+        - Linux: checks for the ``/etc/sudoers.d/simgui-mount`` drop-in
+          rule installed by ``simgui-setup-mount``.  Returns False if the
+          file is absent, indicating the user must run the setup command.
         """
         if _MACOS:
-            # On macOS, sudo is available to admin users by default
+            # macOS admin users have sudo by default — no sudoers file needed
             return True
         sudoers_path = '/etc/sudoers.d/simgui-mount'
         try:
@@ -351,7 +369,23 @@ class NetworkStorageManager:
     # ---- Internal helpers ----------------------------------------------
 
     def _build_mount_cmd(self, profile: StorageProfile) -> list[str]:
-        """Build the mount command for the given profile."""
+        """Build the OS-level mount command for the given profile.
+
+        Returns a list suitable for ``subprocess.run``.  Three paths:
+
+        NFS (both platforms):
+            ``sudo mount -t nfs -o <opts> server:/path /mountpoint``
+
+        SMB on macOS:
+            ``sudo mount_smbfs [-o <opts>] //[user[:pass]@]server/share /mountpoint``
+            Credentials are embedded in the URL using percent-encoding.
+            No ``-t cifs``, no ``uid=``/``gid=`` options.
+
+        SMB on Linux (CIFS):
+            ``sudo mount -t cifs -o uid=…,gid=…,credentials=…,… //server/share /mountpoint``
+            Credentials are passed via a 0600 credentials file when one
+            exists for this profile label; otherwise inline username=/password=.
+        """
         mp = profile.mount_point
         src = profile.source_path
 
@@ -360,7 +394,7 @@ class NetworkStorageManager:
             return [_SUDO, _MOUNT, "-t", "nfs",
                     "-o", opts, src, mp]
 
-        # SMB / CIFS
+        # SMB / CIFS — command structure differs by platform
         if _MACOS:
             # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
             if profile.username:
@@ -378,7 +412,7 @@ class NetworkStorageManager:
             cmd.extend([url, mp])
             return cmd
 
-        # Linux CIFS
+        # Linux CIFS: mount -t cifs with uid/gid/credentials options
         opts_parts = [
             f"uid={os.getuid()}",
             f"gid={os.getgid()}",

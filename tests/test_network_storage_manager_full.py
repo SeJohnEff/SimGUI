@@ -2,7 +2,8 @@
 
 Covers:
 - StorageProfile dataclass (to_dict, from_dict, mount_point, source_path)
-- _build_mount_cmd for SMB (guest, creds file, username/password/domain)
+- _build_mount_cmd for SMB on Linux/CIFS (guest, creds file, username/password/domain)
+- _build_mount_cmd for SMB on macOS/mount_smbfs (URL-encoded credentials)
 - _build_mount_cmd for NFS (default + custom options)
 - _test_smb and _test_nfs (mocked subprocess)
 - mount / unmount (mocked subprocess, os.path.ismount)
@@ -1058,3 +1059,160 @@ class TestSudoPermissionDetection:
         ns = NetworkStorageManager()
         with patch("os.path.isfile", side_effect=OSError):
             assert ns.check_sudo_mount() is False
+
+    # -- macOS branch --
+
+    def test_check_sudo_mount_macos_always_true(self):
+        """On macOS, check_sudo_mount() always returns True regardless of sudoers file."""
+        ns = NetworkStorageManager()
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("os.path.isfile", return_value=False):
+            assert ns.check_sudo_mount() is True
+
+    def test_check_sudo_mount_macos_does_not_check_isfile(self):
+        """On macOS, check_sudo_mount() returns True without inspecting any file."""
+        ns = NetworkStorageManager()
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("os.path.isfile") as mock_isfile:
+            result = ns.check_sudo_mount()
+        assert result is True
+        mock_isfile.assert_not_called()
+
+    def test_sudo_fix_message_linux_contains_setup_command(self):
+        """On Linux, _sudo_fix_message() includes the simgui-setup-mount command."""
+        with patch("managers.network_storage_manager._MACOS", False):
+            msg = NetworkStorageManager._sudo_fix_message()
+        assert "simgui-setup-mount" in msg
+
+    def test_sudo_fix_message_macos_contains_finder_hint(self):
+        """On macOS, _sudo_fix_message() gives macOS-specific guidance (no simgui-setup-mount)."""
+        with patch("managers.network_storage_manager._MACOS", True):
+            msg = NetworkStorageManager._sudo_fix_message()
+        assert "simgui-setup-mount" not in msg
+        assert "Finder" in msg
+
+    def test_sudo_fix_message_macos_does_not_reference_sudoers(self):
+        """On macOS, _sudo_fix_message() does not mention the sudoers file path."""
+        with patch("managers.network_storage_manager._MACOS", True):
+            msg = NetworkStorageManager._sudo_fix_message()
+        assert "sudoers.d" not in msg
+
+
+# ---------------------------------------------------------------------------
+# _build_mount_cmd — macOS branch (mount_smbfs, URL-encoded credentials)
+# ---------------------------------------------------------------------------
+
+class TestBuildMountCmdMacOS:
+    """Tests for _build_mount_cmd() macOS path.
+
+    These patch both _MACOS=True and _MOUNT_SMB_FS so the macOS branch is
+    exercised on any platform.  The Linux-branch tests in TestBuildMountCmd
+    cover the complementary path.
+    """
+
+    _patch_macos = {"managers.network_storage_manager._MACOS": True,
+                    "managers.network_storage_manager._MOUNT_SMB_FS": "/sbin/mount_smbfs"}
+
+    def _build(self, profile):
+        ns = NetworkStorageManager()
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            return ns._build_mount_cmd(profile)
+
+    def test_smb_guest_uses_mount_smbfs(self):
+        """macOS guest SMB: command uses mount_smbfs binary."""
+        p = StorageProfile(label="guest", protocol="smb",
+                           server="nas.local", share="simdata")
+        cmd = self._build(p)
+        assert cmd[0] == "/usr/bin/sudo"
+        assert cmd[1] == "/sbin/mount_smbfs"
+
+    def test_smb_guest_url_no_credentials(self):
+        """macOS guest SMB URL: //server/share with no credential prefix."""
+        p = StorageProfile(label="guest", protocol="smb",
+                           server="nas.local", share="simdata")
+        cmd = self._build(p)
+        url = cmd[-2]
+        assert url == "//nas.local/simdata"
+
+    def test_smb_username_only_url(self):
+        """macOS SMB with username but no password: //user@server/share."""
+        p = StorageProfile(label="auth", protocol="smb",
+                           server="nas.local", share="simdata",
+                           username="admin")
+        cmd = self._build(p)
+        url = cmd[-2]
+        assert url == "//admin@nas.local/simdata"
+
+    def test_smb_username_and_password_url(self):
+        """macOS SMB with credentials: //user:pass@server/share."""
+        p = StorageProfile(label="auth", protocol="smb",
+                           server="nas.local", share="simdata",
+                           username="admin", password="secret")
+        cmd = self._build(p)
+        url = cmd[-2]
+        assert url == "//admin:secret@nas.local/simdata"
+
+    def test_smb_special_chars_are_url_encoded(self):
+        """macOS SMB: @ and : in username/password are percent-encoded in URL."""
+        p = StorageProfile(label="enc", protocol="smb",
+                           server="nas.local", share="data",
+                           username="user@domain", password="p@ss:word")
+        cmd = self._build(p)
+        url = cmd[-2]
+        assert "user%40domain" in url
+        assert "p%40ss%3Aword" in url
+        # Raw @ must not appear in the credential portion
+        cred_part = url.split("@")[-2] if url.count("@") >= 2 else url.split("//")[1].split("@")[0]
+        assert "user@domain" not in cred_part
+
+    def test_smb_mount_options_via_dash_o(self):
+        """macOS SMB: mount_options are passed as -o <opts> before the URL."""
+        p = StorageProfile(label="opts", protocol="smb",
+                           server="nas.local", share="simdata",
+                           mount_options="soft")
+        cmd = self._build(p)
+        assert "-o" in cmd
+        o_idx = cmd.index("-o")
+        assert cmd[o_idx + 1] == "soft"
+        assert cmd[-2].startswith("//")  # URL comes after the -o block
+
+    def test_smb_no_options_when_mount_options_empty(self):
+        """macOS SMB: no -o argument when mount_options is empty."""
+        p = StorageProfile(label="plain", protocol="smb",
+                           server="nas.local", share="simdata")
+        cmd = self._build(p)
+        assert "-o" not in cmd
+
+    def test_smb_no_cifs_type(self):
+        """macOS SMB command does not use -t cifs (Linux CIFS only)."""
+        p = StorageProfile(label="x", protocol="smb",
+                           server="nas", share="share")
+        cmd = self._build(p)
+        assert "cifs" not in cmd
+        assert "-t" not in cmd
+
+    def test_smb_no_uid_gid_options(self):
+        """macOS SMB command does not include uid= or gid= (Linux CIFS only)."""
+        p = StorageProfile(label="x", protocol="smb",
+                           server="nas", share="share")
+        cmd = self._build(p)
+        full = " ".join(cmd)
+        assert "uid=" not in full
+        assert "gid=" not in full
+
+    def test_smb_mountpoint_is_last_argument(self):
+        """macOS SMB: mount point is always the final argument."""
+        p = StorageProfile(label="mp", protocol="smb",
+                           server="nas.local", share="simdata")
+        cmd = self._build(p)
+        assert cmd[-1] == p.mount_point
+
+    def test_nfs_unaffected_by_macos_flag(self):
+        """NFS command is the same on macOS and Linux."""
+        p = StorageProfile(label="nfs", protocol="nfs",
+                           server="10.0.0.1", share="/exports/sim")
+        cmd = self._build(p)
+        assert cmd[1] == "/usr/bin/mount"
+        assert "-t" in cmd
+        assert "nfs" in cmd
