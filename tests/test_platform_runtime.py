@@ -1,34 +1,22 @@
 """
 Tests for the optional platform_runtime adapter.
 
-Two categories:
+Three categories:
   1. Linux/Ubuntu-correctness — the stub must return correct Ubuntu values.
   2. Phase 4 regression guards — common managers must remain importable
      whether platform_runtime is absent, broken, or returns bad data.
+     These tests run in isolated subprocesses to prevent sys.modules pollution.
+  3. Static analysis — no top-level platform_runtime import in common managers.
 """
 
-import importlib
 import os
+import subprocess
 import sys
-import types
-import unittest.mock as mock
 from pathlib import Path
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 PROJECT_ROOT = Path(__file__).parent.parent
-
-
-def _fresh_import(module_name: str):
-    """Import a module, bypassing the cache (forces a real re-import)."""
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-    return importlib.import_module(module_name)
 
 
 # ---------------------------------------------------------------------------
@@ -111,122 +99,102 @@ class TestPlatformRuntimeLinuxDefaults:
 
 
 # ---------------------------------------------------------------------------
-# 2. Phase 4 regression guards — common managers must always be importable
+# 2. Phase 4 regression guards — subprocess-isolated import tests
+#
+# Each test spawns a fresh Python interpreter so that sys.modules manipulation
+# is fully contained and cannot corrupt the pytest process's module registry.
 # ---------------------------------------------------------------------------
 
-COMMON_MANAGERS = [
+_COMMON_MANAGERS = [
     "managers.card_manager",
     "managers.network_storage_manager",
     "managers.card_watcher",
     "state_manager",
 ]
 
+# Setup code injected before the import attempt in each subprocess scenario.
+_SETUP_ABSENT = [
+    # Simulate platform_runtime.py not present on the filesystem.
+    "sys.modules['platform_runtime'] = None",
+]
 
-def _purge_manager_cache():
-    """Remove common manager modules from sys.modules to force re-import."""
-    for mod in list(sys.modules.keys()):
-        for manager in COMMON_MANAGERS + ["platform_runtime"]:
-            if mod == manager or mod.startswith(manager + "."):
-                del sys.modules[mod]
+_SETUP_IMPORT_ERROR = [
+    # Simulate platform_runtime.py present but unimportable (e.g. syntax error,
+    # missing dependency). None in sys.modules causes ImportError on import.
+    "sys.modules['platform_runtime'] = None",
+]
 
-
-class TestCommonManagersImportWithoutPlatformRuntime:
-    """Common managers must be importable when platform_runtime.py is absent."""
-
-    def test_card_manager_importable_without_platform_runtime(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.card_manager  # noqa: F401
-
-    def test_network_storage_manager_importable_without_platform_runtime(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.network_storage_manager  # noqa: F401
-
-    def test_card_watcher_importable_without_platform_runtime(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.card_watcher  # noqa: F401
-
-    def test_state_manager_importable_without_platform_runtime(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import state_manager  # noqa: F401
+_SETUP_INVALID_DATA = [
+    # Simulate platform_runtime.py present but returning wrong types from all
+    # public functions — guards against managers calling it at import time.
+    "import types as _t",
+    "_mod = _t.ModuleType('platform_runtime')",
+    "_mod.pysim_search_dirs = lambda: None",
+    "_mod.sysmo_search_dirs = lambda: 'not-a-list'",
+    "_mod.config_dir = lambda: 42",
+    "_mod.mount_cmd_nfs = lambda src, dst: None",
+    "_mod.mount_cmd_smb = lambda src, dst, opts: {}",
+    "sys.modules['platform_runtime'] = _mod",
+]
 
 
-class TestCommonManagersImportWithBrokenPlatformRuntime:
-    """Common managers must be importable when platform_runtime raises ImportError."""
+def _run_import_subprocess(setup_lines, module_name):
+    """
+    Verify that `module_name` can be imported in a fresh Python subprocess
+    after the given setup lines have been executed.
 
-    def _make_raising_module(self):
-        """Return a fake module whose import raises ImportError on attribute access."""
-        # We simulate a module that raises ImportError when imported by
-        # inserting a sentinel that causes the import machinery to raise.
-        # The simplest way: replace sys.modules entry with None (which causes
-        # ImportError on 'import platform_runtime').
-        return None  # None in sys.modules → ImportError on import
-
-    def test_card_manager_survives_platform_runtime_import_error(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.card_manager  # noqa: F401
-
-    def test_network_storage_manager_survives_platform_runtime_import_error(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.network_storage_manager  # noqa: F401
-
-    def test_card_watcher_survives_platform_runtime_import_error(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import managers.card_watcher  # noqa: F401
-
-    def test_state_manager_survives_platform_runtime_import_error(self):
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": None}):
-            import state_manager  # noqa: F401
+    Returns (success: bool, output: str).
+    """
+    script = "\n".join([
+        "import sys, types",
+        f"sys.path.insert(0, {str(PROJECT_ROOT)!r})",
+    ] + setup_lines + [
+        "try:",
+        f"    import {module_name}",
+        "except Exception as exc:",
+        "    print(str(exc), file=sys.stderr)",
+        "    sys.exit(1)",
+    ])
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.returncode == 0, (result.stdout + result.stderr).strip()
 
 
-class TestCommonManagersImportWithInvalidPlatformRuntime:
-    """Common managers must be importable when platform_runtime returns bad/incomplete data."""
+@pytest.mark.parametrize("module_name", _COMMON_MANAGERS)
+def test_importable_when_platform_runtime_absent(module_name):
+    """Manager must be importable when platform_runtime.py does not exist."""
+    ok, out = _run_import_subprocess(_SETUP_ABSENT, module_name)
+    assert ok, (
+        f"{module_name} failed to import with platform_runtime absent:\n{out}"
+    )
 
-    def _make_bad_platform_runtime(self):
-        """Create a fake platform_runtime module with functions that return wrong types."""
-        mod = types.ModuleType("platform_runtime")
-        mod.pysim_search_dirs = lambda: None          # wrong type
-        mod.sysmo_search_dirs = lambda: "not-a-list"  # wrong type
-        mod.config_dir = lambda: 42                   # wrong type
-        mod.mount_cmd_nfs = lambda src, dst: None     # wrong type
-        mod.mount_cmd_smb = lambda src, dst, opts: {} # wrong type
-        return mod
 
-    def test_card_manager_survives_invalid_platform_runtime(self):
-        bad_mod = self._make_bad_platform_runtime()
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": bad_mod}):
-            import managers.card_manager  # noqa: F401
+@pytest.mark.parametrize("module_name", _COMMON_MANAGERS)
+def test_importable_when_platform_runtime_raises_import_error(module_name):
+    """Manager must be importable when platform_runtime raises ImportError."""
+    ok, out = _run_import_subprocess(_SETUP_IMPORT_ERROR, module_name)
+    assert ok, (
+        f"{module_name} failed to import with platform_runtime raising ImportError:\n{out}"
+    )
 
-    def test_network_storage_manager_survives_invalid_platform_runtime(self):
-        bad_mod = self._make_bad_platform_runtime()
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": bad_mod}):
-            import managers.network_storage_manager  # noqa: F401
 
-    def test_card_watcher_survives_invalid_platform_runtime(self):
-        bad_mod = self._make_bad_platform_runtime()
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": bad_mod}):
-            import managers.card_watcher  # noqa: F401
-
-    def test_state_manager_survives_invalid_platform_runtime(self):
-        bad_mod = self._make_bad_platform_runtime()
-        _purge_manager_cache()
-        with mock.patch.dict(sys.modules, {"platform_runtime": bad_mod}):
-            import state_manager  # noqa: F401
+@pytest.mark.parametrize("module_name", _COMMON_MANAGERS)
+def test_importable_when_platform_runtime_returns_invalid_data(module_name):
+    """Manager must be importable when platform_runtime returns wrong types."""
+    ok, out = _run_import_subprocess(_SETUP_INVALID_DATA, module_name)
+    assert ok, (
+        f"{module_name} failed to import with invalid platform_runtime data:\n{out}"
+    )
 
 
 # ---------------------------------------------------------------------------
-# 3. No top-level platform_runtime import in common modules
+# 3. Static analysis — no top-level platform_runtime import in common managers
 # ---------------------------------------------------------------------------
+
 
 class TestNoTopLevelPlatformRuntimeImport:
     """Prohibition 1: platform_runtime must NOT be imported at module scope
@@ -243,19 +211,16 @@ class TestNoTopLevelPlatformRuntimeImport:
         source = path.read_text()
         lines = source.splitlines()
 
-        # Find module-level import lines: any 'import platform_runtime' or
-        # 'from platform_runtime import' that is NOT inside a function/class
-        # (i.e. indented). A top-level import has no leading whitespace.
         violations = []
         for lineno, line in enumerate(lines, start=1):
             stripped = line.lstrip()
-            if not stripped.startswith(("#", '"""', "'''")):
-                if ("import platform_runtime" in line or
-                        "from platform_runtime" in line):
-                    # Top-level = line has no leading whitespace (indent == 0)
-                    indent = len(line) - len(line.lstrip())
-                    if indent == 0:
-                        violations.append((lineno, line.rstrip()))
+            if stripped.startswith(("#", '"""', "'''")):
+                continue
+            if ("import platform_runtime" in line or
+                    "from platform_runtime" in line):
+                indent = len(line) - len(line.lstrip())
+                if indent == 0:
+                    violations.append((lineno, line.rstrip()))
 
         assert not violations, (
             f"{source_file} has top-level platform_runtime import(s) — "
