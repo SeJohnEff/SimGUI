@@ -216,21 +216,39 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
         return pysim_path, CLIBackend.PYSIM
 
     # 4–6. Common sysmo-usim-tool locations
+    # platform_runtime.sysmo_search_dirs() provides the system-install path(s);
+    # falls back to the hardcoded Ubuntu default when the module is absent or broken.
+    sysmo_system_dirs = ['/opt/sysmo-usim-tool']
+    try:
+        import platform_runtime as _pr
+        _dirs = _pr.sysmo_search_dirs()
+        if isinstance(_dirs, list) and _dirs:
+            sysmo_system_dirs = _dirs
+    except Exception:
+        pass
     for candidate in [
         os.path.join(os.path.dirname(__file__), '..', '..', 'sysmo-usim-tool'),
         os.path.expanduser('~/sysmo-usim-tool'),
-        '/opt/sysmo-usim-tool',
-    ]:
+    ] + sysmo_system_dirs:
         if os.path.isdir(candidate):
             logger.info("Found sysmo-usim-tool at %s", candidate)
             return os.path.abspath(candidate), CLIBackend.SYSMO
 
     # 7–9. Common pySim locations (~/pysim = macOS default, /opt/pysim = Ubuntu default)
+    # platform_runtime.pysim_search_dirs() provides the system-install path(s);
+    # falls back to the hardcoded Ubuntu default when the module is absent or broken.
+    pysim_system_dirs = ['/opt/pysim']
+    try:
+        import platform_runtime as _pr
+        _dirs = _pr.pysim_search_dirs()
+        if isinstance(_dirs, list) and _dirs:
+            pysim_system_dirs = _dirs
+    except Exception:
+        pass
     for candidate in [
         os.path.join(os.path.dirname(__file__), '..', '..', 'pysim'),
         os.path.expanduser('~/pysim'),
-        '/opt/pysim',
-    ]:
+    ] + pysim_system_dirs:
         if os.path.isdir(candidate):
             logger.info("Found pySim at %s", candidate)
             return os.path.abspath(candidate), CLIBackend.PYSIM
