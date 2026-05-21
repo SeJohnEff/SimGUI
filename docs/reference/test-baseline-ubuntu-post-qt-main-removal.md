@@ -12,7 +12,7 @@ pre-removal v0.5.50 count.**
 
 | Field | Value |
 |---|---|
-| Platform | macOS (developer machine) |
+| Platform | Ubuntu (ARM/aarch64, UTM VM) |
 | Git tag | `v0.5.53-remove-qt-main` |
 | Branch | `main` |
 
@@ -28,7 +28,7 @@ python3 -m pytest tests/ -x -q
 |---|---|
 | Passed | 2123 |
 | Failed | 0 |
-| Skipped | 366 |
+| Skipped | 323 |
 
 Run time: 43.89 seconds.
 
