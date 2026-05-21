@@ -113,48 +113,57 @@ Log out and back in for the group change to take effect.
 ## macOS Installation
 
 **Applies to:** macOS 12 (Monterey) or later (Intel or Apple Silicon)  
-**Time required:** 2 minutes for simulator mode; 10 minutes with hardware support
+**Current distribution:** Source-based. A packaged `.app` is in development.  
+**Time required:** 5 minutes (simulator mode); 10–15 minutes with hardware support
 
-### Quick Start — Simulator Mode (No Hardware)
+### Prerequisites
 
-For a zero-configuration experience without a physical card reader, use the installer script:
+- macOS 12 (Monterey) or later
+- Python 3.9 or later ([python.org](https://python.org) or `brew install python@3.12`)
+- [Git](https://git-scm.com) (`xcode-select --install` installs it on macOS)
+- Internet connection
+
+### Install from source
+
+1. **Clone the repository:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SeJohnEff/SimGUI/main/scripts/install-macos-release.sh | bash
+git clone https://github.com/SeJohnEff/SimGUI.git ~/SimGUI
+cd ~/SimGUI
 ```
 
-Or manually:
+2. **Install SimGUI dependencies:**
 
-1. **Download** `SimGUI.pkg` from [GitHub Releases](https://github.com/SeJohnEff/SimGUI/releases/tag/v0.5.37)
-2. **Double-click** to install (places `SimGUI.app` in `/Applications`)
-3. **Launch** from Applications or use `open /Applications/SimGUI.app`
+```bash
+bash scripts/build-macos.sh
+```
 
-The app has no dependencies and works immediately with 20 virtual SIM cards for simulator mode.
+3. **Launch SimGUI:**
+
+```bash
+python3 main.py
+```
+
+Simulator mode works immediately — 20 virtual SIM cards are available without any hardware.
+
+---
 
 ### Hardware Support — Real SIM Card Programming
 
-To enable hardware card reader support, install pySim and dependencies:
+To enable hardware card reader support, install pySim:
 
 ```bash
-bash /Applications/SimGUI.app/Contents/Resources/scripts/install-macos.sh
+bash ~/SimGUI/scripts/install-macos.sh
 ```
 
-Or manually:
-
-```bash
-git clone https://gitea.osmocom.org/sim-card/pysim.git ~/pysim
-cd ~/pysim
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-Then set the environment variable (add to `~/.zshrc` or `~/.bash_profile`):
+This script clones pySim to `~/pysim` and installs its Python dependencies. After it
+completes, set the environment variable (add to `~/.zshrc` or `~/.bash_profile`):
 
 ```bash
 export PYSIM_PATH=~/pysim
 ```
 
-Restart SimGUI — it will now auto-detect pySim and enable hardware card operations.
+Relaunch SimGUI — it will auto-detect pySim and enable hardware card operations.
 
 ### PCSC Reader Detection
 
@@ -181,10 +190,10 @@ Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point S
 | Symptom | Fix |
 |---|---|
 | "No reader detected" | Plug in your USB card reader; quit and restart SimGUI |
-| "CLI tool not found" | Run the `install-macos.sh` script to install pySim |
+| "CLI tool not found" | Run `bash ~/SimGUI/scripts/install-macos.sh` to install pySim |
 | Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
 | pySim import errors | Set `export PYSIM_PATH=~/pysim` and restart |
-| GUI won't load (image error) | **Known issue v0.5.37**: tkinter can't load PNG assets from bundled app temp directory. Workaround: Run from source instead: `python3 /Applications/SimGUI.app/Contents/Resources/SimGUI/main.py` |
+| PyQt6 not found | Run `bash ~/SimGUI/scripts/build-macos.sh` to install dependencies |
 
 ---
 
