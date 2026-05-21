@@ -143,3 +143,19 @@ required:
    `requirements.txt` comment to reflect removal.
 
 No other files require changes.
+
+---
+
+## Deletion completed — v0.5.53 (2026-05-21)
+
+All actions recommended above have been carried out:
+
+1. `qt_main.py` — deleted from repository (commit `7f572a0`).
+2. `debian/rules` line 16 — `qt_main.py` removed from `cp` argument list.
+3. `CLAUDE.md` quarantine notice — updated to record permanent removal
+   and prohibit reintroduction.
+4. `requirements.txt` line 6 — stale comment removed.
+
+Tag: `v0.5.53-remove-qt-main`
+
+This audit is now closed. `qt_main.py` must not be reintroduced.

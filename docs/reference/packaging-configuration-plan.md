@@ -89,47 +89,43 @@ Single-line file; not shown in audit details. No changes needed.
 
 ## 2. qt_main.py References in Packaging
 
-The complete reference map is documented in `docs/reference/qt_main_audit.md`.
-Summary of the one structural packaging reference:
+**COMPLETED — v0.5.53 (2026-05-21, tag `v0.5.53-remove-qt-main`)**
 
-| File | Line | Nature | Impact |
+`qt_main.py` has been permanently deleted. All packaging references have
+been removed. See `docs/reference/qt_main_audit.md` for the full audit
+and completion record.
+
+| File | Line | Nature | Status |
 |------|------|--------|--------|
-| `debian/rules` | 16 | `cp` argument — file is physically packaged | If `qt_main.py` is deleted, this must be updated |
-
-All other references (`requirements.txt` comment, `docs/PYQT6_MIGRATION_PLAN.md`,
-`CLAUDE.md` quarantine notice) are documentation-only — no build or runtime impact.
+| `debian/rules` | 16 | `cp` argument — file was physically packaged | **Removed** |
+| `requirements.txt` | 6 | comment only | **Removed** |
+| `CLAUDE.md` | quarantine notice | control document | **Updated to tombstone** |
 
 ---
 
-## 3. What Must Change if qt_main.py Is Deleted
+## 3. qt_main.py Deletion — COMPLETED
 
-**Precondition:** Deletion of `qt_main.py` requires explicit written human approval.
-Do not delete it during any implementation phase without that approval.
+**Completed in commit `7f572a0`, tag `v0.5.53-remove-qt-main`.**
 
-If and when approval is given, exactly three changes are required:
+All three required changes were made:
 
-### 3a. `debian/rules` — remove from `cp` command (line 16)
+### 3a. `debian/rules` — `qt_main.py` removed from `cp` command
 
-Current line 16:
+Updated line 16 now reads:
 ```makefile
-cp -r main.py qt_main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ etc/ $(CURDIR)/debian/simgui/opt/simgui/
+cp -r main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ etc/ $(CURDIR)/debian/simgui/opt/simgui/
 ```
 
-Required change: remove `qt_main.py` from the argument list.
+### 3b. `CLAUDE.md` — quarantine notice replaced with tombstone
 
-### 3b. `CLAUDE.md` — update quarantine notice
+The quarantine notice now states that `qt_main.py` has been permanently
+removed and must not be reintroduced.
 
-The quarantine entry in `CLAUDE.md` references `qt_main.py` by name. Once the file
-is deleted, the quarantine notice should be replaced with a tombstone note that records
-the deletion decision (version, date, reason) and states the file no longer exists.
+### 3c. Documentation cleanup completed
 
-### 3c. Optional documentation cleanup
+- `requirements.txt` line 6: stale comment removed.
 
-- `requirements.txt` line 6: remove the comment referencing `qt_main.py`.
-- `docs/PYQT6_MIGRATION_PLAN.md`: note that the migration plan is superseded (the
-  application already runs on PyQt6 via `main.py`; `qt_main.py` was never completed).
-
-No other files require changes.
+`qt_main.py` must not be reintroduced.
 
 ---
 
