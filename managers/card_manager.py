@@ -127,7 +127,6 @@ class CLIBackend(Enum):
     NONE = auto()
     SYSMO = auto()
     PYSIM = auto()
-    SIMULATOR = auto()
 
 
 def _find_venv_python(tool_path: str) -> Optional[str]:
@@ -284,50 +283,11 @@ class CardManager:
         self.card_info: Dict[str, str] = {}
         self._authenticated_adm1_hex: Optional[str] = None
         self._original_card_data: Optional[Dict[str, str]] = None  # None = no card detected yet
-        self._simulator = None  # Optional[SimulatorBackend]
         self.card_blocked: bool = False   # True when ADM1 retry counter = 0
         self._adm1_remaining_attempts: Optional[int] = None
         self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
         logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
                     self.cli_backend.name, self.cli_path, self._venv_python)
-
-    # ---- simulator ---------------------------------------------------------
-
-    def enable_simulator(self, settings=None):
-        """Enable the simulator backend."""
-        from simulator import SimulatorBackend, SimulatorSettings
-        self._simulator = SimulatorBackend(settings or SimulatorSettings())
-        self.disconnect()
-
-    def disable_simulator(self):
-        """Disable the simulator backend; revert to hardware/CLI."""
-        self._simulator = None
-        self.disconnect()
-
-    @property
-    def is_simulator_active(self) -> bool:
-        return self._simulator is not None
-
-    def next_virtual_card(self) -> Optional[Tuple[int, int]]:
-        if self._simulator:
-            return self._simulator.next_card()
-        return None
-
-    def previous_virtual_card(self) -> Optional[Tuple[int, int]]:
-        if self._simulator:
-            return self._simulator.previous_card()
-        return None
-
-    def get_simulator_info(self) -> Optional[Dict]:
-        if self._simulator is None:
-            return None
-        card = self._simulator._current_card()
-        return {
-            "current_index": self._simulator.current_card_index,
-            "total_cards": len(self._simulator.card_deck),
-            "card": card.get_current_data() if card else None,
-            "card_type": card.card_type if card else None,
-        }
 
     # ---- helpers -------------------------------------------------------
 
@@ -444,28 +404,13 @@ class CardManager:
     # ---- card operations -----------------------------------------------
 
     def detect_card(self) -> Tuple[bool, str]:
-        """Detect a card in the reader (or the virtual card if simulator active).
+        """Detect a card in the reader.
 
         Reads public card data only (ICCID, IMSI, etc.) via pySim-read.
         Does NOT check the ADM1 retry counter — that is deferred to
         ``authenticate()`` to avoid burning attempts on gialersim/blank
         cards where VERIFY CHV 0x0A is unsupported.
         """
-        if self._simulator:
-            ok, msg = self._simulator.detect_card()
-            if ok:
-                card = self._simulator._current_card()
-                if card:
-                    ct = card.card_type
-                    self.card_type = CardType[ct] if ct in CardType.__members__ else CardType.UNKNOWN
-                    data = card.get_current_data()
-                    self.card_info = {
-                        "IMSI": data.get("imsi", ""),
-                        "ICCID": data.get("iccid", ""),
-                    }
-                    self.authenticated = card.authenticated
-            return ok, msg
-
         self.authenticated = False
         self.card_info = {}
         self.card_type = CardType.UNKNOWN
@@ -519,10 +464,6 @@ class CardManager:
 
     def read_iccid(self) -> Optional[str]:
         """Read ICCID from the card without authentication."""
-        if self._simulator:
-            card = self._simulator._current_card()
-            return card.iccid if card else None
-        # Hardware: ICCID is available from card_info after detect
         return self.card_info.get("ICCID")
 
     def _adm1_to_hex(self, adm1: str) -> str:
@@ -797,12 +738,6 @@ class CardManager:
             Number of remaining attempts (0 = blocked), or None if
             the counter could not be read (e.g. no pyscard, no card).
         """
-        if self._simulator:
-            sim_card = self._simulator._current_card()
-            if sim_card:
-                return sim_card.remaining_attempts
-            return None
-
         if not _init_pyscard(self._venv_python):
             logger.debug("check_adm1_retry_counter: pyscard not available")
             return None
@@ -905,14 +840,6 @@ class CardManager:
                         f"expected: {expected_iccid}. Wrong card or wrong data row. "
                         f"Authentication aborted to prevent card lockout."
                     )
-
-        if self._simulator:
-            ok, msg = self._simulator.authenticate(adm1, force=force)
-            if ok:
-                self.authenticated = True
-                if force:
-                    self._safety_override_acknowledged = True
-            return ok, msg
 
         err = validate_adm1(adm1)
         if err:
@@ -1074,15 +1001,10 @@ class CardManager:
 
     def read_public_data(self) -> Optional[Dict[str, str]]:
         """Read public fields without authentication."""
-        if self._simulator:
-            return self._simulator.read_public_data()
-        # For hardware: return what we have from detect (ICCID, IMSI, etc.)
         return self.card_info if self.card_info else None
 
     def read_protected_data(self) -> Optional[Dict[str, str]]:
         """Read protected fields (requires ADM1 auth)."""
-        if self._simulator:
-            return self._simulator.read_protected_data()
         if not self.authenticated:
             return None
         # TODO: Real CLI read of Ki, OPc, etc.
@@ -1090,8 +1012,6 @@ class CardManager:
 
     def read_card_data(self) -> Optional[Dict[str, str]]:
         """Read basic card data (IMSI, ICCID, etc.)."""
-        if self._simulator:
-            return self._simulator.read_card_data()
         if not self.authenticated:
             return None
         return self.card_info if self.card_info else None
@@ -1156,8 +1076,6 @@ class CardManager:
             original_data: Optional baseline data for change detection.
                 If None, uses self._original_card_data from the last detect.
         """
-        if self._simulator:
-            return self._simulator.program_card(card_data)
         if self.card_blocked:
             return False, (
                 "Card is PERMANENTLY LOCKED \u2014 cannot program. "
@@ -1273,9 +1191,6 @@ class CardManager:
             (ok, message, read_back_data)
             *read_back_data* is the dict parsed from pySim-read output.
         """
-        if self._simulator:
-            return True, "Simulator — verification skipped", {}
-
         if self.cli_backend != CLIBackend.PYSIM:
             return True, "Verification not supported for this backend", {}
 
@@ -1335,21 +1250,15 @@ class CardManager:
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""
-        if self._simulator:
-            return self._simulator.verify_card(expected)
         if not self.authenticated:
             return False, ["Not authenticated"]
         return True, []
 
     def get_remaining_attempts(self) -> Optional[int]:
         """Return remaining ADM1 auth attempts, or None if unknown."""
-        if self._simulator:
-            return self._simulator.get_remaining_attempts()
         return self._adm1_remaining_attempts
 
     def disconnect(self):
-        if self._simulator:
-            self._simulator.disconnect()
         self.authenticated = False
         self._authenticated_adm1_hex = None
         self._original_card_data = None

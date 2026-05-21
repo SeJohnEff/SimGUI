@@ -11,38 +11,6 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from managers.card_manager import CardManager
-from simulator.settings import SimulatorSettings
-from simulator.simulator_backend import SimulatorBackend
-from simulator.virtual_card import VirtualCard
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_card_manager_with_simulator(**overrides):
-    """Return a CardManager in simulator mode with a single known card."""
-    cm = CardManager()
-    settings = SimulatorSettings()
-    settings.num_cards = 1
-    settings.delay_ms = 0
-    cm.enable_simulator(settings)
-    # Overwrite the deck with a card whose data we control
-    card = VirtualCard(
-        card_type="SJA2",
-        iccid="89860012345678901234",
-        imsi="001010123456789",
-        ki="A" * 32,
-        opc="B" * 32,
-        adm1="12345678",
-        acc="0004",
-    )
-    for k, v in overrides.items():
-        setattr(card, k, v)
-    cm._simulator.card_deck = [card]
-    cm._simulator.current_card_index = 0
-    return cm
-
 
 # ---------------------------------------------------------------------------
 # TestSharedReadData — verifying data flows into the shared dict
@@ -50,47 +18,6 @@ def _make_card_manager_with_simulator(**overrides):
 
 class TestSharedReadData:
     """Simulate what ReadSIMPanel does: read public/protected and update dict."""
-
-    def test_public_read_populates_shared_state(self):
-        cm = _make_card_manager_with_simulator()
-        shared = {}
-
-        # Simulate detect + public read (what ReadSIMPanel.refresh does)
-        ok, _ = cm.detect_card()
-        assert ok
-        pub = cm.read_public_data()
-        assert pub is not None
-
-        # Simulate what ReadSIMPanel._update_shared_read_data does
-        shared.clear()
-        shared.update(pub)
-
-        assert shared["iccid"] == "89860012345678901234"
-        assert shared["imsi"] == "001010123456789"
-        assert shared["acc"] == "0004"
-
-    def test_protected_read_adds_to_shared_state(self):
-        cm = _make_card_manager_with_simulator()
-        shared = {}
-
-        ok, _ = cm.detect_card()
-        assert ok
-        pub = cm.read_public_data()
-        shared.update(pub)
-
-        # Authenticate and read protected
-        ok, _ = cm.authenticate("12345678")
-        assert ok
-        prot = cm.read_protected_data()
-        assert prot is not None
-        shared.update(prot)
-
-        assert shared["ki"] == "A" * 32
-        assert shared["opc"] == "B" * 32
-        # Note: adm1 is not included in get_current_data() / get_protected_data()
-        # because it's a state field on VirtualCard, not a data field
-        # Public fields still present
-        assert shared["iccid"] == "89860012345678901234"
 
     def test_shared_state_cleared_when_no_card(self):
         shared = {"iccid": "old_value", "imsi": "old_value"}
@@ -165,82 +92,6 @@ class TestProgramSIMReadCardPopulation:
         fields = self._populate_fields({})
         for form_key in self._READ_KEY_MAP.values():
             assert fields[form_key] == ""
-
-
-# ---------------------------------------------------------------------------
-# TestEndToEndReadThenProgram — full simulator flow
-# ---------------------------------------------------------------------------
-
-class TestEndToEndReadThenProgram:
-    """End-to-end test: read a card, then populate Program SIM fields."""
-
-    def test_read_public_then_populate(self):
-        cm = _make_card_manager_with_simulator()
-        shared = {}
-
-        # Read phase (simulates ReadSIMPanel)
-        cm.detect_card()
-        pub = cm.read_public_data()
-        shared.update(pub)
-
-        # Program phase (simulates ProgramSIMPanel._populate_from_read_card)
-        form_iccid = shared.get("iccid", "")
-        form_imsi = shared.get("imsi", "")
-        assert form_iccid == "89860012345678901234"
-        assert form_imsi == "001010123456789"
-
-    def test_full_read_then_modify_and_program(self):
-        cm = _make_card_manager_with_simulator()
-        shared = {}
-
-        # Read phase
-        cm.detect_card()
-        pub = cm.read_public_data()
-        shared.update(pub)
-        cm.authenticate("12345678")
-        prot = cm.read_protected_data()
-        shared.update(prot)
-
-        # Populate form from shared (uppercase keys as the form uses)
-        card_data = {
-            "ICCID": shared.get("iccid", ""),
-            "IMSI": shared.get("imsi", ""),
-            "Ki": shared.get("ki", ""),
-            "OPc": shared.get("opc", ""),
-            "ADM1": "12345678",
-            "ACC": shared.get("acc", ""),
-        }
-        # User modifies IMSI (the main use case)
-        card_data["IMSI"] = "999990123456789"
-
-        # Program the card
-        ok, msg = cm.program_card(card_data)
-        assert ok
-
-        # Verify the modification was stored
-        card = cm._simulator._current_card()
-        assert card.programmed_fields["IMSI"] == "999990123456789"
-
-    def test_iccid_cross_check_still_works(self):
-        """ICCID cross-check during authentication should still function."""
-        cm = _make_card_manager_with_simulator()
-
-        cm.detect_card()
-        # Authenticate with the correct ICCID
-        ok, msg = cm.authenticate(
-            "12345678", expected_iccid="89860012345678901234")
-        assert ok
-
-    def test_iccid_mismatch_detected(self):
-        """A mismatched ICCID should be flagged during authentication."""
-        cm = _make_card_manager_with_simulator()
-
-        cm.detect_card()
-        # Authenticate with wrong ICCID
-        ok, msg = cm.authenticate(
-            "12345678", expected_iccid="99999999999999999999")
-        assert ok is False
-        assert "ICCID mismatch" in msg
 
 
 # ---------------------------------------------------------------------------

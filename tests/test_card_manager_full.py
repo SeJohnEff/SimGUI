@@ -22,20 +22,6 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_manager import CardManager, CardType, CLIBackend, _find_cli_tool
-from simulator.settings import SimulatorSettings
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_sim_manager(num_cards=5, error_rate=0.0):
-    """Create a CardManager in simulator mode."""
-    cm = CardManager()
-    cm.enable_simulator(SimulatorSettings(delay_ms=0,
-                                           error_rate=error_rate,
-                                           num_cards=num_cards))
-    return cm
-
 
 # ---------------------------------------------------------------------------
 # authenticate() with expected_iccid
@@ -214,14 +200,6 @@ class TestReadCard:
         cm.card_info = {"ICCID": "123", "IMSI": "456"}
         result = cm.read_card_data()
         assert result == {"ICCID": "123", "IMSI": "456"}
-
-    def test_read_card_data_simulator(self):
-        """Simulator mode: read_card_data() returns card data without auth."""
-        cm = _make_sim_manager()
-        data = cm.read_card_data()
-        assert data is not None
-        assert "iccid" in data
-        assert "imsi" in data
 
     def test_read_public_data_hardware_no_data(self):
         """Hardware mode: read_public_data() returns None when card_info is empty."""
@@ -587,21 +565,6 @@ class TestVerifyCard:
         assert ok is True
         assert mismatches == []
 
-    def test_simulator_match(self):
-        """verify_card() in simulator mode: matching data -> success."""
-        cm = _make_sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        cm.program_card({"imsi": "test_val"})
-        ok, mismatches = cm.verify_card({"imsi": "test_val"})
-        assert ok is True
-
-    def test_simulator_mismatch(self):
-        """verify_card() in simulator mode: mismatched data -> failure."""
-        cm = _make_sim_manager()
-        ok, mismatches = cm.verify_card({"imsi": "wrong_value"})
-        assert ok is False
-        assert len(mismatches) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -615,17 +578,6 @@ class TestGetRemainingAttempts:
         """get_remaining_attempts() returns None in hardware mode."""
         cm = CardManager()
         assert cm.get_remaining_attempts() is None
-
-    def test_simulator_returns_3(self):
-        """get_remaining_attempts() returns 3 for a fresh virtual card."""
-        cm = _make_sim_manager()
-        assert cm.get_remaining_attempts() == 3
-
-    def test_simulator_decrements_on_wrong_adm1(self):
-        """get_remaining_attempts() decrements after wrong ADM1."""
-        cm = _make_sim_manager()
-        cm.authenticate("00000000")  # wrong
-        assert cm.get_remaining_attempts() == 2
 
 
 # ---------------------------------------------------------------------------
@@ -648,17 +600,3 @@ class TestReadIccid:
         cm.card_info = {"ICCID": "89860012345678901234"}
         assert cm.read_iccid() == "89860012345678901234"
 
-    def test_simulator_returns_iccid(self):
-        """read_iccid() returns the virtual card's ICCID."""
-        cm = _make_sim_manager()
-        iccid = cm.read_iccid()
-        assert iccid is not None
-        assert len(iccid) > 0
-
-    def test_simulator_no_card(self):
-        """read_iccid() returns None when simulator has empty deck."""
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=0))
-        cm._simulator.card_deck = []
-        result = cm.read_iccid()
-        assert result is None

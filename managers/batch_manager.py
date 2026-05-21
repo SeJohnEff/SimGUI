@@ -136,8 +136,6 @@ class BatchManager:
     # ---- internal thread -----------------------------------------------
 
     def _run(self) -> None:
-        simulator_mode = self._cm.is_simulator_active
-
         for i, card_data in enumerate(self._batch_data):
             self._current_index = i
 
@@ -152,24 +150,21 @@ class BatchManager:
             iccid = card_data.get("ICCID", "?")
             adm1 = card_data.get("ADM1", "")
 
-            # --- prompt for card insertion (or auto-advance in simulator) ---
-            if simulator_mode and i > 0:
-                self._cm.next_virtual_card()
-            elif not simulator_mode:
-                self.state = BatchState.WAITING_FOR_CARD
-                self._card_ready_event.clear()
-                if self.on_waiting_for_card:
-                    self.on_waiting_for_card(i, iccid)
-                self._card_ready_event.wait()
-                if self._abort_event.is_set():
-                    break
-                if self._skip_event.is_set():
-                    self._skip_event.clear()
-                    self.results.append(CardResult(i, iccid, False, "Skipped"))
-                    if self.on_card_result:
-                        self.on_card_result(self.results[-1])
-                    continue
-                self.state = BatchState.RUNNING
+            # --- prompt for card insertion ---
+            self.state = BatchState.WAITING_FOR_CARD
+            self._card_ready_event.clear()
+            if self.on_waiting_for_card:
+                self.on_waiting_for_card(i, iccid)
+            self._card_ready_event.wait()
+            if self._abort_event.is_set():
+                break
+            if self._skip_event.is_set():
+                self._skip_event.clear()
+                self.results.append(CardResult(i, iccid, False, "Skipped"))
+                if self.on_card_result:
+                    self.on_card_result(self.results[-1])
+                continue
+            self.state = BatchState.RUNNING
 
             if self.on_progress:
                 self.on_progress(i, len(self._batch_data), f"Processing card {i + 1}")

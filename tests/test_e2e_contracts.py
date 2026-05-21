@@ -727,45 +727,6 @@ class TestAuthLockoutContract:
     operator later provided the correct ADM1.
     """
 
-    def _sim_manager(self, num_cards: int = 1) -> CardManager:
-        from simulator.settings import SimulatorSettings
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=num_cards))
-        return cm
-
-    def test_correct_adm1_succeeds_immediately(self):
-        """CardManager.authenticate() returns True for correct ADM1."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        ok, msg = cm.authenticate(card.adm1)
-        assert ok is True
-        assert cm.authenticated is True
-
-    def test_wrong_adm1_fails_and_decrements(self):
-        """Wrong ADM1 returns False and decrements attempts counter."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        ok, msg = cm.authenticate("00000000")
-        assert ok is False
-        assert card.adm1_attempts_remaining == 2
-
-    def test_three_wrong_adm1_locks_card_permanently(self):
-        """Three consecutive wrong ADM1 values lock the card permanently.
-
-        This mirrors the real SIM card behaviour: ADM1 is a write-once counter.
-        After the third failure the card enters a permanent locked state.
-        """
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        for _ in range(3):
-            cm.authenticate("00000000")
-        assert card.adm1_locked is True
-        assert card.adm1_attempts_remaining == 0
-        # Even the correct ADM1 is now rejected
-        ok, msg = cm.authenticate(card.adm1)
-        assert ok is False
-        assert "locked" in msg.lower()
-
     def test_iccid_mismatch_does_not_count_as_attempt(self):
         """ICCID mismatch must NOT trigger a pySim-shell VERIFY call.
 
@@ -785,125 +746,10 @@ class TestAuthLockoutContract:
             "ICCID mismatch must not trigger a VERIFY call"
         )
 
-    def test_correct_adm1_does_not_decrement_counter(self):
-        """A successful authentication must not touch the attempts counter."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        before = card.adm1_attempts_remaining
-        cm.authenticate(card.adm1)
-        assert card.adm1_attempts_remaining == before
-
-    def test_card_still_locked_after_correct_adm1_post_lock(self):
-        """A locked card stays locked even if the correct ADM1 is given."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        for _ in range(3):
-            cm.authenticate("00000000")
-        ok, msg = cm.authenticate(card.adm1)  # correct but too late
-        assert ok is False
-        assert cm.authenticated is False
 
 
 # ===========================================================================
-# Section 7 — Full simulate-program-verify contract
-# ===========================================================================
-
-class TestSimulateProgramVerify:
-    """End-to-end: authenticate → program → verify → check fields.
-
-    Bug this catches: if programmed_fields were not consulted during
-    verify_card(), every verification would pass regardless of what was
-    written, silently producing garbage-programmed cards in the field.
-    """
-
-    def _sim_manager(self, num_cards: int = 1) -> CardManager:
-        from simulator.settings import SimulatorSettings
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=num_cards))
-        return cm
-
-    def test_full_program_verify_cycle_passes(self):
-        """Authenticate → program IMSI+Ki → verify same values → success."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        ok, _ = cm.authenticate(card.adm1)
-        assert ok is True
-
-        data = {"imsi": "001010000099999", "ki": "A" * 32}
-        ok, _ = cm.program_card(data)
-        assert ok is True
-
-        ok, mismatches = cm.verify_card(data)
-        assert ok is True
-        assert mismatches == []
-
-    def test_verify_detects_wrong_imsi(self):
-        """verify_card() catches an IMSI that was programmed differently."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        cm.program_card({"imsi": "001010000011111"})
-
-        # Verify against different IMSI
-        ok, mismatches = cm.verify_card({"imsi": "001010000099999"})
-        assert ok is False
-        assert any("imsi" in m.lower() for m in mismatches), (
-            f"Expected 'imsi' in mismatch list, got: {mismatches}"
-        )
-
-    def test_verify_empty_dict_always_passes(self):
-        """verify_card({}) passes for any card state."""
-        cm = self._sim_manager()
-        ok, mismatches = cm.verify_card({})
-        assert ok is True
-        assert mismatches == []
-
-    def test_program_without_auth_fails(self):
-        """program_card() without prior authenticate() must return False."""
-        cm = self._sim_manager()
-        ok, msg = cm.program_card({"imsi": "001010000099999"})
-        assert ok is False
-        assert "not authenticated" in msg.lower() or "auth" in msg.lower()
-
-    def test_program_multiple_fields_all_written(self):
-        """All fields passed to program_card() are written correctly."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        data = {
-            "imsi": "001010000055555",
-            "ki": "A" * 32,
-            "opc": "B" * 32,
-        }
-        ok, _ = cm.program_card(data)
-        assert ok is True
-
-        ok, mismatches = cm.verify_card(data)
-        assert ok is True, f"Unexpected mismatches: {mismatches}"
-
-    def test_re_program_overwrites_previous_value(self):
-        """Programming the same field twice stores the latest value."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        cm.program_card({"imsi": "111111111111111"})
-        cm.program_card({"imsi": "222222222222222"})
-        assert card.programmed_fields["imsi"] == "222222222222222"
-
-    def test_read_card_data_reflects_programmed_fields(self):
-        """read_card_data() returns a dict that includes programmed fields."""
-        cm = self._sim_manager()
-        card = cm._simulator._current_card()
-        cm.authenticate(card.adm1)
-        cm.program_card({"imsi": "999880001000001"})
-        data = cm.read_card_data()
-        assert data is not None
-        # The programmed imsi should appear somewhere in read_card_data output
-        assert "imsi" in data or "IMSI" in data
-
-
-# ===========================================================================
-# Section 8 — Hardware-gated tests (skipped in CI)
+# Section 7 — Hardware-gated tests (skipped in CI)
 # ===========================================================================
 
 class TestHardwareGated:

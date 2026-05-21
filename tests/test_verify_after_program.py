@@ -177,14 +177,6 @@ class TestVerifyAfterProgram:
         # card_info should be restored to original
         assert cm.card_info["IMSI"] == "original_imsi"
 
-    def test_verify_simulator_skips(self):
-        """Simulator mode → skip verification, return True."""
-        cm = CardManager()
-        cm.enable_simulator()
-        ok, msg, data = cm.verify_after_program({"ICCID": "123"})
-        assert ok is True
-        assert "Simulator" in msg
-
     def test_verify_non_pysim_backend_skips(self):
         """Non-pySim backend → skip verification."""
         cm = _make_hw_card_manager()
@@ -302,21 +294,6 @@ class TestProgramCardWithVerify:
 
         assert ok is True
         assert "already matches" in msg.lower()
-        mock_verify.assert_not_called()
-
-    def test_simulator_skips_verify(self):
-        """Simulator program_card doesn't call verify."""
-        cm = CardManager()
-        cm.enable_simulator()
-        cm._simulator.detect_card()
-        card = cm._simulator._current_card()
-        cm._simulator.authenticate(card.adm1)
-
-        with patch.object(cm, 'verify_after_program') as mock_verify:
-            ok, msg = cm.program_card({"IMSI": "999880000200001"})
-
-        # Simulator path returns before reaching verify
-        # verify_after_program should not be called
         mock_verify.assert_not_called()
 
 

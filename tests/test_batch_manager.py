@@ -4,22 +4,36 @@ import threading
 import time
 
 import pytest
+from unittest.mock import MagicMock
 
 from managers.batch_manager import BatchManager, BatchState, CardResult
 from managers.card_manager import CardManager
 
 
+def _slow_program(*_args, **_kwargs):
+    """Introduce a small delay so abort/pause tests can fire before batch completes."""
+    time.sleep(0.005)
+    return (True, "Programmed")
+
+
 @pytest.fixture
 def batch_card_manager():
-    """CardManager in simulator mode for batch tests."""
-    cm = CardManager()
-    cm.enable_simulator()
+    """Mock CardManager for hardware-path batch tests."""
+    cm = MagicMock()
+    cm.is_simulator_active = False
+    cm.detect_card.return_value = (True, "Card detected")
+    cm.read_iccid.return_value = None
+    cm.authenticate.return_value = (True, "Authenticated")
+    cm.program_card.side_effect = _slow_program
+    cm.verify_card.return_value = (True, [])
     return cm
 
 
 @pytest.fixture
 def batch_manager(batch_card_manager):
-    return BatchManager(batch_card_manager)
+    bm = BatchManager(batch_card_manager)
+    bm.on_waiting_for_card = lambda i, iccid: bm.card_ready()
+    return bm
 
 
 def _make_batch(count: int) -> list:
@@ -63,17 +77,6 @@ class TestCardResult:
 
 
 class TestBatchExecution:
-    def test_run_batch_simulator(self, batch_manager):
-        """Run a small batch in simulator mode and verify completion."""
-        batch = _make_batch(3)
-        completed = threading.Event()
-        batch_manager.on_completed = lambda: completed.set()
-        batch_manager.start(batch)
-        completed.wait(timeout=10)
-        assert batch_manager.state == BatchState.COMPLETED
-        assert batch_manager.total == 3
-        assert len(batch_manager.results) == 3
-
     def test_results_have_iccid(self, batch_manager):
         batch = _make_batch(2)
         completed = threading.Event()

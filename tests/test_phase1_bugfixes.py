@@ -263,17 +263,6 @@ class TestSafetyOverrideCarryForward(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(cm._safety_override_acknowledged)
 
-    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
-    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
-    def test_force_auth_simulator_sets_override(self, mock_retry, mock_safe):
-        """Simulator authenticate(force=True) must also set override."""
-        cm = self._make_card_manager()
-        cm._simulator = MagicMock()
-        cm._simulator.authenticate.return_value = (True, 'ok')
-        ok, _ = cm.authenticate('88888888', force=True)
-        self.assertTrue(ok)
-        self.assertTrue(cm._safety_override_acknowledged)
-
 
 class TestIccidIndexAddIccid(unittest.TestCase):
     """Bug 1.4: IccidIndex.add_iccid() must register a single ICCID.

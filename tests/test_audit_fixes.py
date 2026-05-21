@@ -185,29 +185,6 @@ class TestBatchProcessOnePaths:
         assert "89001" in result.message
         assert "89999" in result.message
 
-    def test_no_callbacks_set_does_not_raise(self):
-        """BatchManager runs fine with no callbacks set at all."""
-        from managers.batch_manager import BatchManager, BatchState
-        from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
-
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        bm = BatchManager(cm)
-        # Don't set any callbacks
-        backend = cm._simulator
-        batch = [{"ICCID": c.iccid, "IMSI": c.imsi, "ADM1": c.adm1}
-                 for c in backend.card_deck[:2]]
-        bm.state.__class__  # warmup
-        bm.start(batch)
-        # Must not raise — give it 5s to finish
-        deadline = time.time() + 5
-        while bm.state not in (BatchState.COMPLETED, BatchState.ABORTED):
-            if time.time() > deadline:
-                bm.abort()
-                break
-            time.sleep(0.05)
-        assert bm.state in (BatchState.COMPLETED, BatchState.ABORTED)
 
 
 # ===========================================================================
@@ -609,60 +586,46 @@ class TestCardManagerUncoveredPaths:
         assert isinstance(msg, str)
 
     def test_read_protected_data_unauthenticated(self):
-        """read_protected_data fails when not authenticated."""
+        """read_protected_data returns None when not authenticated."""
         from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
 
         cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        # Without authenticating, read should fail or return None
         result = cm.read_protected_data()
-        # Either None or a tuple with ok=False
-        if isinstance(result, tuple):
-            ok = result[0]
-            assert ok is False
-        else:
-            assert result is None
+        assert result is None
 
     def test_read_protected_data_authenticated(self):
-        """read_protected_data succeeds after authentication."""
+        """read_protected_data returns a dict (may be empty) after authentication."""
         from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
 
         cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        ok, _ = cm.authenticate(card.adm1)
-        assert ok is True
+        cm.authenticated = True
         result = cm.read_protected_data()
-        # Should succeed or return something meaningful
         assert result is not None
 
     def test_authenticate_with_expected_iccid_match(self):
         """CardManager.authenticate with expected_iccid matching the card passes."""
-        from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
+        from managers.card_manager import CardManager, CLIBackend
 
         cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        ok, msg = cm.authenticate(card.adm1, expected_iccid=card.iccid)
+        cm.cli_path = "/fake/pysim"
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_info = {"ICCID": "89999000000000000001", "IMSI": "99999000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001", "IMSI": "99999000000001"}
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_shell_safe', return_value=(True, '', '')):
+            ok, msg = cm.authenticate("88888888", expected_iccid="89999000000000000001")
         assert ok is True
 
     def test_authenticate_with_expected_iccid_mismatch(self):
         """CardManager.authenticate with wrong expected_iccid returns failure."""
         from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
 
         cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        ok, msg = cm.authenticate(card.adm1, expected_iccid="00000000000000000000")
+        cm.card_info = {"ICCID": "89999000000000000001", "IMSI": "99999000000001"}
+        cm._original_card_data = {"ICCID": "89999000000000000001", "IMSI": "99999000000001"}
+        ok, msg = cm.authenticate("88888888", expected_iccid="00000000000000000000")
         assert ok is False
-        assert isinstance(msg, str)
+        assert "ICCID mismatch" in msg
 
     def test_parse_pysim_output_key_value(self):
         """_parse_pysim_output populates card_info with key: value pairs."""
@@ -980,29 +943,6 @@ class TestIntegrationVerification:
                                   "89001", "12345678")
         assert "IMSI mismatch" in result.message
         assert "Ki mismatch" in result.message
-
-    def test_first_card_no_next_virtual_card(self):
-        """With 1-card batch, there is no 'next' virtual card to pre-load."""
-        from managers.batch_manager import BatchManager, BatchState
-        from managers.card_manager import CardManager
-        from simulator.settings import SimulatorSettings
-
-        cm = CardManager()
-        cm.enable_simulator(SimulatorSettings(delay_ms=0, num_cards=3))
-        backend = cm._simulator
-        card = backend.card_deck[0]
-        batch = [{"ICCID": card.iccid, "IMSI": card.imsi, "ADM1": card.adm1}]
-
-        bm = BatchManager(cm)
-        bm.start(batch)
-        deadline = time.time() + 5
-        while bm.state not in (BatchState.COMPLETED, BatchState.ABORTED):
-            if time.time() > deadline:
-                bm.abort()
-                break
-            time.sleep(0.05)
-        assert bm.state == BatchState.COMPLETED
-        assert len(bm.results) == 1
 
     def test_find_duplicate_iccids_no_duplicates(self, tmp_path):
         """find_duplicate_iccids returns empty list when no duplicates."""
