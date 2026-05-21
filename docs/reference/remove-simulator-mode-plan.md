@@ -1,29 +1,38 @@
 # Plan: Remove Simulator Mode
 
-**Status:** Design only — no code has been changed.  
+**Status:** Design complete — decisions recorded. Implementation not yet started.  
 **Goal:** Remove simulator mode entirely. The application will have one operational mode: hardware mode. The Card menu mode switch will also be removed.
 
 ---
 
-## 1. Human Decisions Required Before Implementation
+## 1. Human Decisions — Recorded
 
-These questions must be answered before any code is deleted:
+These were open questions in the original audit. All three are now answered and binding.
 
-1. **Startup fallback when no pySim is found:** Currently, if `CLIBackend.NONE` (no pySim found at startup), the app starts in `AppMode.SIMULATOR`. After removal, what should happen instead? Options:
-   - Show a blocking error dialog and refuse to start.
-   - Start normally but show a persistent warning in the status bar.
-   - Start normally and let card detection fail naturally when the user tries to insert a card.
+### Decision 1 — Startup with no pySim found
 
-2. **Test suite strategy:** ~150+ tests use the simulator backend as a cheap stand-in for real hardware (no reader needed). After simulator removal they will fail. Two options:
-   - Delete them (lose coverage of batching, programming logic, state transitions).
-   - Rewrite them to use `unittest.mock` to mock `CardManager` internals directly.
-   The rewrite is the correct choice, but it is a significant effort and must be scoped before starting.
+**Decision:** No simulator fallback. The application is hardware-only.
 
-3. **`simulator/` directory:** Delete the entire directory and all 5 modules? Confirm.
+If `CLIBackend.NONE` (no pySim found at startup), the app must fail safely with a clear setup/install message. Options that were considered and rejected: falling back to simulator mode (not allowed), silent startup (not allowed). The message must tell the user how to install pySim and must not leave the app in an ambiguous state. Exact UX (blocking dialog vs. persistent banner) to be confirmed during Commit 5 implementation, but the principle is fixed: no simulator fallback under any circumstances.
 
-4. **`simulator_mode` settings key:** The key exists in `SettingsManager` but is never written. Delete the key and the default entry?
+### Decision 2 — Test suite strategy
 
-5. **`CLIBackend.SIMULATOR` enum value:** This value exists in `card_manager.py` but is not used anywhere. Delete it when removing other simulator code?
+**Decision:** Two-track approach.
+
+- **Delete** tests that specifically validate simulator mode as a product feature (e.g. `test_simulator.py`, AppMode toggle tests, simulator-mode startup tests). These tests have no hardware equivalent and nothing to rewrite toward.
+- **Rewrite** tests that only use the simulator as a convenient test double for real business logic. Coverage must be preserved for: SIM programming, authentication, card detection, retry safety, CSV handling, batch sequencing, and state machine behavior. Rewrites use `unittest.mock` to mock `CardManager` internals directly — the simulator backend is never a dependency in rewritten tests.
+
+Coverage areas that must not shrink: SIM programming, auth, card detection, retry safety, CSV, batch, state behavior.
+
+### Decision 3 — `simulator/` directory deletion
+
+**Decision:** Approved for deletion — but only in a late commit, after all references in application code and tests are removed or replaced, and after the full test suite passes without importing from `simulator/`.
+
+Deleting the directory before references are cleaned up causes import errors that mask real failures.
+
+### Decision 4 (standing rule) — macOS-specific code authority
+
+macOS-specific code is untested as business logic. It may only provide thin platform adapter values. It must never be treated as a source of behavioral truth. Ubuntu active baseline and `state-machine.md` are the behavioral authorities for this work.
 
 ---
 
@@ -81,41 +90,50 @@ These references only affect what the user sees; they have no business logic.
 | `docs/how-to/troubleshooting.md` | 216–221 | "Simulator mode" troubleshooting section |
 | `README.md` | 21, 87 | Feature list and getting-started simulator mention |
 
-### 2.5 Tests That Will Fail or Need Removal
+### 2.5 Tests — Delete or Rewrite
 
-These test files test simulator behavior directly and will require deletion or full rewrite:
+Per Decision 2, each test file is classified below.
 
-| File | What it tests |
-|------|---------------|
-| `tests/test_simulator.py` | SimulatorBackend unit tests (70+ tests) |
-| `tests/test_simulator_full.py` | Full simulator integration tests |
-| `tests/test_simulator_settings_logic.py` | Simulator settings handling |
-| `tests/test_batch_manager_full.py` | Batch runs using simulator auto-advance |
-| `tests/test_card_manager_full.py` | CardManager with simulator enabled |
-| `tests/test_verify_after_program.py` | Verification flow via simulator |
-| `tests/test_e2e_contracts.py` | End-to-end contracts using simulator |
-| `tests/test_phase1_bugfixes.py` | References `cm._simulator = None` to disable |
-| `tests/test_state_manager.py` | 216–242: AppMode enum and mode property tests |
-| `tests/test_main_app.py` | 649–683: simulator mode restored from settings; 685+: no CLI → simulator |
-| `tests/test_settings_manager.py` | 51–52: `simulator_mode` key get/set |
-| `tests/test_settings_manager_extended.py` | 82–85: default value `False` |
+**Delete entirely** (tests simulator as a product feature — nothing to rewrite toward):
+
+| File | Reason |
+|------|--------|
+| `tests/test_simulator.py` | SimulatorBackend unit tests (~70 tests). The backend is being deleted. |
+| `tests/test_simulator_full.py` | Full simulator integration tests. |
+| `tests/test_simulator_settings_logic.py` | Simulator settings handling. |
+| `tests/test_state_manager.py` lines 216–242 | AppMode enum and mode property tests. AppMode is being deleted. |
+| `tests/test_main_app.py` lines 649–683 | Simulator mode restored from settings — feature is deleted. |
+| `tests/test_main_app.py` lines 685+ | No CLI → simulator mode — behavior is deleted. |
+| `tests/test_settings_manager.py` lines 51–52 | `simulator_mode` key get/set — key is deleted. |
+| `tests/test_settings_manager_extended.py` lines 82–85 | `simulator_mode` default value — key is deleted. |
+
+**Rewrite with mocks** (simulator was only a test double; the logic under test survives):
+
+| File | Coverage to preserve |
+|------|---------------------|
+| `tests/test_batch_manager_full.py` | Batch sequencing, card-swap wait, retry behavior, CSV iteration. Remove simulator auto-advance tests; rewrite remaining with mock `CardManager`. |
+| `tests/test_card_manager_full.py` | Card detection, authentication, programming logic, retry safety, ADM1 format handling. Replace `enable_simulator()` calls with mock `CardManager` methods. |
+| `tests/test_verify_after_program.py` | Verification flow after programming. Rewrite with mock `CardManager.verify_card()`. |
+| `tests/test_e2e_contracts.py` | End-to-end state machine contracts. Rewrite hardware path scenarios with mock `CardManager`. |
+| `tests/test_phase1_bugfixes.py` | Lines using `cm._simulator = None` — remove those lines; keep the underlying bug assertions if the behavior still exists. |
 
 ---
 
 ## 3. Can AppMode Be Removed Entirely?
 
-**Yes.** `AppMode` has exactly two values: `HARDWARE` and `SIMULATOR`. After simulator removal there would be one operational mode. The enum, its signal (`mode_changed`), its property, and all connected handlers can be removed entirely.
+**Yes.** `AppMode` has exactly two values: `HARDWARE` and `SIMULATOR`. After simulator removal there is one operational mode. The enum, its signal (`mode_changed`), its property, and all connected handlers are deleted entirely.
 
-`state-machine.md` mentions `AppMode` once (line 170, signal table). That entry must be removed when `mode_changed` is removed. This requires editing `state-machine.md` — a guarded file. That edit should be a standalone commit with explicit human sign-off.
+`AppMode` removal must be its own isolated commit (Commit 4 in the sequence below). No other concerns may be bundled into that commit.
 
-`SimulatorInfo` (the dataclass and its signal `simulator_info_changed`) is purely simulator-internal and can be deleted alongside `AppMode`.
+`state-machine.md` mentions `AppMode` once (line 170, signal table entry for `mode_changed`). That entry must be removed — in a separate, standalone commit (Commit 6) with no other changes. Human sign-off is required before that commit is made.
+
+`SimulatorInfo` (the dataclass and its signal `simulator_info_changed`) is purely simulator-internal and is deleted in the same commit as `AppMode`.
 
 ---
 
 ## 4. What Can Be Removed vs. What Must Stay
 
 ### Safe to delete entirely (no other purpose)
-- `simulator/` directory — all 5 modules
 - `AppMode` enum
 - `SimulatorInfo` dataclass
 - `mode_changed` signal and property
@@ -127,119 +145,212 @@ These test files test simulator behavior directly and will require deletion or f
 - `"simulator_mode"` settings key in `SettingsManager`
 - Card menu Hardware Mode / Simulator Mode actions and handlers in `main.py`
 - `_on_mode_changed()` handler in `main.py`
+- `simulator/` directory — all 5 modules (late commit only, after all references cleared)
 
 ### Requires rewrite (not pure deletion)
-- Every `if self._simulator:` gate in `card_manager.py` — remove the branch, keep the `else` (hardware) path as the unconditional path.
+- Every `if self._simulator:` gate in `card_manager.py` — remove the simulator branch, promote the hardware (`else`) path to unconditional.
 - Batch manager auto-advance — remove the simulator branch; hardware wait-for-operator is the only path.
-- Startup logic in `main.py` — remove the `AppMode.SIMULATOR` fallback; decide what happens when `CLIBackend.NONE` (see Human Decisions section).
+- Startup logic in `main.py` — remove the `AppMode.SIMULATOR` fallback; replace with a clear setup/install error message when `CLIBackend.NONE` (see Decision 1).
 - `_startup_detect_card()` guard — remove the mode check; always run detection.
 
-### Requires careful edit (guarded files)
-- `docs/reference/state-machine.md` — remove the `mode_changed` row from the signal table. No other content changes.
+### Requires careful standalone edit (guarded file)
+- `docs/reference/state-machine.md` — remove only the `mode_changed` row from the signal table. No other edits. Standalone commit. Human sign-off required.
 
-### Tests: delete or rewrite
-- All simulator-specific test files (listed in 2.5) must be deleted.
-- Tests in `test_state_manager.py`, `test_main_app.py`, `test_settings_manager.py` that test simulator-specific behavior must be deleted (not rewritten — there is nothing to test).
-- Tests in `test_batch_manager_full.py`, `test_card_manager_full.py`, `test_e2e_contracts.py` that use simulator as a test double need assessment: if they test logic that is still present (e.g. batch sequencing, card programming logic), they must be rewritten to use `unittest.mock` rather than the simulator backend.
+### Tests: see 2.5 above
+Delete simulator-feature tests. Rewrite test-double tests with `unittest.mock`. Coverage for SIM programming, auth, detection, retry safety, CSV, batch, and state behavior must not shrink.
 
 ---
 
-## 5. Proposed Implementation Sequence
+## 5. Implementation Sequence
 
-Each commit is a single concern. Run the full test suite after every commit.
+**Non-negotiable sequencing rules:**
+- `simulator/` directory is deleted **late** — only after all application code references are removed and the full test suite passes without any import from `simulator/`.
+- `AppMode` removal is its own isolated commit. No other concerns bundled.
+- `state-machine.md` edit is a standalone commit with no other changes. Human sign-off required before it is made.
+- A new Ubuntu test baseline is recorded and `CLAUDE.md` updated as the final commit of this sequence.
+- macOS-specific code must never be a source of behavioral decisions during this work.
 
-### Commit 1 — Remove `simulator/` directory
-- Delete `simulator/__init__.py`, `simulator/settings.py`, `simulator/simulator_backend.py`, `simulator/virtual_card.py`, `simulator/card_deck.py`.
-- Delete all simulator-specific test files: `test_simulator.py`, `test_simulator_full.py`, `test_simulator_settings_logic.py`.
-- **Test command:** `python3 -m pytest tests/ -x -q`
-- **Expected:** Tests that imported from `simulator/` will no longer import it. The test count will drop. Any test that did `from simulator import ...` will now fail if not deleted — verify none remain.
+Each commit is a single concern. Run `python3 -m pytest tests/ -x -q` after every commit.
 
-### Commit 2 — Remove simulator routing from `card_manager.py`
-- Remove `self._simulator` field and all 30+ `if self._simulator:` gates.
-- Remove `enable_simulator()`, `disable_simulator()`, `is_simulator_active`, `next_virtual_card()`, `previous_virtual_card()`, `get_simulator_info()`.
+---
+
+### Commit 1 — Rewrite test-double tests (no application code changes)
+
+Before touching application code, convert tests that use the simulator as a test double to use `unittest.mock`. This ensures coverage is confirmed working before the backend is removed.
+
+- Rewrite `test_batch_manager_full.py`: remove simulator auto-advance tests; rewrite remaining batch logic tests with mock `CardManager`.
+- Rewrite `test_card_manager_full.py`: replace `enable_simulator()` calls with mock `CardManager` methods; preserve coverage for all hardware-path logic.
+- Rewrite `test_verify_after_program.py`: replace simulator with mock `CardManager.verify_card()`.
+- Rewrite `test_e2e_contracts.py`: replace simulator with mock `CardManager` for hardware path scenarios.
+- Rewrite affected lines in `test_phase1_bugfixes.py`: remove `cm._simulator = None` lines; keep underlying behavior assertions.
+- Do **not** touch application code in this commit.
+
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** All 2123 tests still pass (rewrites are behavior-equivalent).
+
+---
+
+### Commit 2 — Delete simulator-feature tests
+
+Delete tests that validate simulator as a product feature — there is nothing to rewrite them toward.
+
+- Delete `tests/test_simulator.py`
+- Delete `tests/test_simulator_full.py`
+- Delete `tests/test_simulator_settings_logic.py`
+- Delete AppMode test cases from `tests/test_state_manager.py` (lines 216–242)
+- Delete simulator startup test cases from `tests/test_main_app.py` (lines 649–685+)
+- Delete `simulator_mode` key test cases from `tests/test_settings_manager.py` (lines 51–52)
+- Delete `simulator_mode` default test cases from `tests/test_settings_manager_extended.py` (lines 82–85)
+- Do **not** touch application code in this commit.
+
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Test count drops by ~150–200. No failures — only deletions. Any failure here means a rewrite in Commit 1 is incomplete; stop and fix before continuing.
+
+---
+
+### Commit 3 — Remove simulator routing from `card_manager.py`
+
+- Remove `self._simulator = None` instance field.
+- Remove all 30+ `if self._simulator:` routing gates — promote the hardware `else` path to unconditional in each case.
+- Remove `enable_simulator()`, `disable_simulator()`, `is_simulator_active`.
+- Remove `next_virtual_card()`, `previous_virtual_card()`, `get_simulator_info()`.
 - Remove `CLIBackend.SIMULATOR` enum value.
-- **Test command:** `python3 -m pytest tests/ -x -q`
-- **Expected:** Tests that called `enable_simulator()` or checked `is_simulator_active` will fail — these must have been deleted in Commit 1 or identified here for deletion.
+- Do **not** delete `simulator/` yet — it is imported nowhere in tests after Commits 1–2, but confirm with a grep before deleting.
 
-### Commit 3 — Remove simulator routing from `batch_manager.py`
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Same count as Commit 2. Any failure = a mock rewrite in Commit 1 missed something; stop and fix.
+
+---
+
+### Commit 4 — Remove simulator routing from `batch_manager.py`
+
 - Remove `simulator_mode = self._cm.is_simulator_active` capture.
-- Remove the `if simulator_mode:` auto-advance branch; hardware wait path becomes unconditional.
-- **Test command:** `python3 -m pytest tests/ -x -q`
-- **Expected:** Batch tests that relied on auto-advance (test_batch_manager_full.py) must already be deleted or rewritten.
+- Remove the `if simulator_mode:` auto-advance branch.
+- Hardware wait-for-operator path becomes unconditional.
 
-### Commit 4 — Remove `AppMode`, `SimulatorInfo`, and their signals from `state_manager.py`
-- Delete `AppMode` enum.
-- Delete `SimulatorInfo` dataclass.
-- Delete `mode_changed` signal definition, property, and setter logic.
-- Delete `simulator_info_changed` signal, property, and `update_simulator_info()`.
-- Remove `"simulator_mode"` default from `SettingsManager`.
-- **Test command:** `python3 -m pytest tests/ -x -q`
-- **Expected:** `test_state_manager.py` AppMode tests and `test_settings_manager*.py` simulator key tests will fail — delete those test cases.
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Same count as Commit 3.
 
-### Commit 5 — Remove Card menu and mode handlers from `main.py`
-- Remove Card menu "Hardware Mode" / "Simulator Mode" actions (lines 379–403).
-- Remove `_on_mode_hardware()`, `_on_mode_simulator()` (lines 591–595).
+---
+
+### Commit 5 — Remove `AppMode`, `SimulatorInfo`, and signals from `state_manager.py` (isolated)
+
+This commit removes `AppMode` and nothing else outside `state_manager.py` and `settings_manager.py`.
+
+- Delete `AppMode` enum from `state_manager.py`.
+- Delete `SimulatorInfo` dataclass from `state_manager.py`.
+- Delete `mode_changed` signal definition, property getter/setter, and emission call.
+- Delete `simulator_info_changed` signal, property, and `update_simulator_info()` method.
+- Remove `"simulator_mode"` default key from `SettingsManager`.
+- Remove any remaining `AppMode` imports in other files that referenced the signal.
+
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Same count as Commit 4. Any remaining test that imports `AppMode` will now fail — those must have been deleted in Commit 2; stop and fix if any remain.
+
+---
+
+### Commit 6 — Remove Card menu and mode handlers from `main.py`; implement no-pySim message
+
+- Remove Card menu "Hardware Mode" / "Simulator Mode" checkable actions (lines 379–403).
+- Remove `_on_mode_hardware()`, `_on_mode_simulator()` handlers (lines 591–595).
 - Remove `_on_mode_changed()` and its signal connection (lines 419, 438–443).
-- Remove startup mode selection (`AppMode.SIMULATOR` fallback) and implement the agreed-upon no-pySim fallback (see Human Decisions).
-- Remove mode check guard in `_startup_detect_card()`.
 - Remove `self._hw_act`, `self._sim_act` attributes.
-- **Test command:** `python3 -m pytest tests/ -x -q`
-- **Expected:** `test_main_app.py` simulator-mode startup tests will fail — delete those test cases.
+- Replace the `AppMode.SIMULATOR` startup fallback (lines 228–231) with a clear setup/install error message when `CLIBackend.NONE`. No simulator fallback under any circumstances.
+- Remove mode check guard in `_startup_detect_card()` (lines 506–509) — detection always runs.
 
-### Commit 6 — Edit `state-machine.md`
-- Remove the `mode_changed | AppMode | Hardware ↔ Simulator toggle` row from the signal table.
-- No other edits to `state-machine.md`.
-- **Human sign-off required before this commit.**
-- **Test command:** `python3 -m pytest tests/ -x -q` (no change expected)
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Same count as Commit 5.
 
-### Commit 7 — Update documentation
-- `docs/explanation/architecture.md`: Remove simulator backend section (lines 197–211), update signal table, update architecture diagram.
-- `docs/reference/configuration.md`: Remove `simulator_mode` key entry.
-- `docs/how-to/troubleshooting.md`: Remove "Simulator mode" section (lines 216–221).
-- `README.md`: Remove simulator mode from feature list and getting-started.
+---
+
+### Commit 7 — Delete `simulator/` directory (late, after references confirmed clear)
+
+Before deleting, run: `grep -r "from simulator" tests/ managers/ main.py state_manager.py` and `grep -r "import simulator" tests/ managers/ main.py state_manager.py`. Both must return zero results. If any import remains, stop and fix the reference first.
+
+Only then:
+- Delete `simulator/__init__.py`
+- Delete `simulator/settings.py`
+- Delete `simulator/simulator_backend.py`
+- Delete `simulator/virtual_card.py`
+- Delete `simulator/card_deck.py`
+- Remove the `simulator/` directory.
+
+**Test command:** `python3 -m pytest tests/ -x -q`  
+**Expected:** Same count as Commit 6. Any `ModuleNotFoundError` for `simulator` = a stale import was missed; stop and fix.
+
+---
+
+### Commit 8 — Edit `state-machine.md` (standalone, human sign-off required)
+
+**Do not proceed with this commit until human sign-off is given.**
+
+- Open `docs/reference/state-machine.md`.
+- Remove the single row `mode_changed | AppMode | Hardware ↔ Simulator toggle` from the signal table (line 170).
+- No other edits to `state-machine.md`. Not a single other character changed.
+
+**Test command:** `python3 -m pytest tests/ -x -q` (no change expected — docs-only commit)
+
+---
+
+### Commit 9 — Update all other documentation
+
+- `docs/explanation/architecture.md`: Remove simulator backend section (lines 197–211), remove `mode_changed` from signal table, update architecture diagram.
+- `docs/reference/configuration.md`: Remove `simulator_mode` key entry (lines 88, 116–120).
+- `docs/how-to/troubleshooting.md`: Remove "Simulator mode" troubleshooting section (lines 216–221).
+- `README.md`: Remove simulator mode from feature list (line 21) and getting-started section (line 87).
 - Update `docs/reference/current-platform-refactor-status.md`.
-- **Test command:** `python3 -m pytest tests/ -x -q` (no change expected)
 
-### Commit 8 — Establish new test baseline
-- Record the new passing count after all simulator tests are removed.
-- Update `CLAUDE.md` with the new baseline count.
-- Update `docs/reference/test-baseline-ubuntu-post-qt-main-removal.md` (or create a new baseline doc).
+**Test command:** `python3 -m pytest tests/ -x -q` (no change expected — docs-only commit)
+
+---
+
+### Commit 10 — Record new Ubuntu baseline
+
+- Run full test suite on Ubuntu and record the actual pass/skip/fail counts.
+- Create `docs/reference/test-baseline-ubuntu-post-simulator-removal.md` with the new authoritative counts, Ubuntu version, and date.
+- Update `CLAUDE.md` active baseline line to the new count.
+- This commit completes the sequence.
+
+**Test command:** `python3 -m pytest tests/ -x -q` (this run IS the new baseline)
 
 ---
 
 ## 6. Test Count Impact Estimate
 
-The current Ubuntu baseline is **2123 passed, 323 skipped**.
+Current Ubuntu baseline: **2123 passed, 323 skipped**.
 
-The following test files are expected to be deleted entirely:
+Tests deleted in Commit 2 (approximate):
 - `test_simulator.py` — ~70 tests
-- `test_simulator_full.py` — estimated ~40 tests
-- `test_simulator_settings_logic.py` — estimated ~15 tests
+- `test_simulator_full.py` — ~40 tests
+- `test_simulator_settings_logic.py` — ~15 tests
+- AppMode cases from `test_state_manager.py` — ~27 tests
+- Simulator startup cases from `test_main_app.py` — ~35 tests
+- Settings key cases — ~3 tests
 
-Additional test cases within surviving files that will be deleted:
-- `test_batch_manager_full.py` — some tests (those using simulator auto-advance)
-- `test_card_manager_full.py` — some tests (those enabling simulator)
-- `test_state_manager.py` — AppMode tests (~27 tests at lines 216–242)
-- `test_main_app.py` — simulator startup tests (~35 tests at lines 649–685+)
-- `test_settings_manager.py` / `test_settings_manager_extended.py` — ~3 tests
+**Rough estimate:** 150–200 tests deleted. New baseline expected approximately **1923–1973 passed**. The actual count is recorded in Commit 10 and becomes the new authority.
 
-**Rough estimate:** 150–200 tests deleted. New baseline expected to be approximately 1923–1973 passed. The new baseline must be recorded and `CLAUDE.md` updated before any further work continues.
+Tests rewritten in Commit 1 preserve coverage and do not change the count.
 
 ---
 
 ## 7. Rollback Condition
 
-Stop and revert the current commit if:
-- Any commit causes tests unrelated to simulator mode to fail.
-- Any commit changes the behavior of card detection, authentication, or programming on hardware cards.
-- A `state-machine.md` conflict is discovered that cannot be resolved without a design decision (report and stop — do not paper over it).
-- The agreed-upon no-pySim fallback behavior (Human Decision 1) has not been decided before Commit 5.
+Stop and revert the current commit if any of the following occur:
+
+- A commit causes tests unrelated to simulator mode to fail.
+- A commit changes the behavior of card detection, authentication, or programming on hardware cards.
+- A `state-machine.md` conflict is discovered — report the exact file, line, and conflicting invariant; do not paper over it; do not push a partial fix.
+- The no-pySim startup message behavior (Decision 1) has not been fully confirmed before Commit 6.
+- The `simulator/` directory is deleted before Commit 7 (i.e., before all imports are confirmed clear).
+- The `state-machine.md` edit is bundled into any commit other than Commit 8.
+- Human sign-off for Commit 8 has not been received.
 
 ---
 
 ## 8. Notes
 
-- The `CLIBackend.SIMULATOR` enum value in `card_manager.py` (lines 125–130) is **not used anywhere** in the codebase. It can be deleted silently in Commit 2 with no behavior change.
-- The `"simulator_mode"` settings key is **never written** to disk in the current codebase. It exists only as a default. Deleting it will not break any saved settings files — the key will simply be absent and ignored.
-- `pySim-read`, `pySim-prog`, and `pySim-shell` integrations are unaffected. All three are hardware-only paths and will remain exactly as-is.
-- The Ubuntu test baseline guardrail applies throughout: no commit may break hardware-path tests. If a commit in this sequence causes a hardware test to fail, the commit is invalid and must be reverted.
+- `CLIBackend.SIMULATOR` in `card_manager.py` (lines 125–130) is not used anywhere. It is deleted silently in Commit 3 with no behavior change.
+- The `"simulator_mode"` settings key is never written to disk. Deleting it will not break any saved user settings — the key will simply be absent and ignored by any existing `~/.config/simgui/settings.json`.
+- `pySim-read`, `pySim-prog`, and `pySim-shell` CLI integrations are entirely unaffected by this work. All three are hardware-only paths and remain unchanged.
+- The Ubuntu baseline guardrail applies to every commit in this sequence. If a hardware-path test fails at any point, that commit is invalid and must be reverted before continuing.
+- macOS-specific code (`platform_runtime.py` or any `sys.platform` branch) must not be consulted or copied during this work. Ubuntu behavior and `state-machine.md` are the sole authorities.
