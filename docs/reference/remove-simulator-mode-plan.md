@@ -1,6 +1,6 @@
 # Plan: Remove Simulator Mode
 
-**Status:** Design complete — decisions recorded. Implementation not yet started.  
+**Status:** COMPLETE — all 10 commits implemented and pushed. New Ubuntu baseline: 1900 passed, 313 skipped.  
 **Goal:** Remove simulator mode entirely. The application will have one operational mode: hardware mode. The Card menu mode switch will also be removed.
 
 ---

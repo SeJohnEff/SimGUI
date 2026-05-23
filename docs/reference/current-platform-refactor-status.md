@@ -1,8 +1,7 @@
 # Current Platform Refactor Status
 
-**Last updated:** 2026-05-21
-**Head commit:** `4072a3d` — docs: record active Ubuntu regression baseline
-**Latest tag:** `v0.5.54-post-qt-main-baseline`
+**Last updated:** 2026-05-23
+**Head commit:** `92d8fe4` — chore: delete obsolete simulator package
 
 ---
 
@@ -10,36 +9,34 @@
 
 | Outcome | Count |
 |---|---|
-| Passed | 2123 |
+| Passed | 1900 |
 | Failed | 0 |
-| Skipped | 323 |
+| Skipped | 313 |
 
-Run time: 43.89s. Recorded at tag `v0.5.54-post-qt-main-baseline`.
+Run time: 24.63s. Recorded after simulator-removal Commit 9.
 
-Authoritative document: `docs/reference/test-baseline-ubuntu-post-qt-main-removal.md`
+Authoritative document: `docs/reference/test-baseline-ubuntu-post-simulator-removal.md`
 
-**Any future Ubuntu run that drops below 2123 passed without an approved
+**Any future Ubuntu run that drops below 1900 passed without an approved
 explanation is a regression and must be reverted.**
 
 ---
 
-## Historical v0.5.50 Baseline and Why It Changed
+## Historical Baseline Progression
 
-The v0.5.50 Ubuntu baseline was **2051 passed, 321 skipped** (recorded in
-`docs/reference/test-baseline-ubuntu-v0.5.50.md`). The count changed for
-two intentional reasons:
-
-| Phase | Δ passed | Δ skipped | Tag |
+| Baseline | Passed | Skipped | Document |
 |---|---|---|---|
-| Platform-aware test cleanup | +72 | +2 | `v0.5.52-platform-aware-tests` |
-| qt_main.py removal | −17 | 0 | `v0.5.53-remove-qt-main` |
+| v0.5.50 | 2051 | 321 | `test-baseline-ubuntu-v0.5.50.md` |
+| Post qt_main removal | 2123 | 323 | `test-baseline-ubuntu-post-qt-main-removal.md` |
+| Post simulator removal | **1900** | **313** | `test-baseline-ubuntu-post-simulator-removal.md` ← **active** |
 
-The +72 came from new tests added during the guarded platform prep phases
-(PCSC seam, macOS hardware-gated, network storage/scanner platform splits).
-The −17 came from deleting `qt_main.py`, which also dropped the tests that
-referenced its `QtSimGUIApp` class. Neither change is a regression. The
-v0.5.50 behavioral contract — card programming, authentication, state
-transitions — is fully intact.
+The reduction from 2123 to 1900 is entirely intentional: simulator mode
+was removed as a product feature. Tests that validated simulator behavior
+(~220 tests) were deleted or dropped when the `simulator/` package and
+`AppMode` enum were removed. No hardware-path tests were lost. The
+behavioral contract for card programming, authentication, card detection,
+retry safety, CSV handling, batch sequencing, and state machine behavior
+is fully intact.
 
 ---
 
@@ -106,6 +103,24 @@ transitions — is fully intact.
   "COMPLETED".
 - `CLAUDE.md` Testing section and Rule 1 updated to reflect current count.
 - Tag: `v0.5.54-post-qt-main-baseline`.
+
+### 10. Simulator mode removal (Commits 1–10)
+- All simulator runtime branches removed from `card_manager.py` and
+  `batch_manager.py`.
+- `AppMode`, `SimulatorInfo`, `mode_changed` signal, and
+  `simulator_info_changed` signal removed from `state_manager.py`.
+- Simulator UI (Card menu hardware/simulator toggle, mode status display)
+  removed from `main.py`.
+- `simulator/` package deleted: `SimulatorBackend`, `VirtualCard`,
+  `CardDeck`, `SimulatorSettings` no longer exist.
+- `dialogs/simulator_settings_dialog.py` deleted.
+- `"simulator_mode"` settings key removed from `SettingsManager`.
+- `state-machine.md` `mode_changed` / `AppMode` signal row removed
+  (standalone commit, human-approved).
+- Simulator-feature tests deleted; test-double tests rewritten with
+  `unittest.mock` to preserve hardware-path coverage.
+- New Ubuntu baseline: **1900 passed, 313 skipped**.
+- Authoritative document: `test-baseline-ubuntu-post-simulator-removal.md`.
 
 ---
 
