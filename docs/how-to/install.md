@@ -114,7 +114,7 @@ Log out and back in for the group change to take effect.
 
 **Applies to:** macOS 12 (Monterey) or later (Intel or Apple Silicon)  
 **Current distribution:** Source-based. A packaged `.app` is in development.  
-**Time required:** 5 minutes (simulator mode); 10–15 minutes with hardware support
+**Time required:** 10–15 minutes
 
 ### Prerequisites
 
@@ -144,7 +144,7 @@ bash scripts/build-macos.sh
 python3 main.py
 ```
 
-Simulator mode works immediately — 20 virtual SIM cards are available without any hardware.
+pySim is required for all SIM card operations. Install it with the script below.
 
 ---
 
@@ -244,7 +244,7 @@ simgui --version
 
 Or launch the GUI and check **Settings → About** for the installed version.
 
-To verify without hardware, enable **Simulator Mode** in Settings and run through the [first-card tutorial](../tutorials/first-card.md) using virtual cards.
+To verify the installation, follow the [first-card tutorial](../tutorials/first-card.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # SimGUI Documentation
 
-SimGUI is a PyQt6 desktop application for programming sysmocom SIM cards (SJA2, SJA5, GIALERSIM types) on Ubuntu. It wraps [pySim](https://github.com/osmocom/pysim) CLI tools (pySim-read, pySim-shell, pySim-prog) behind a graphical interface, adding batch workflows, automatic card detection, ICCID cross-verification, network share integration, and a built-in simulator for testing without hardware. pySim is auto-installed by the install script.
+SimGUI is a PyQt6 desktop application for programming sysmocom SIM cards (SJA2, SJA5, GIALERSIM types) on Ubuntu. It wraps [pySim](https://github.com/osmocom/pysim) CLI tools (pySim-read, pySim-shell, pySim-prog) behind a graphical interface, adding batch workflows, automatic card detection, ICCID cross-verification, and network share integration. pySim is required and is auto-installed by the install script.
 
 ---
 
@@ -53,7 +53,7 @@ Context, design decisions, and the reasoning behind how SimGUI works.
 |---|---|
 | [Why ICCID is read-only](explanation/iccid-traceability.md) | Factory traceability and the role of the ICCID |
 | [ADM1 security and cross-verification](explanation/adm1-security.md) | Why ICCID cross-check prevents card lockout |
-| [Architecture overview](explanation/architecture.md) | Managers, widgets, simulator, and CLI decoupling |
+| [Architecture overview](explanation/architecture.md) | Managers, widgets, signal architecture, and CLI decoupling |
 | [SUCI vs non-SUCI cards](explanation/suci-vs-non-suci.md) | 19-digit ICCIDs (all types), capability differences |
 
 ---

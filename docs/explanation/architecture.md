@@ -23,7 +23,7 @@ SimGUI is structured as a thin GUI layer over a set of independent manager compo
 │  │  ADM1Dialog         │  │  IccidIndex             │  │
 │  │  ArtifactExport     │  │  SettingsManager        │  │
 │  │  NetworkStorage     │  │  BackupManager          │  │
-│  │  SimulatorSettings  │  │  StateManager           │  │
+│  │                     │  │  StateManager           │  │
 │  └──────────▲──────────┘  └────────────┬────────────┘  │
 │             │ signals                  │               │
 │  ┌──────────┴──────────────────────────┴────────────┐  │
@@ -31,12 +31,6 @@ SimGUI is structured as a thin GUI layer over a set of independent manager compo
 │  │  Widgets subscribe to signals, never import      │  │
 │  │  each other. Only MainWindow writes state.       │  │
 │  └──────────────────────────────────────────────────┘  │
-│                                                        │
-│                           ┌─────────────────────────┐  │
-│                           │  SimulatorBackend (opt) │  │
-│                           │  virtual_card.py        │  │
-│                           │  card_deck.py           │  │
-│                           └─────────────────────────┘  │
 └─────────────────────────────────┬───────────────────────┘
                                   │ subprocess
                ┌──────────────────▼──────────────────┐
@@ -80,7 +74,6 @@ The central card interface. Manages:
 - ADM1 authentication (skipped for blank/gialersim cards to avoid CHV 0x0C failures)
 - Programming: pySim-shell for non-empty cards, pySim-prog for blank/gialersim cards
 - ICCID cross-verification before every authentication
-- Simulator delegation (when `_simulator` is set, all operations route there)
 
 A single `CardManager` instance is created in `main.py` and passed to every component that needs card access.
 
@@ -157,7 +150,6 @@ SimGUI uses a signal-based architecture for cross-component communication. `Stat
 **Key signals:**
 - `card_state_changed(CardState)` — NO_CARD → DETECTED → AUTHENTICATED
 - `card_info_changed(CardInfo)` — ICCID, IMSI, card_type, etc.
-- `mode_changed(AppMode)` — HARDWARE ↔ SIMULATOR
 - `csv_path_changed(str)` — active CSV file
 - `batch_running_changed(bool)` — batch lock
 - `card_programmed(dict)` — triggers auto-artifact
@@ -191,24 +183,6 @@ Long-running tasks (e.g., network share reconnect, ICCID index scanning) must no
 - No threading race conditions (Qt handles thread-safe signal dispatch)
 - Clean separation: worker emits signals, slots react
 - Easy to test: disconnect signals, verify emissions; separately verify slot behavior
-
----
-
-## The simulator backend
-
-The simulator provides a complete card-operations API without requiring hardware. It is activated by setting `CardManager._simulator` to a `SimulatorBackend` instance.
-
-`SimulatorBackend` holds a `card_deck` — a list of 20 `VirtualCard` objects pre-populated with real sysmoISIM-SJA5 profiles. Each virtual card:
-
-- Has a unique ICCID and IMSI
-- Tracks authentication state
-- Tracks remaining ADM1 attempts (starts at 3)
-- Can be programmed (fields updated in memory)
-- Can be verified (programmed fields compared to expected)
-
-`CardManager.next_virtual_card()` / `previous_virtual_card()` advance through the deck, simulating card insertions and removals. CardWatcher detects virtual card changes the same way it detects physical ones.
-
-The simulator is intentionally opaque to the rest of the system — `BatchProgramPanel`, `AutoArtifactManager`, and all other components interact with `CardManager`'s public API and cannot tell whether the backend is hardware or simulator.
 
 ---
 

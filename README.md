@@ -18,7 +18,6 @@ to run card operations from a desktop GUI.
 - **Network storage** — mount NFS and SMB/CIFS shares for reading SIM data files and saving artifacts
 - **Network discovery** — auto-discover SMB servers on the local network via mDNS and NetBIOS
 - **Artifact export** — export programming artifacts to network shares with duplicate detection
-- **Simulator mode** — built-in SIM programmer simulator with 20 real sysmoISIM-SJA5 profiles
 - **Backup / restore** — JSON backups of card data
 - **Progress tracking** — thread-safe progress bar and log output for long operations
 - **Modern theme** — platform-aware fonts and macOS-inspired styling (Linux, Windows, macOS)
@@ -84,15 +83,10 @@ Or follow the [first-card tutorial](docs/tutorials/first-card.md).
 
 ### Requirements
 
-**For simulator mode** (no hardware needed):
-- macOS 12+ or Ubuntu 22.04+
-- That's it — 20 virtual SIM profiles included
-
-**For hardware support** (programming real SIM cards):
-- [pySim](https://github.com/osmocom/pysim) (or sysmo-usim-tool for older versions)
+- [pySim](https://github.com/osmocom/pysim) (or sysmo-usim-tool for older versions) — required for all SIM card operations
 - A USB PCSC-compatible card reader (e.g., OMNIKEY 3x21)
 - macOS: uses built-in `PCSC.framework`
-- Ubuntu: requires `pcscd` service (installed automatically)
+- Ubuntu: requires `pcscd` service (installed automatically by the install script)
 
 ## Development
 
