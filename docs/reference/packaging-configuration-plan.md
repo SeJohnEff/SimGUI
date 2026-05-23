@@ -36,7 +36,7 @@ qt_theme.py
 pyproject.toml
 requirements.txt
 managers/
-simulator/
+simulator/          ← DELETED in v0.5.55-hardware-only; must be removed from debian/rules
 widgets/
 dialogs/
 utils/
@@ -46,6 +46,11 @@ BUILD               (optional, created by install.sh before build)
 sim-standard.example.json (optional)
 bin/simgui-setup-mount
 ```
+
+> **Outstanding packaging fix:** `simulator/` was intentionally deleted as part of the
+> simulator-mode removal (tag `v0.5.55-hardware-only`). The `cp` command in `debian/rules`
+> line 16 still includes `simulator/` and will cause a `.deb` build failure. This must be
+> removed in a dedicated packaging fix commit (requires separate approval per §10).
 
 Additional items installed to system paths:
 - `/usr/bin/simgui-setup-mount` → symlink to `/opt/simgui/bin/simgui-setup-mount`
@@ -111,10 +116,18 @@ All three required changes were made:
 
 ### 3a. `debian/rules` — `qt_main.py` removed from `cp` command
 
-Updated line 16 now reads:
+Updated line 16 (after `qt_main.py` removal, commit `7f572a0`) read:
 ```makefile
 cp -r main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ simulator/ widgets/ dialogs/ utils/ assets/ etc/ $(CURDIR)/debian/simgui/opt/simgui/
 ```
+
+> **Note:** The `simulator/` directory shown above has since been deleted
+> (`v0.5.55-hardware-only`). The target state of `debian/rules` line 16 is:
+> ```makefile
+> cp -r main.py state_manager.py version.py theme.py qt_theme.py pyproject.toml requirements.txt managers/ widgets/ dialogs/ utils/ assets/ etc/ $(CURDIR)/debian/simgui/opt/simgui/
+> ```
+> This change to `debian/rules` has not yet been made and requires explicit approval
+> per §10 before implementation.
 
 ### 3b. `CLAUDE.md` — quarantine notice replaced with tombstone
 
@@ -271,7 +284,8 @@ explicitly approved in writing:
 2. Confirm pass/skip counts match `docs/reference/test-baseline-macos-stage1.md`.
 3. Build the `.app`: `./scripts/build-macos-app.sh`
 4. Launch `dist/SimGUI.app` and confirm it reaches the main window without crashing.
-5. Confirm simulator mode is functional in the bundle (no hardware required for this check).
+5. Confirm the app starts in hardware mode and displays the expected "No card reader" or
+   "Insert a SIM card" status. Simulator mode no longer exists.
 
 ---
 
