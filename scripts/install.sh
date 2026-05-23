@@ -111,8 +111,8 @@ else
     info "Installing pySim to $PYSIM_DIR..."
     rm -rf "$PYSIM_DIR"
     if ! git clone --depth 1 "$PYSIM_REPO" "$PYSIM_DIR" 2>&1; then
-        warn "pySim clone failed — SimGUI will run in simulator-only mode."
-        warn "You can install pySim manually later: git clone $PYSIM_REPO $PYSIM_DIR"
+        warn "pySim clone failed — SIM card programming will not work until pySim is installed."
+        warn "Install manually: git clone $PYSIM_REPO $PYSIM_DIR"
     fi
 fi
 

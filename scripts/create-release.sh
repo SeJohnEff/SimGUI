@@ -31,13 +31,7 @@ SimGUI now runs natively on macOS (Intel and Apple Silicon) with zero prerequisi
 
 ### What's New
 
-✨ **Zero-Setup Simulator Mode**
-- Download \`SimGUI.dmg\` → drag to Applications → run
-- 20 virtual SIM card profiles included
-- No Python, no pySim, no pcscd needed
-- Works immediately for learning and testing
-
-🔧 **Optional Hardware Support**
+🔧 **Hardware Support**
 - Run \`bash scripts/install-macos.sh\` for pySim setup
 - Set \`export PYSIM_PATH=~/pysim\`
 - Plug in OMNIKEY reader → auto-detected
