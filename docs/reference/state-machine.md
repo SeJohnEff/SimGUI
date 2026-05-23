@@ -167,7 +167,6 @@ These rules are non-negotiable. Violating them causes incorrect UI behaviour.
 | `card_info_changed`       | `CardInfo`  | ICCID, IMSI, card_type, or other info changed|
 | `status_changed`          | `str`       | Status bar text update                       |
 | `error_occurred`          | `str`       | Non-fatal error for toast/log display        |
-| `mode_changed`            | `AppMode`   | Hardware ↔ Simulator toggle                  |
 | `share_status_changed`    | `ShareStatus`| Network share mount/unmount                 |
 
 ### Desired future signals (not yet implemented)
