@@ -117,14 +117,6 @@ class CardStatusPanel(QGroupBox):
         self._blocked_label.hide()
         main_layout.addWidget(self._blocked_label, row, 0, 1, 4)
 
-        row += 1
-
-        # Simulator info
-        self._sim_label = QLabel()
-        self._sim_label.setStyleSheet("font-size: 9pt;")
-        self._sim_label.hide()
-        main_layout.addWidget(self._sim_label, row, 0, 1, 4)
-
         # Column stretches for value fields
         main_layout.setColumnStretch(1, 1)
         main_layout.setColumnStretch(3, 1)
@@ -254,11 +246,3 @@ class CardStatusPanel(QGroupBox):
             var.setText('Not available')
         self._programmed_label.hide()
         self._blocked_label.hide()
-
-    def set_simulator_info(self, card_index, total_cards):
-        """Show or hide the virtual card indicator below the buttons."""
-        if card_index is not None and total_cards is not None:
-            self._sim_label.setText(f"Virtual card {card_index + 1} of {total_cards}")
-            self._sim_label.show()
-        else:
-            self._sim_label.hide()

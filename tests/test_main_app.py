@@ -203,7 +203,6 @@ def _load_main():
             def set_status(self, *a, **kw): pass
             def set_card_info(self, **kw): pass
             def set_auth_status(self, *a): pass
-            def set_simulator_info(self, *a): pass
             def has_unsaved_changes(self): return False
             def get_programmed_records(self): return []
             def load_csv_file(self, *a, **kw): return True

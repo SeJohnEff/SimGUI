@@ -401,31 +401,3 @@ class TestCardStatusPanelMethods:
         csp.set_auth_status(panel, False)
         assert panel._info_vars["auth"].get() == "No"
 
-    def test_set_simulator_info(self):
-        """set_simulator_info creates label and shows virtual card info."""
-        csp = self._get_csp_class()
-        panel = self._make_fake_panel()
-
-        # Need to add label infrastructure to the fake panel
-        label = _FakeWidget()
-        label.configure = lambda **kw: label._cfg.update(kw)
-        label.grid = lambda **kw: None
-        label.grid_remove = lambda: None
-
-        # Pre-create _sim_label so the `if not hasattr` branch is skipped
-        panel._sim_label = label
-        csp.set_simulator_info(panel, card_index=2, total_cards=10)
-        assert "3 of 10" in label._cfg.get("text", "")
-
-    def test_set_simulator_info_none_removes(self):
-        """set_simulator_info(None, None) calls grid_remove."""
-        csp = self._get_csp_class()
-        panel = self._make_fake_panel()
-        removed = []
-        label = _FakeWidget()
-        label.configure = lambda **kw: None
-        label.grid = lambda **kw: None
-        label.grid_remove = lambda: removed.append(True)
-        panel._sim_label = label
-        csp.set_simulator_info(panel, card_index=None, total_cards=None)
-        assert len(removed) == 1

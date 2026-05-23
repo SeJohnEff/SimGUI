@@ -1144,10 +1144,6 @@ class TestCardStatusPanelInstantiation:
         mod, panel = self._make_panel()
         panel.set_auth_status(False)
 
-    def test_set_simulator_info(self):
-        mod, panel = self._make_panel()
-        panel.set_simulator_info(0, 5)
-
     def test_clear_card_info(self):
         mod, panel = self._make_panel()
         panel.clear_card_info()
