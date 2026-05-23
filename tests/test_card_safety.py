@@ -36,7 +36,7 @@ class TestAuthenticateNeverUsesAFlag(unittest.TestCase):
         cm.card_info = {'ICCID': '8946000000000000001'}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {'ICCID': '8946000000000000001'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False
@@ -102,7 +102,7 @@ class TestBlockedCardDetection(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False
@@ -179,7 +179,7 @@ class TestRetryCounterParsing(unittest.TestCase):
     def _make_card_manager(self):
         from managers.card_manager import CardManager
         cm = CardManager.__new__(CardManager)
-        cm._simulator = None
+
         cm._venv_python = None
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
@@ -289,7 +289,7 @@ class TestPySimShellSafe(unittest.TestCase):
         cm.cli_path = '/opt/pysim'
         cm.cli_backend = CLIBackend.PYSIM
         cm._venv_python = '/opt/pysim/.venv/bin/python'
-        cm._simulator = None
+
         cm.card_type = CardType.UNKNOWN
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
@@ -345,7 +345,7 @@ class TestBlankCardSafeAuth(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {}  # blank card — no original data
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False
@@ -383,7 +383,7 @@ class TestDetectCardBlockedCheck(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False
@@ -413,7 +413,7 @@ class TestDisconnectResetsBlockedState(unittest.TestCase):
     def test_disconnect_clears_blocked(self):
         from managers.card_manager import CardManager
         cm = CardManager.__new__(CardManager)
-        cm._simulator = None
+
         cm.authenticated = True
         cm._authenticated_adm1_hex = 'abc'
         cm._original_card_data = {'x': 'y'}
@@ -489,7 +489,7 @@ class TestAuthenticateWrongKeyUpdatesRetryCounter(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {'ICCID': '123'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False
@@ -521,14 +521,14 @@ class TestGetRemainingAttemptsReturnsStoredValue(unittest.TestCase):
     def test_returns_stored_value(self):
         from managers.card_manager import CardManager
         cm = CardManager.__new__(CardManager)
-        cm._simulator = None
+
         cm._adm1_remaining_attempts = 2
         self.assertEqual(cm.get_remaining_attempts(), 2)
 
     def test_returns_none_when_unknown(self):
         from managers.card_manager import CardManager
         cm = CardManager.__new__(CardManager)
-        cm._simulator = None
+
         cm._adm1_remaining_attempts = None
         self.assertIsNone(cm.get_remaining_attempts())
 
@@ -563,7 +563,7 @@ class TestProgramCardBlockedGuard(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = '3838383838383838'
         cm._original_card_data = {'ICCID': '123', 'IMSI': '001'}
-        cm._simulator = None
+
         cm.card_blocked = True
         cm._adm1_remaining_attempts = 0
         cm._safety_override_acknowledged = False
@@ -604,7 +604,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = '3838383838383838'
         cm._original_card_data = {'ICCID': '123', 'IMSI': '001'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = remaining
         cm._safety_override_acknowledged = False
@@ -677,7 +677,7 @@ class TestAuthenticateDetects6983InOutput(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {'ICCID': '123'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False
@@ -712,7 +712,7 @@ class TestPySimShellImplDetectsCommandErrors(unittest.TestCase):
         cm.cli_path = '/opt/pysim'
         cm.cli_backend = CLIBackend.PYSIM
         cm._venv_python = '/opt/pysim/.venv/bin/python'
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False
@@ -817,7 +817,7 @@ class TestAuthenticateDetects6f00(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {'ICCID': '123'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False
@@ -892,7 +892,7 @@ class TestIccidCheckSkippedForBlankAndGialersim(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {}   # blank card detected
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False
@@ -910,7 +910,7 @@ class TestIccidCheckSkippedForBlankAndGialersim(unittest.TestCase):
         cm.card_info = {}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {}   # blank — no ICCID, no IMSI
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = None
         cm._safety_override_acknowledged = False
@@ -927,7 +927,7 @@ class TestIccidCheckSkippedForBlankAndGialersim(unittest.TestCase):
         cm.card_info = {'ICCID': '8946000000000000001'}
         cm._authenticated_adm1_hex = None
         cm._original_card_data = {'ICCID': '8946000000000000001', 'IMSI': '001010000000001'}
-        cm._simulator = None
+
         cm.card_blocked = False
         cm._adm1_remaining_attempts = 3
         cm._safety_override_acknowledged = False

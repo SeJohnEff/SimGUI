@@ -15,7 +15,7 @@ Strategy
 
 Why this file matters
 ---------------------
-The rest of the test-suite mocks subprocess and uses SimulatorBackend.
+The rest of the test-suite mocks subprocess calls.
 These tests fill the gap by exercising the *exact* bytes and exit codes that
 CardManager would exchange with the real CLI executables.
 """

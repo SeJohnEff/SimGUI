@@ -9,7 +9,7 @@ Covers areas not yet tested:
 - set_backend via set_cli_path
 - detect_card CLI path (pySim and sysmo)
 - _run_cli edge cases
-- Simulator path edge cases
+- Hardware programming path edge cases
 """
 
 import os
@@ -75,7 +75,7 @@ class TestAuthenticateWithIccid:
         assert ok is True
 
     def test_hardware_path_iccid_mismatch(self):
-        """Hardware path (no simulator): ICCID mismatch aborts auth."""
+        """Hardware path: ICCID mismatch aborts auth."""
         cm = CardManager()
         cm.card_info = {"ICCID": "89999111111111111111"}
         ok, msg = cm.authenticate("12345678",
@@ -109,7 +109,7 @@ class TestAuthenticateWithIccid:
 # ---------------------------------------------------------------------------
 
 class TestProgramCard:
-    """Tests for program_card() in hardware and simulator modes."""
+    """Tests for program_card() in hardware mode."""
 
     def test_hardware_unauthenticated_fails(self):
         """program_card() returns failure when not authenticated (hardware)."""
@@ -127,7 +127,7 @@ class TestProgramCard:
         assert ok is False
         assert 'not supported' in msg.lower() or 'no adm1' in msg.lower()
 
-    def test_simulator_program_success(self):
+    def test_program_authenticated_success(self):
         """Authenticated program_card() with CLI success returns True."""
         cm = CardManager()
         cm.cli_path = "/opt/pysim"
@@ -142,14 +142,14 @@ class TestProgramCard:
             ok, msg = cm.program_card({"IMSI": "new_imsi"})
         assert ok is True
 
-    def test_simulator_program_unauthenticated(self):
-        """program_card() fails when not authenticated."""
+    def test_program_unauthenticated_lowercase_key(self):
+        """program_card() fails when not authenticated (lowercase field key)."""
         cm = CardManager()
         cm.authenticated = False
         ok, msg = cm.program_card({"imsi": "x"})
         assert ok is False
 
-    def test_simulator_program_multiple_fields(self):
+    def test_program_multiple_changed_fields(self):
         """program_card() with multiple changed fields invokes CLI once."""
         cm = CardManager()
         cm.cli_path = "/opt/pysim"
@@ -547,7 +547,7 @@ class TestDetectCard:
 # ---------------------------------------------------------------------------
 
 class TestVerifyCard:
-    """Tests for verify_card() in hardware and simulator modes."""
+    """Tests for verify_card() in hardware mode."""
 
     def test_hardware_unauthenticated(self):
         """verify_card() returns failure when not authenticated (hardware)."""

@@ -1,7 +1,7 @@
 """Tests for the 'From Read Card' data source on the Program SIM tab.
 
 Verifies the data flow: Read SIM → shared state → Program SIM form fields.
-Uses the simulator backend so no hardware is needed.
+Uses mocked CardManager — no hardware or pySim needed.
 """
 
 import os
