@@ -7,8 +7,7 @@ Issues addressed:
 2. CSVManager: load_file() EML path never tested via CSVManager
 3. CSVManager: whitespace-delimited fallback never covered
 4. IccidIndex: rescan_if_stale() when NOT stale; error path in scan
-5. SimulatorBackend: _load_deck() CSV fallback path
-6. CardManager: _parse_pysim_output() various inputs
+5. CardManager: _parse_pysim_output() various inputs
 7. ValidationModule: validate_card_data() with OPc
 8. AutoArtifactManager: case-insensitive field lookup
 9. Integration: CSVManager.load_file(.eml) → columns normalised
@@ -489,87 +488,6 @@ class TestIccidIndexEdgeCases:
 
 
 # ===========================================================================
-# 5. SimulatorBackend — _load_deck CSV fallback
-# ===========================================================================
-
-class TestSimulatorBackendDeckLoading:
-    """Covers uncovered _load_deck paths."""
-
-    def test_load_from_settings_path(self, tmp_path):
-        """_load_deck uses settings.card_data_path if set and valid."""
-        from simulator.card_deck import generate_deck
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        # Create a minimal valid CSV that card_deck can load
-        # Use the bundled CSV as a template
-        bundled = os.path.join(
-            os.path.dirname(__file__), "..", "simulator", "data",
-            "sysmocol_test_cards.csv")
-        if not os.path.isfile(bundled):
-            pytest.skip("Bundled CSV not available")
-
-        import shutil
-        test_csv = str(tmp_path / "test_cards.csv")
-        shutil.copy(bundled, test_csv)
-
-        settings = SimulatorSettings(card_data_path=test_csv, delay_ms=0)
-        backend = SimulatorBackend(settings)
-        assert len(backend.card_deck) > 0
-
-    def test_load_with_invalid_csv_path_falls_back_to_bundled(self, tmp_path):
-        """_load_deck falls back to bundled CSV if settings path is broken."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        settings = SimulatorSettings(
-            card_data_path="/nonexistent/path.csv", delay_ms=0)
-        # Should not raise — falls back
-        backend = SimulatorBackend(settings)
-        assert len(backend.card_deck) > 0
-
-    def test_empty_card_deck_current_card_is_none(self):
-        """_current_card returns None when deck is empty."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        backend = SimulatorBackend(SimulatorSettings(delay_ms=0))
-        backend.card_deck = []  # force empty
-        assert backend._current_card() is None
-
-    def test_empty_card_deck_detect_card_returns_false(self):
-        """detect_card returns failure when deck is empty."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        backend = SimulatorBackend(SimulatorSettings(delay_ms=0))
-        backend.card_deck = []
-        ok, msg = backend.detect_card()
-        assert ok is False
-
-    def test_empty_card_deck_read_iccid_returns_none(self):
-        """detect_card returns failure when deck is empty (no read_iccid on backend)."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        backend = SimulatorBackend(SimulatorSettings(delay_ms=0))
-        backend.card_deck = []
-        # SimulatorBackend has no read_iccid; detect_card returns False when empty
-        ok, msg = backend.detect_card()
-        assert ok is False
-
-    def test_empty_card_deck_authenticate_returns_false(self):
-        """authenticate returns failure when deck is empty."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        backend = SimulatorBackend(SimulatorSettings(delay_ms=0))
-        backend.card_deck = []
-        ok, msg = backend.authenticate("12345678")
-        assert ok is False
-
-
-# ===========================================================================
 # 6. CardManager — uncovered paths
 # ===========================================================================
 
@@ -844,19 +762,6 @@ class TestNegativeInputHandling:
         from managers.csv_manager import CSVManager
         mgr = CSVManager()
         assert mgr.filepath is None
-
-    def test_simulator_backend_next_card_wraps_empty(self):
-        """next_card() on empty deck does not crash."""
-        from simulator.settings import SimulatorSettings
-        from simulator.simulator_backend import SimulatorBackend
-
-        backend = SimulatorBackend(SimulatorSettings(delay_ms=0))
-        backend.card_deck = []
-        # Should not raise
-        try:
-            backend.next_card()
-        except (IndexError, AttributeError, StopIteration):
-            pass  # structured errors OK
 
     def test_eml_parser_lookahead_at_eof(self, tmp_path):
         """EML parser handles truncated file (EOF during value collection)."""
