@@ -85,7 +85,6 @@ The file is created automatically on first run. If the file is missing or corrup
 | `last_csv_path` | String | `""` | Last CSV file path opened |
 | `last_batch_size` | Integer | `20` | Last batch size in Generate Sequence mode |
 | `window_geometry` | String | `""` | Saved window position/size |
-| `simulator_mode` | Boolean | `false` | Whether Simulator Mode was active on last close |
 
 ### Editing the settings file
 
@@ -115,8 +114,7 @@ rm ~/.config/simgui/settings.json
   "last_fplmn": "24007;24024;24001",
   "last_csv_path": "/home/user/data/order-20260314.csv",
   "last_batch_size": 20,
-  "window_geometry": "1200x800+100+50",
-  "simulator_mode": false
+  "window_geometry": "1200x800+100+50"
 }
 ```
 

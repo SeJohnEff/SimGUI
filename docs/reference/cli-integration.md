@@ -12,7 +12,6 @@ SimGUI communicates with physical SIM cards by shelling out to external CLI tool
 |---|---|---|---|
 | pySim | `CLIBackend.PYSIM` | Primary — auto-installed at `/opt/pysim` by `install.sh` | `pySim-read.py`, `pySim-shell.py`, `pySim-prog.py` |
 | sysmo-usim-tool | `CLIBackend.SYSMO` | Optional fallback for legacy SJS1 card support | `sysmo_isim_sja2.py`, `sysmo_isim_sja5.py`, `sysmo_isim_sjs1.py` |
-| Simulator | `CLIBackend.SIMULATOR` | Active when Simulator Mode is enabled; no CLI calls made | (internal) |
 | None | `CLIBackend.NONE` | Neither tool found; CSV editing still works | — |
 
 ---
@@ -167,14 +166,6 @@ The first successful response sets `card_type`.
 | No CLI tool configured | `(False, "", "sysmo-usim-tool / pySim not found. Set SYSMO_USIM_TOOL_PATH or PYSIM_PATH, or place them next to SimGUI.")` |
 
 All errors are surfaced in the SimGUI log panel. The batch manager treats any `False` success result as a failed card and continues to the next.
-
----
-
-## Simulator mode
-
-When Simulator Mode is enabled, `CardManager._simulator` is set to a `SimulatorBackend` instance. All methods that would otherwise call the CLI (`detect_card`, `authenticate`, `program_card`, `verify_card`, etc.) are delegated to the simulator instead. No subprocess calls are made.
-
-The simulator loads 20 real sysmoISIM-SJA5 profiles from `simulator/card_deck.py`. Each virtual card has a unique ICCID and IMSI and can be navigated with `next_virtual_card()` / `previous_virtual_card()`.
 
 ---
 

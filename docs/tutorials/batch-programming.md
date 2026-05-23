@@ -127,21 +127,6 @@ These artifacts are immutable records. Keep them; they are your audit trail.
 
 ---
 
-## Using the simulator for a dry run
-
-Before running a batch against real hardware for the first time, use the built-in simulator:
-
-1. Open **Settings** → enable **Simulator Mode**.
-2. The simulator loads 20 real sysmoISIM-SJA5 profiles as virtual cards.
-3. Run through the complete batch workflow — card detection, ICCID matching, programming, artifacts — without touching physical hardware.
-4. Disable Simulator Mode before switching to real cards.
-
-<!-- screenshot: simulator-mode-enabled -->
-
-See [Architecture overview](../explanation/architecture.md) for how the simulator backend works.
-
----
-
 ## Batch programming blank cards
 
 If your batch includes blank (unpersonalised/gialersim) cards, the workflow differs slightly:

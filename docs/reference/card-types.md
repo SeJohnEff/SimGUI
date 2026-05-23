@@ -48,8 +48,6 @@ See [SUCI vs non-SUCI](../explanation/suci-vs-non-suci.md) for a full explanatio
 **Supported fields:**
 - All SJA2 fields, plus SUCI-specific keys (SUPI protection scheme, home network public key, home network key ID)
 
-**Simulator:** The built-in SimGUI simulator loads 20 real sysmoISIM-SJA5 profiles, making SJA5 the default simulator card type.
-
 ---
 
 ## GIALERSIM — Blank/Unpersonalised Cards

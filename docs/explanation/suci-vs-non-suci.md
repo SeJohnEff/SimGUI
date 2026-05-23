@@ -99,12 +99,6 @@ A CSV batch can contain a mix of SUCI and non-SUCI cards. SimGUI identifies the 
 
 ---
 
-## In the simulator
-
-The built-in simulator uses sysmoISIM-SJA5 profiles (19-digit ICCIDs). The simulator does not currently simulate SUCI-specific EFs. For SUCI field testing, use physical hardware.
-
----
-
 ## Summary
 
 | Property | Non-SUCI | SUCI (SJA5) |
@@ -116,4 +110,3 @@ The built-in simulator uses sysmoISIM-SJA5 profiles (19-digit ICCIDs). The simul
 | IMSI T digit | `0` (USIM) | `1` (USIM+SUCI) |
 | 5G SUCI privacy | No | Yes |
 | Programming workflow | Standard | Standard + extra fields |
-| SimGUI simulator | Yes (SJA5 profiles used) | No (SUCI EFs not simulated) |

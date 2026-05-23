@@ -109,7 +109,7 @@ SimGUI immediately checks for `standards.json` at the root of the mount point an
 
 ## Step 6: Test artifact writing
 
-Program a card (or run a simulator session) and check that a file appears in `auto-artifact/`:
+Program a card and check that a file appears in `auto-artifact/`:
 
 ```bash
 ls /mnt/simgui-share/auto-artifact/

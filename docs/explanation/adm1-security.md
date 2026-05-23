@@ -88,7 +88,7 @@ Some systems implement checks like this as warnings that can be bypassed with a 
 
 ## Remaining attempt tracking
 
-SimGUI displays remaining ADM1 authentication attempts when the information is available from the CLI tool (`get_remaining_attempts()`). In the simulator, each virtual card tracks attempts and reduces the count on each failed authentication, mirroring real hardware behaviour.
+SimGUI displays remaining ADM1 authentication attempts when the information is available from the CLI tool (`get_remaining_attempts()`). The count is read from the card after each authentication attempt.
 
 The displayed count is informational. SimGUI does not block authentication based on the remaining count (though it can warn at low values). The ICCID cross-check is the primary guard — it prevents wrong-card authentication, which is the dominant cause of accidental lockout.
 

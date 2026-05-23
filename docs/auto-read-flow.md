@@ -238,7 +238,6 @@ every 1.5s:
 | **New files on SMB** | Periodic rescan (30s) or manual refresh. "+24 cards indexed" notification. |
 | **ICCID length** | All card types use 19-digit ICCIDs per ITU-T E.118. Legacy 23-digit ICCIDs are no longer generated. |
 | **Non-sequential ICCIDs** | Multiple index entries per file. Falls back gracefully. |
-| **Simulator mode** | CardWatcher pauses. Index still usable for CSV-loaded simulator data. |
 
 ---
 
