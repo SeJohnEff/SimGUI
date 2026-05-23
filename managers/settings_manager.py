@@ -22,7 +22,6 @@ _DEFAULTS = {
     "last_csv_path": "",
     "last_batch_size": 20,
     "window_geometry": "",
-    "simulator_mode": False,
 }
 
 

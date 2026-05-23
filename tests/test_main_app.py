@@ -293,7 +293,6 @@ def _make_app(mod):
         cm.detect_card.return_value = (True, "Card detected")
         cm.authenticate.return_value = (True, "Authenticated")
         cm.get_remaining_attempts.return_value = 3
-        cm.get_simulator_info.return_value = None
         cm.read_public_data.return_value = None
         cm_cls.return_value = cm
 
@@ -342,20 +341,17 @@ class TestSimGUIAppCallbacks:
     def test_on_detect_card_success(self):
         app, cm, settings, ns = self._get_app()
         cm.detect_card.return_value = (True, "Card detected")
-        cm.get_simulator_info.return_value = None
         app._on_detect_card()
 
     def test_on_detect_card_failure(self):
         app, cm, settings, ns = self._get_app()
         cm.detect_card.return_value = (False, "No card")
-        cm.get_simulator_info.return_value = None
         app._on_detect_card()
 
     def test_on_detect_card_with_sim_info(self):
         app, cm, settings, ns = self._get_app()
         cm.detect_card.return_value = (True, "SIM detected")
         cm.is_simulator_active = True
-        cm.get_simulator_info.return_value = {"current_index": 0, "total_cards": 5}
         app._on_detect_card()
 
     def test_on_authenticate_no_adm1(self):
@@ -421,7 +417,6 @@ class TestSimGUIAppCallbacks:
     def test_on_mode_change_to_simulator(self):
         app, cm, settings, ns = self._get_app()
         app._mode_var.set("simulator")
-        cm.get_simulator_info.return_value = None
         cm.detect_card.return_value = (True, "Virtual card")
         app._on_mode_change()
 
@@ -451,7 +446,6 @@ class TestSimGUIAppCallbacks:
         cm.is_simulator_active = True
         cm.next_virtual_card.return_value = (1, 5)
         cm.detect_card.return_value = (True, "Virtual card")
-        cm.get_simulator_info.return_value = None
         app._on_next_virtual_card()
 
     def test_on_next_virtual_card_no_result(self):
@@ -470,7 +464,6 @@ class TestSimGUIAppCallbacks:
         cm.is_simulator_active = True
         cm.previous_virtual_card.return_value = (0, 5)
         cm.detect_card.return_value = (True, "Virtual card")
-        cm.get_simulator_info.return_value = None
         app._on_previous_virtual_card()
 
     def test_on_simulator_settings_not_active(self):
@@ -503,7 +496,6 @@ class TestSimGUIAppCallbacks:
         sim = _mock.MagicMock()
         cm._simulator = sim
         cm.detect_card.return_value = (True, "Reset done")
-        cm.get_simulator_info.return_value = None
         app._on_reset_simulator()
 
     def test_on_network_storage(self):
@@ -661,7 +653,6 @@ class TestSimGUIAppCallbacks:
             cm.card_info = {}
             cm.detect_card.return_value = (False, "No card")
             cm.get_remaining_attempts.return_value = 3
-            cm.get_simulator_info.return_value = None
             cm_cls.return_value = cm
 
             settings = _mock.MagicMock()

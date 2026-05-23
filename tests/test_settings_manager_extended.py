@@ -45,7 +45,7 @@ class TestSettingsManagerExtended:
         path = tmp_path / "bad.json"
         path.write_text("{not valid json}")
         mgr = SettingsManager(path=str(path))
-        assert mgr.get("simulator_mode") == _DEFAULTS["simulator_mode"]
+        assert mgr.get("last_mcc_mnc") == _DEFAULTS["last_mcc_mnc"]
 
     def test_set_and_get_roundtrip(self, tmp_path):
         """set() stores a value that get() retrieves."""
