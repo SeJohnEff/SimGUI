@@ -39,7 +39,7 @@ from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
 from managers.standards_manager import StandardsManager
 from qt_theme import QtTheme
-from state_manager import StateManager, CardState, AppMode, CardInfo
+from state_manager import StateManager, CardState, CardInfo
 from utils import get_browse_initial_dir
 from version import __version__
 from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
@@ -226,9 +226,10 @@ class SimGUIApp(QMainWindow):
 
         # ---- Startup sequence ----
         if self._card_manager.cli_backend == CLIBackend.NONE:
-            self.state_manager.mode = AppMode.SIMULATOR
+            self.state_manager.status_text = (
+                "pySim not found. Install pySim and restart the application."
+            )
         else:
-            self.state_manager.mode = AppMode.HARDWARE
             QTimer.singleShot(100, self._startup_detect_card)
 
         QTimer.singleShot(0, self._background_startup)
@@ -387,20 +388,6 @@ class SimGUIApp(QMainWindow):
         auth_act.triggered.connect(self._on_authenticate)
         card_menu.addAction(auth_act)
 
-        card_menu.addSeparator()
-
-        hw_act = QAction("Hardware Mode", self)
-        hw_act.setCheckable(True)
-        hw_act.setChecked(True)
-        hw_act.triggered.connect(self._on_mode_hardware)
-        card_menu.addAction(hw_act)
-        self._hw_act = hw_act
-
-        sim_act = QAction("Simulator Mode", self)
-        sim_act.setCheckable(True)
-        sim_act.triggered.connect(self._on_mode_simulator)
-        card_menu.addAction(sim_act)
-        self._sim_act = sim_act
 
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
@@ -416,7 +403,6 @@ class SimGUIApp(QMainWindow):
         self.state_manager.card_state_changed.connect(self._on_card_state_changed)
         self.state_manager.card_info_changed.connect(self._on_card_info_changed)
         self.state_manager.share_status_changed.connect(self._on_share_status_changed)
-        self.state_manager.mode_changed.connect(self._on_mode_changed)
         self.state_manager.iccid_index_updated.connect(self._on_index_updated)
 
     def _on_status_changed(self, text: str) -> None:
@@ -434,13 +420,6 @@ class SimGUIApp(QMainWindow):
             self._share_label.setStyleSheet(f"color: {QtTheme.get_color('success')};")
         else:
             self._share_label.setStyleSheet("")
-
-    def _on_mode_changed(self, mode: AppMode) -> None:
-        prefix = "[SIM] " if mode == AppMode.SIMULATOR else ""
-        text = f"{prefix}{'Simulator' if mode == AppMode.SIMULATOR else 'Hardware'} mode active"
-        self.state_manager.status_text = text
-        self._hw_act.setChecked(mode == AppMode.HARDWARE)
-        self._sim_act.setChecked(mode == AppMode.SIMULATOR)
 
     # ---- CardWatcher → StateManager bridge ----------------------------
 
@@ -504,9 +483,7 @@ class SimGUIApp(QMainWindow):
         self._card_watcher.start()
 
     def _startup_detect_card(self) -> None:
-        """Trigger initial card detection in hardware mode."""
-        if self.state_manager.mode != AppMode.HARDWARE:
-            return
+        """Trigger initial card detection."""
         if self._card_manager.cli_backend == CLIBackend.NONE:
             return
         try:
@@ -587,12 +564,6 @@ class SimGUIApp(QMainWindow):
 
     def _on_authenticate(self):
         self.state_manager.status_text = "Authenticate action"
-
-    def _on_mode_hardware(self):
-        self.state_manager.mode = AppMode.HARDWARE
-
-    def _on_mode_simulator(self):
-        self.state_manager.mode = AppMode.SIMULATOR
 
     def _on_network_storage(self):
         """Open the Network Storage configuration dialog."""
