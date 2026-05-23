@@ -58,12 +58,6 @@ class CardState(Enum):
     BLANK = auto()         # Card present but no ICCID (factory-blank)
 
 
-class AppMode(Enum):
-    """Hardware vs. simulator mode."""
-    HARDWARE = "hardware"
-    SIMULATOR = "simulator"
-
-
 # ---------------------------------------------------------------------------
 # Lightweight data containers
 # ---------------------------------------------------------------------------
@@ -127,14 +121,6 @@ class ShareStatus:
             f"{label}: {path}" for label, path in self.mount_paths)
 
 
-@dataclass
-class SimulatorInfo:
-    """Virtual card position when in simulator mode."""
-    current_index: int = 0
-    total_cards: int = 0
-    active: bool = False
-
-
 # ---------------------------------------------------------------------------
 # StateManager
 # ---------------------------------------------------------------------------
@@ -151,16 +137,12 @@ class StateManager(QObject):
         Card reader state transitions.
     card_info_changed(CardInfo)
         Any card identity field changed (ICCID, IMSI, …).
-    mode_changed(AppMode)
-        Hardware ↔ Simulator toggle.
     status_changed(str)
         Status bar text update.
     share_status_changed(ShareStatus)
         Network share mount/unmount.
     csv_path_changed(str)
         Active CSV file changed.
-    simulator_info_changed(SimulatorInfo)
-        Virtual card index updated.
     batch_running_changed(bool)
         Batch programming started/stopped.
     error_occurred(str)
@@ -176,11 +158,9 @@ class StateManager(QObject):
     # -- Signals ------------------------------------------------------------
     card_state_changed = pyqtSignal(object)       # CardState
     card_info_changed = pyqtSignal(object)         # CardInfo
-    mode_changed = pyqtSignal(object)              # AppMode
     status_changed = pyqtSignal(str)
     share_status_changed = pyqtSignal(object)      # ShareStatus
     csv_path_changed = pyqtSignal(str)
-    simulator_info_changed = pyqtSignal(object)    # SimulatorInfo
     batch_running_changed = pyqtSignal(bool)
     error_occurred = pyqtSignal(str)
     toast_requested = pyqtSignal(str, str, int)    # msg, level, duration
@@ -193,11 +173,9 @@ class StateManager(QObject):
         # Internal state
         self._card_state = CardState.NO_CARD
         self._card_info = CardInfo()
-        self._mode = AppMode.HARDWARE
         self._status_text = "Ready"
         self._share_status = ShareStatus()
         self._csv_path = ""
-        self._simulator_info = SimulatorInfo()
         self._batch_running = False
 
     # -- card_state ---------------------------------------------------------
@@ -240,20 +218,6 @@ class StateManager(QObject):
         """Reset card info to defaults (card removed) and emit."""
         self._card_info.clear()
         self.card_info_changed.emit(self._card_info)
-
-    # -- mode ---------------------------------------------------------------
-
-    @property
-    def mode(self) -> AppMode:
-        return self._mode
-
-    @mode.setter
-    def mode(self, value: AppMode) -> None:
-        if self._mode is value:
-            return
-        self._mode = value
-        self.mode_changed.emit(value)
-        logger.debug("mode → %s", value.value)
 
     # -- status_text --------------------------------------------------------
 
@@ -311,32 +275,6 @@ class StateManager(QObject):
             return
         self._csv_path = value
         self.csv_path_changed.emit(value)
-
-    # -- simulator_info -----------------------------------------------------
-
-    @property
-    def simulator_info(self) -> SimulatorInfo:
-        return self._simulator_info
-
-    def update_simulator_info(
-        self,
-        current_index: Optional[int]= None,
-        total_cards: Optional[int]= None,
-        active: Optional[bool]= None,
-    ) -> None:
-        """Update simulator info and emit if changed."""
-        changed = False
-        if current_index is not None and self._simulator_info.current_index != current_index:
-            self._simulator_info.current_index = current_index
-            changed = True
-        if total_cards is not None and self._simulator_info.total_cards != total_cards:
-            self._simulator_info.total_cards = total_cards
-            changed = True
-        if active is not None and self._simulator_info.active != active:
-            self._simulator_info.active = active
-            changed = True
-        if changed:
-            self.simulator_info_changed.emit(self._simulator_info)
 
     # -- batch_running ------------------------------------------------------
 

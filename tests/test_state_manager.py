@@ -8,9 +8,8 @@ Covers:
   - update_card_info partial updates.
   - clear_card_info resets all fields.
   - ShareStatus convenience properties.
-  - SimulatorInfo partial updates.
   - Toast/error/card_programmed/index_updated convenience signals.
-  - Enum correctness (CardState, AppMode).
+  - Enum correctness (CardState).
   - CardInfo.to_dict() round-trip.
   - Thread safety of signal emission (basic verification).
 
@@ -29,7 +28,6 @@ from state_manager import (
     CardInfo,
     CardState,
     ShareStatus,
-    SimulatorInfo,
     StateManager,
 )
 
@@ -328,44 +326,6 @@ class TestCSVPath:
         spy = SignalSpy()
         sm.csv_path_changed.connect(spy.slot)
         sm.csv_path = "/data/cards.csv"
-        assert spy.count == 0
-
-
-# ---------------------------------------------------------------------------
-# Simulator info
-# ---------------------------------------------------------------------------
-
-class TestSimulatorInfo:
-
-    def test_initial(self, sm):
-        info = sm.simulator_info
-        assert info.current_index == 0
-        assert info.total_cards == 0
-        assert info.active is False
-
-    def test_update_emits(self, sm):
-        spy = SignalSpy()
-        sm.simulator_info_changed.connect(spy.slot)
-        sm.update_simulator_info(current_index=3, total_cards=20, active=True)
-        assert spy.count == 1
-        assert sm.simulator_info.current_index == 3
-        assert sm.simulator_info.total_cards == 20
-        assert sm.simulator_info.active is True
-
-    def test_partial_update(self, sm):
-        sm.update_simulator_info(current_index=3, total_cards=20)
-        spy = SignalSpy()
-        sm.simulator_info_changed.connect(spy.slot)
-        sm.update_simulator_info(current_index=4)
-        assert spy.count == 1
-        assert sm.simulator_info.current_index == 4
-        assert sm.simulator_info.total_cards == 20  # unchanged
-
-    def test_idempotent(self, sm):
-        sm.update_simulator_info(current_index=3)
-        spy = SignalSpy()
-        sm.simulator_info_changed.connect(spy.slot)
-        sm.update_simulator_info(current_index=3)
         assert spy.count == 0
 
 
