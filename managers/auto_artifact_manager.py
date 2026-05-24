@@ -19,9 +19,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Default fields to include in auto-artifacts
+# Default fields to include in auto-artifacts.
+# Covers programmed data and audit identifiers.
+# KIC/KID/KIK (OTA keys) are intentionally excluded from the default —
+# they are high-value security material and must be opted in via the export dialog.
 DEFAULT_ARTIFACT_FIELDS = [
-    "ICCID", "IMSI", "Ki", "OPc", "ADM1",
+    "ICCID", "IMSI", "OLD_IMSI", "Ki", "OPc", "ADM1",
     "ACC", "SPN", "FPLMN",
     "PIN1", "PUK1", "PIN2", "PUK2",
 ]

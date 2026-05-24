@@ -29,22 +29,23 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Known sysmocom field names (canonical casing)
+# Known sysmocom field names (canonical casing, matching SIM_SCHEMA)
 _SYSMOCOM_FIELDS = {
-    "IMSI", "ICCID", "ACC", "PIN1", "PUK1", "PIN2", "PUK2",
-    "Ki", "OPC", "ADM1",
+    "IMSI", "OLD_IMSI", "ICCID", "ACC",
+    "PIN1", "PUK1", "PIN2", "PUK2",
+    "Ki", "OPc", "ADM1",
     "KIC1", "KID1", "KIK1",
     "KIC2", "KID2", "KIK2",
     "KIC3", "KID3", "KIK3",
 }
 
 # Case-insensitive lookup → canonical name
+# "OPC" (sysmocom emails) and "OPc" both map to canonical "OPc" via f.upper()
 _FIELD_LOOKUP: dict[str, str] = {f.upper(): f for f in _SYSMOCOM_FIELDS}
 
-# Aliases: some sysmocom files use "ADM" instead of "ADM1", etc.
+# Aliases: some sysmocom files use "ADM" or "KI" instead of "ADM1"/"Ki"
 _FIELD_LOOKUP["ADM"] = "ADM1"
-_FIELD_LOOKUP["OPC"] = "OPC"    # already there via set, but explicit
-_FIELD_LOOKUP["KI"] = "Ki"     # already there via set, but explicit
+_FIELD_LOOKUP["KI"] = "Ki"
 
 # Minimum number of recognised field names to consider a block a header
 _MIN_HEADER_FIELDS = 5

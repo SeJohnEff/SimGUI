@@ -40,7 +40,7 @@ _HAS_REAL_EML = os.path.exists(_REAL_EML)
 
 _STANDARD_FIELDS = [
     "IMSI", "ICCID", "ACC", "PIN1", "PUK1", "PIN2", "PUK2",
-    "Ki", "OPC", "ADM1",
+    "Ki", "OPc", "ADM1",
     "KIC1", "KID1", "KIK1",
     "KIC2", "KID2", "KIK2",
     "KIC3", "KID3", "KIK3",
@@ -238,7 +238,7 @@ class TestFieldOrderIndependence:
 
     def test_subset_of_fields(self):
         """Parser must work with fewer than 19 fields (as long as >= 5)."""
-        subset = ["ICCID", "IMSI", "Ki", "OPC", "ADM1", "ACC"]
+        subset = ["ICCID", "IMSI", "Ki", "OPc", "ADM1", "ACC"]
         body = _build_batch_body(subset, 3)
         eml = _build_eml(body)
         path = _write_eml(eml)
@@ -253,7 +253,7 @@ class TestFieldOrderIndependence:
         """Field names like 'imsi', 'Iccid', 'opc' must be normalised."""
         assert _normalise_field_name("imsi") == "IMSI"
         assert _normalise_field_name("ICCID") == "ICCID"
-        assert _normalise_field_name("opc") == "OPC"
+        assert _normalise_field_name("opc") == "OPc"
         assert _normalise_field_name("ki") == "Ki"
         assert _normalise_field_name("adm1") == "ADM1"
         assert _normalise_field_name("unknown") is None
@@ -419,7 +419,7 @@ class TestFindAllFieldHeaders:
 
     def test_order_independent_detection(self):
         """Detection must not depend on which field comes first."""
-        fields = ["ADM1", "Ki", "OPC", "ICCID", "IMSI", "ACC"]
+        fields = ["ADM1", "Ki", "OPc", "ICCID", "IMSI", "ACC"]
         lines = ["some header"] + fields + ["value1"]
         result = _find_all_field_headers(lines)
         assert len(result) == 1

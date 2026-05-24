@@ -15,12 +15,20 @@ from utils.validation import validate_card_data
 
 logger = logging.getLogger(__name__)
 
-# Standard CSV columns for SIM card programming
-STANDARD_COLUMNS = [
-    'ICCID', 'IMSI', 'Ki', 'OPc', 'ADM1',
-    'MNC_LENGTH', 'ALGO_2G', 'ALGO_3G', 'ALGO_4G5G',
-    'USE_OPC', 'HPLMN', 'SPN', 'FPLMN',
-]
+# Canonical ordered SIM card field schema — single source of truth.
+# Propagated to auto_artifact_manager, eml_parser, and test helpers.
+SIM_SCHEMA = (
+    'IMSI', 'OLD_IMSI', 'ICCID', 'ACC',
+    'PIN1', 'PUK1', 'PIN2', 'PUK2',
+    'Ki', 'OPc', 'ADM1',
+    'KIC1', 'KID1', 'KIK1',
+    'KIC2', 'KID2', 'KIK2',
+    'KIC3', 'KID3', 'KIK3',
+    'SPN', 'FPLMN',
+)
+
+# Standard CSV columns for SIM card programming (alias for backward compat)
+STANDARD_COLUMNS = list(SIM_SCHEMA)
 
 # Column name normalization: lowercase key -> internal name
 _COLUMN_NORMALIZE = {

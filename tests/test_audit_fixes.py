@@ -50,7 +50,7 @@ def _write_csv(path, rows, columns=None):
 
 def _make_eml_with_cards(count=3):
     """Build a minimal sysmocol-style EML body."""
-    fields = ["IMSI", "ICCID", "ACC", "PIN1", "PUK1", "Ki", "OPC", "ADM1",
+    fields = ["IMSI", "ICCID", "ACC", "PIN1", "PUK1", "Ki", "OPc", "ADM1",
               "KIC1", "KID1", "KIK1", "KIC2", "KID2", "KIK2"]
     lines = [
         "From: test@sysmocol.de",
@@ -77,7 +77,7 @@ def _make_eml_with_cards(count=3):
                 lines.append("1234")
             elif f == "PUK1":
                 lines.append("12345678")
-            elif f in ("Ki", "OPC", "KIC1", "KID1", "KIK1",
+            elif f in ("Ki", "OPc", "KIC1", "KID1", "KIK1",
                        "KIC2", "KID2", "KIK2"):
                 lines.append("AA" * 16)
             else:

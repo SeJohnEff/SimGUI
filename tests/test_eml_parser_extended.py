@@ -40,7 +40,7 @@ from utils.eml_parser import (
 
 _STANDARD_FIELDS = [
     "IMSI", "ICCID", "ACC", "PIN1", "PUK1", "PIN2", "PUK2",
-    "Ki", "OPC", "ADM1",
+    "Ki", "OPc", "ADM1",
     "KIC1", "KID1", "KIK1",
     "KIC2", "KID2", "KIK2",
     "KIC3", "KID3", "KIK3",
@@ -104,9 +104,9 @@ class TestNormaliseFieldName:
         assert _normalise_field_name("ki") == "Ki"
 
     def test_opc_canonical_casing(self):
-        """'OPC' is the canonical form."""
-        assert _normalise_field_name("opc") == "OPC"
-        assert _normalise_field_name("OPC") == "OPC"
+        """'OPc' is the canonical form; 'OPC' and 'opc' both map to it."""
+        assert _normalise_field_name("opc") == "OPc"
+        assert _normalise_field_name("OPC") == "OPc"
 
     def test_unknown_returns_none(self):
         """Unknown field names return None."""
