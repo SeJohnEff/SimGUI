@@ -1366,8 +1366,11 @@ class CardManager:
             except (ValueError, TypeError):
                 continue
             if isinstance(data, dict) and 'ACC0' in data:
-                enabled = [f'ACC{i}' for i in range(16) if data.get(f'ACC{i}')]
-                self.card_info['ACC'] = ','.join(enabled)
+                mask = 0
+                for i in range(16):
+                    if data.get(f'ACC{i}'):
+                        mask |= (1 << i)
+                self.card_info['ACC'] = f'{mask:04X}'
             elif isinstance(data, dict) and 'spn' in data:
                 spn = data.get('spn', '')
                 if spn:
@@ -1382,7 +1385,7 @@ class CardManager:
                     except (KeyError, TypeError, AttributeError):
                         continue
                 if plmns:
-                    self.card_info['FPLMN'] = ','.join(plmns)
+                    self.card_info['FPLMN'] = ':'.join(plmns)
 
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info.

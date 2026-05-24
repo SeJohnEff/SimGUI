@@ -32,24 +32,27 @@ SHELL_STDOUT = textwrap.dedent("""\
 
 class TestParseShellPublicFields:
     def test_acc_single_class_enabled(self):
+        """ACC0 only => bitmask bit 0 set => 0001."""
         cm = _cm()
         output = '{"ACC0": true, "ACC1": false, "ACC2": false, "ACC3": false, "ACC4": false, "ACC5": false, "ACC6": false, "ACC7": false, "ACC8": false, "ACC9": false, "ACC10": false, "ACC11": false, "ACC12": false, "ACC13": false, "ACC14": false, "ACC15": false}'
         cm._parse_shell_public_fields(output)
-        assert cm.card_info['ACC'] == 'ACC0'
+        assert cm.card_info['ACC'] == '0001'
 
     def test_acc_multiple_classes_enabled(self):
+        """ACC0 + ACC3 => bits 0 and 3 => 0009."""
         cm = _cm()
-        data = {f'ACC{i}': (i in (0, 11)) for i in range(16)}
         import json
+        data = {f'ACC{i}': (i in (0, 3)) for i in range(16)}
         cm._parse_shell_public_fields(json.dumps(data))
-        assert cm.card_info['ACC'] == 'ACC0,ACC11'
+        assert cm.card_info['ACC'] == '0009'
 
-    def test_acc_no_classes_enabled(self):
+    def test_acc_no_classes_enabled_stored_as_0000(self):
+        """No ACC classes enabled => bitmask 0 => 0000 (stored, not absent)."""
         cm = _cm()
-        data = {f'ACC{i}': False for i in range(16)}
         import json
+        data = {f'ACC{i}': False for i in range(16)}
         cm._parse_shell_public_fields(json.dumps(data))
-        assert cm.card_info.get('ACC') == ''
+        assert cm.card_info.get('ACC') == '0000'
 
     def test_spn_populated(self):
         cm = _cm()
@@ -61,10 +64,11 @@ class TestParseShellPublicFields:
         cm._parse_shell_public_fields('{"rfu": 63, "hide_in_oplmn": true, "show_in_hplmn": true, "spn": ""}')
         assert 'SPN' not in cm.card_info
 
-    def test_fplmn_nulls_ignored(self):
+    def test_fplmn_colon_separated(self):
+        """FPLMN entries are joined with ':' not ','."""
         cm = _cm()
         cm._parse_shell_public_fields('[{"mcc": "234", "mnc": "20"}, {"mcc": "234", "mnc": "02"}, null, null]')
-        assert cm.card_info['FPLMN'] == '23420,23402'
+        assert cm.card_info['FPLMN'] == '23420:23402'
 
     def test_fplmn_mnc_zero_padded(self):
         cm = _cm()
@@ -79,12 +83,12 @@ class TestParseShellPublicFields:
     def test_full_shell_stdout_parses_all_three(self):
         cm = _cm()
         cm._parse_shell_public_fields(SHELL_STDOUT)
-        # ACC: only ACC0 enabled on test card
-        assert cm.card_info.get('ACC') == 'ACC0'
+        # ACC: only ACC0 enabled => 0001
+        assert cm.card_info.get('ACC') == '0001'
         # SPN: empty → not stored
         assert 'SPN' not in cm.card_info
-        # FPLMN: four entries, nulls stripped
-        assert cm.card_info['FPLMN'] == '23420,23402,23407,23430'
+        # FPLMN: four entries, nulls stripped, colon-separated
+        assert cm.card_info['FPLMN'] == '23420:23402:23407:23430'
 
     def test_non_json_lines_ignored(self):
         cm = _cm()
