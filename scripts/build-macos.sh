@@ -20,7 +20,7 @@ fi
 
 if ! command -v python3 &>/dev/null; then
     echo "Error: python3 is required."
-    echo "Install from https://python.org or: brew install python@3.12"
+    echo "Install Python 3.9+ from https://python.org"
     exit 1
 fi
 

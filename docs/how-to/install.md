@@ -119,8 +119,8 @@ Log out and back in for the group change to take effect.
 ### Prerequisites
 
 - macOS 12 (Monterey) or later
-- Python 3.9 or later ([python.org](https://python.org) or `brew install python@3.12`)
-- [Git](https://git-scm.com) (`xcode-select --install` installs it on macOS)
+- Python 3.9 or later ([python.org](https://python.org))
+- Git (included with Xcode Command Line Tools — run `xcode-select --install` if not present)
 - Internet connection
 
 ### Install from source
@@ -139,7 +139,7 @@ bash scripts/build-macos.sh
 ```
 
 This installs PyQt6, pyscard, and pySim at `~/pysim`, and applies the GialerSim SPN patch.
-Homebrew and git must be installed before running.
+Git (from Xcode Command Line Tools) must be available. No Homebrew required.
 
 3. **Launch SimGUI:**
 

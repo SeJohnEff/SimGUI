@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Install pySim for macOS — required for all SimGUI SIM card operations.
 # Called automatically by scripts/build-macos.sh; also safe to run standalone.
+#
+# Requirements:
+#   - python3 3.9+  (system python3 or https://python.org — no Homebrew needed)
+#   - git           (from Xcode Command Line Tools: xcode-select --install)
 
 set -e
 
@@ -12,58 +16,32 @@ echo "  • pySim (cloned to ~/pysim)"
 echo "  • pySim Python dependencies"
 echo ""
 
-# Check for Homebrew
-if ! command -v brew &> /dev/null; then
-    echo "Error: Homebrew is required. Install from https://brew.sh"
-    exit 1
-fi
-
-# Check for git
+# Check for git (ships with Xcode Command Line Tools, no Homebrew needed)
 if ! command -v git &> /dev/null; then
-    echo "Error: git is required. Install with: brew install git"
+    echo "Error: git is required."
+    echo "Install Xcode Command Line Tools with: xcode-select --install"
     exit 1
 fi
-
-# Check for Python 3.10+
-if ! command -v python3 &> /dev/null; then
-    echo "Installing Python 3.12 via Homebrew..."
-    brew install python@3.12
-    brew link python@3.12
-fi
-
-PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-echo "Using Python: $PYTHON_VERSION"
-echo ""
 
 # Install pySim to ~/pysim
 if [ -d ~/pysim ]; then
-    echo "pySim already exists at ~/pysim"
-    read -p "Update it? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        cd ~/pysim
-        git pull origin master
-    fi
+    echo "pySim already exists at ~/pysim — updating..."
+    cd ~/pysim
+    git pull origin master 2>/dev/null || git pull origin main 2>/dev/null || {
+        echo "Warning: git pull failed (network issue?); using existing clone."
+    }
 else
     echo "Cloning pySim to ~/pysim..."
     git clone https://gitea.osmocom.org/sim-card/pysim.git ~/pysim
-    cd ~/pysim
-    echo "Cloned pySim successfully"
+    echo "Cloned pySim successfully."
 fi
 
-# Create and activate venv
-if [ ! -d ~/pysim/.venv ]; then
-    echo "Creating Python venv in ~/pysim/.venv..."
-    python3 -m venv ~/pysim/.venv
-fi
-
-source ~/pysim/.venv/bin/activate
-echo "Virtual environment activated"
-
-# Install pySim dependencies
-echo "Installing pySim dependencies..."
-pip install --upgrade pip setuptools wheel --quiet
-pip install -r ~/pysim/requirements.txt --quiet
+# Install pySim dependencies.
+# Uses pip --user so no venv or Homebrew is required.
+echo ""
+echo "Installing pySim Python dependencies..."
+python3 -m pip install --user -r ~/pysim/requirements.txt --quiet
+echo "pySim dependencies installed."
 
 # Apply GialerSim SPN patch
 echo ""
@@ -101,19 +79,11 @@ else
     echo "Patch target not found at $GIALERSIM_PATCH_FILE — skipping (pySim may use a different layout)."
 fi
 
-deactivate 2>/dev/null || true
-
 echo ""
 echo "pySim installed at ~/pysim"
 echo ""
-echo "To complete setup:"
 echo "  1. Plug in your USB card reader (OMNIKEY 3x21 or compatible)"
-echo ""
-echo "  2. Launch SimGUI:"
-echo "     python3 main.py"
+echo "  2. Launch SimGUI: python3 main.py"
 echo ""
 echo "SimGUI auto-detects pySim at ~/pysim — no PYSIM_PATH export needed."
-echo ""
-echo "Advanced: to use a non-standard pySim location, set:"
-echo "  export PYSIM_PATH=/path/to/your/pysim"
 echo ""
