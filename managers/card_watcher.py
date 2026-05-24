@@ -365,20 +365,29 @@ class CardWatcher:
             self._handle_new_card(cached_iccid)
             return
 
-        # Genuinely unknown / blank card
-        self._last_iccid = None
+        # Distinguish failure reason before classifying the card.
         if not ok:
+            # Transport/protocol failure — the card's contents are unknown, not blank.
+            # PCSC confirmed the card is physically present (ATR was read), but
+            # pySim-read could not communicate with it (e.g. T0 protocol mismatch,
+            # CardConnectionException).  This is a READ_ERROR, not BLANK.
+            # Calling on_card_unknown here would incorrectly set BLANK state.
             logger.warning("CardWatcher: card present but pySim-read failed: %s", msg)
+            if self.on_error:
+                try:
+                    self.on_error(msg)
+                except Exception:
+                    pass
+            return
+
+        # ok=True but no ICCID → card was contacted successfully and is
+        # genuinely blank/unprogrammed (gialersim).  Signal BLANK state.
+        self._last_iccid = None
         if self.on_card_unknown:
             try:
                 self.on_card_unknown("")
             except Exception:
                 pass
-        # Do NOT call on_error here. PCSC confirmed the card is physically present;
-        # a card that pySim-read cannot fully parse is a blank/gialersim card
-        # (BLANK state), not an error. Calling on_error would overwrite the BLANK
-        # state with ERROR before the main thread processes the BLANK signal,
-        # causing Program SIM to show "Insert a SIM card..." despite a card present.
 
     def _check_once_slow(self):
         """Slow polling path — full pySim-read every cycle."""

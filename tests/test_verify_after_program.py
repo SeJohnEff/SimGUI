@@ -407,13 +407,13 @@ class TestReadAndNotifyWithCache:
         # Called via _handle_new_card with the ICCID (not blank)
         callback.assert_called_once_with("89999880000000000200001")
 
-    def test_pysim_fails_no_cache_fires_unknown(self):
-        """pySim-read fails, no cache → fire on_card_unknown(""), NOT on_error.
+    def test_pysim_fails_no_cache_fires_error_not_blank(self):
+        """pySim-read fails, no cache → fire on_error, NOT on_card_unknown.
 
-        PCSC already confirmed the card is physically present before
-        _read_and_notify is called.  A card that pySim-read cannot fully
-        parse is treated as blank/BLANK state, not ERROR.  Calling on_error
-        would overwrite BLANK with ERROR, breaking Program SIM status display.
+        PCSC confirmed the card is physically present (ATR detected), but
+        pySim-read failed with a transport/protocol error.  This is a READ_ERROR,
+        not a blank card.  BLANK state must only be set when pySim-read
+        successfully contacted the card and found no ICCID (ok=True, iccid=None).
         """
         fcm = FakeCardManager()
         fcm.detect_ok = False
@@ -428,8 +428,8 @@ class TestReadAndNotifyWithCache:
 
         w._read_and_notify()
 
-        callback.assert_called_once_with("")
-        error_callback.assert_not_called()
+        callback.assert_not_called()
+        error_callback.assert_called_once()
         assert w._last_iccid is None
 
     def test_cache_survives_card_removal_and_reinsertion(self):
@@ -463,7 +463,10 @@ class TestReadAndNotifyWithCache:
         on_unknown.assert_called_once_with("89999880000000000200001")
 
     def test_different_atr_not_cached(self):
-        """A different ATR should not match the cache."""
+        """A different ATR should not match the cache.
+
+        ok=False with no cache hit → on_error (transport failure), NOT on_card_unknown.
+        """
         fcm = FakeCardManager()
         w = CardWatcher(fcm)
         w._atr_iccid_cache["3B 9F 96 80 1F"] = "89999880000000000200001"
@@ -472,12 +475,15 @@ class TestReadAndNotifyWithCache:
         fcm.detect_ok = False
 
         on_unknown = MagicMock()
+        on_error = MagicMock()
         w.on_card_unknown = on_unknown
+        w.on_error = on_error
 
         w._read_and_notify()
 
-        # Different ATR → not in cache → fire unknown
-        on_unknown.assert_called_once_with("")
+        # Different ATR → not in cache; ok=False → transport error → on_error not on_card_unknown
+        on_unknown.assert_not_called()
+        on_error.assert_called_once()
         assert w._last_iccid is None
 
 

@@ -743,3 +743,164 @@ class TestBlankCardRemovalDebounce:
         assert w._card_present is False
         assert w._last_iccid is None
         assert w._last_atr is None
+
+
+# ---------------------------------------------------------------------------
+# _read_and_notify error classification (Bug C fix)
+# ---------------------------------------------------------------------------
+
+class TestReadAndNotifyClassification:
+    """Transport/protocol read failures must NOT become BLANK (on_card_unknown).
+
+    BLANK must only be set when pySim-read successfully contacted the card and
+    found no ICCID (genuinely unprogrammed gialersim).  A T0/CardConnection
+    transport failure is a READ_ERROR — it maps to on_error, not on_card_unknown.
+    """
+
+    def _make_fast_probe_watcher(self, probe_atr="3B 9F 96 80 1F"):
+        """Return (watcher, cm) with the fast probe path active.
+
+        Sets up FakeCardManager so probe_card_presence() reports a card present
+        (triggering _read_and_notify via _handle_probe_result).  The actual
+        detect_card() return value is controlled per-test via detect_ok / detect_msg.
+        """
+        cm = FakeCardManager()
+        # Override probe_card_presence to always report card present
+        cm.probe_card_presence = lambda: (True, probe_atr)
+        w = CardWatcher(cm)
+        w._probe_available = True
+        w._last_atr = None
+        w._card_present = False
+        return w, cm
+
+    def test_transport_error_maps_to_on_error_not_blank(self):
+        """ok=False with transport/protocol error → on_error, NOT on_card_unknown."""
+        w, cm = self._make_fast_probe_watcher()
+        cm.detect_ok = False
+        cm.detect_card = lambda: (
+            False,
+            "Card communication error - re-seat the SIM",
+        )
+        cm.iccid = None
+
+        errors = []
+        unknowns = []
+        w.on_error = lambda msg: errors.append(msg)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        w._check_once()
+
+        assert len(unknowns) == 0, (
+            "Transport error must NOT fire on_card_unknown (BLANK state)"
+        )
+        assert len(errors) == 1
+        assert "communication error" in errors[0].lower() or errors[0]
+
+    def test_cardconnectionexception_maps_to_on_error(self):
+        """CardConnectionException / T0 protocol mismatch → on_error, not BLANK."""
+        w, cm = self._make_fast_probe_watcher()
+        error_msg = "Failed to transmit with protocol T0. Card protocol mismatch"
+        cm.detect_card = lambda: (False, error_msg)
+        cm.iccid = None
+
+        errors = []
+        unknowns = []
+        w.on_error = lambda msg: errors.append(msg)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        w._check_once()
+
+        assert len(unknowns) == 0, (
+            "T0 protocol mismatch must NOT produce BLANK state"
+        )
+        assert len(errors) == 1
+        assert "T0" in errors[0] or "protocol" in errors[0].lower()
+
+    def test_blank_card_ok_no_iccid_still_maps_to_on_card_unknown(self):
+        """ok=True but no ICCID (genuine blank/gialersim) → on_card_unknown("").
+
+        This is the valid BLANK path — pySim-read contacted the card successfully
+        but it has no programmed ICCID.
+        """
+        w, cm = self._make_fast_probe_watcher()
+        cm.detect_ok = True
+        cm.iccid = None  # No ICCID — blank card
+
+        errors = []
+        unknowns = []
+        w.on_error = lambda msg: errors.append(msg)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        w._check_once()
+
+        assert len(errors) == 0, "Blank card (ok=True, no ICCID) must NOT fire on_error"
+        assert len(unknowns) == 1
+        assert unknowns[0] == "", "Blank card should fire on_card_unknown with empty string"
+
+    def test_successful_read_with_iccid_unaffected(self):
+        """ok=True with ICCID → on_card_unknown(iccid) (no index), no on_error."""
+        w, cm = self._make_fast_probe_watcher()
+        cm.detect_ok = True
+        cm.iccid = "8949440000001672706"
+
+        errors = []
+        unknowns = []
+        w.on_error = lambda msg: errors.append(msg)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        w._check_once()
+
+        assert len(errors) == 0
+        assert len(unknowns) == 1
+        assert unknowns[0] == "8949440000001672706"
+
+    def test_transport_error_with_atr_cache_still_resolves(self):
+        """Transport error but ATR cache hit → on_card_unknown(cached_iccid), no error."""
+        w, cm = self._make_fast_probe_watcher(probe_atr="ATR_KNOWN")
+        cached_iccid = "8949440000001672706"
+        # Pre-populate the cache as if a card was just programmed
+        w._atr_iccid_cache["ATR_KNOWN"] = cached_iccid
+        w._last_atr = "ATR_KNOWN"
+
+        cm.detect_card = lambda: (False, "Card communication error")
+        cm.iccid = None
+
+        errors = []
+        unknowns = []
+        w.on_error = lambda msg: errors.append(msg)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        w._check_once()
+
+        # Cache hit takes priority — resolves to cached ICCID, no error
+        assert len(errors) == 0
+        assert len(unknowns) == 1
+        assert unknowns[0] == cached_iccid
+
+    def test_blank_card_debounce_behavior_unchanged(self):
+        """Blank card debounce is unaffected: second absent probe fires removal."""
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = None  # blank
+
+        removed = []
+        unknowns = []
+        w = CardWatcher(cm)
+        w.on_card_removed = lambda: removed.append(True)
+        w.on_card_unknown = lambda ic: unknowns.append(ic)
+
+        # Detect blank card
+        w._check_once()
+        assert len(unknowns) == 1
+        assert w._card_present is True
+
+        # First absent probe — debounced
+        cm.detect_ok = False
+        w._check_once()
+        assert len(removed) == 0
+        assert w._card_present is True
+
+        # Second absent probe — removal fires
+        w._check_once()
+        assert len(removed) == 1
+        assert w._card_present is False
