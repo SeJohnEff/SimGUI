@@ -162,6 +162,25 @@ class _ScanSharesWorker(QObject):
 
 
 # ---------------------------------------------------------------------------
+# CardWatcher → main-thread relay
+# ---------------------------------------------------------------------------
+
+class _CardWatcherRelay(QObject):
+    """Routes CardWatcher callbacks from background thread to main thread.
+
+    CardWatcher fires callbacks on its polling thread (a plain threading.Thread).
+    Emitting a Qt signal from a non-Qt thread and receiving it in the main thread
+    uses an automatic QueuedConnection, so handler code always runs on the main
+    thread and is safe to touch Qt widgets.
+    """
+    card_detected  = pyqtSignal(str, object, object)  # iccid, card_data, file_path
+    card_unknown   = pyqtSignal(str)                   # iccid (may be empty)
+    reader_ready   = pyqtSignal()
+    card_removed   = pyqtSignal()
+    error_occurred = pyqtSignal(str)                   # message
+
+
+# ---------------------------------------------------------------------------
 # Main Application Window
 # ---------------------------------------------------------------------------
 
@@ -424,7 +443,17 @@ class SimGUIApp(QMainWindow):
     # ---- CardWatcher → StateManager bridge ----------------------------
 
     def _wire_card_watcher(self) -> None:
-        """Connect CardWatcher callbacks → StateManager mutations."""
+        """Connect CardWatcher callbacks → StateManager mutations via Qt relay.
+
+        CardWatcher fires callbacks on a background threading.Thread.  Direct
+        Qt widget access from that thread is illegal (QTextDocument child
+        creation warning).  The relay object lives in the main thread; emitting
+        its signals from the background thread uses Qt's automatic
+        QueuedConnection so every handler runs safely on the main thread.
+        """
+        relay = _CardWatcherRelay(self)
+        self._watcher_relay = relay  # keep alive
+
         def on_detected(iccid, card_data, file_path):
             self.state_manager.card_state = CardState.DETECTED
             self.state_manager.update_card_info(
@@ -480,11 +509,21 @@ class SimGUIApp(QMainWindow):
                 self.state_manager.card_state = CardState.ERROR
             self.state_manager.report_error(msg)
 
-        self._card_watcher.on_reader_ready = on_reader_ready
-        self._card_watcher.on_card_detected = on_detected
-        self._card_watcher.on_card_unknown = on_unknown
-        self._card_watcher.on_card_removed = on_removed
-        self._card_watcher.on_error = on_error
+        # Connect relay signals to handlers with explicit QueuedConnection.
+        # This guarantees handlers execute on the main thread's event loop
+        # regardless of which thread emits the signal.
+        relay.card_detected.connect(on_detected, Qt.ConnectionType.QueuedConnection)
+        relay.card_unknown.connect(on_unknown, Qt.ConnectionType.QueuedConnection)
+        relay.reader_ready.connect(on_reader_ready, Qt.ConnectionType.QueuedConnection)
+        relay.card_removed.connect(on_removed, Qt.ConnectionType.QueuedConnection)
+        relay.error_occurred.connect(on_error, Qt.ConnectionType.QueuedConnection)
+
+        # Watcher callbacks are now just signal emitters — no Qt object access.
+        self._card_watcher.on_card_detected = relay.card_detected.emit
+        self._card_watcher.on_card_unknown  = relay.card_unknown.emit
+        self._card_watcher.on_reader_ready  = relay.reader_ready.emit
+        self._card_watcher.on_card_removed  = relay.card_removed.emit
+        self._card_watcher.on_error         = relay.error_occurred.emit
         self._card_watcher.start()
 
     def _startup_detect_card(self) -> None:
