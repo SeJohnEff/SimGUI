@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install SimGUI and pySim for macOS with full hardware support
 # This script is for developers and users who want to program real SIM cards.
-# Casual users should just download SimGUI.app and run it (simulator mode works out of the box).
+# Casual users should just download SimGUI.app and run it.
 
 set -e
 

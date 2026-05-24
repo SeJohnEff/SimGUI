@@ -65,7 +65,6 @@ ui/
   dialogs/                 # ADM1 dialog, network storage, etc.
   widgets/                 # Reusable Qt widgets
   theme.py                 # Qt stylesheet / theming
-simulator/                 # Built-in SIM programmer simulator (20 test profiles)
 tests/                     # pytest suite (2044+ tests)
 debian/                    # Debian packaging
 scripts/install.sh         # One-liner installer
@@ -463,7 +462,6 @@ If a `platform_runtime.py` (or equivalent) module is introduced in a future phas
 StateManager (QObject)
 ├── card_state_changed(CardState)     # NO_CARD → DETECTED → AUTHENTICATED
 ├── card_info_changed(CardInfo)       # ICCID, IMSI, card_type, etc.
-├── mode_changed(AppMode)             # HARDWARE ↔ SIMULATOR
 ├── status_changed(str)               # Status bar text
 ├── share_status_changed(ShareStatus) # Network mount state
 ├── csv_path_changed(str)             # Active CSV file

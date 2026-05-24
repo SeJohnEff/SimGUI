@@ -208,18 +208,6 @@ mount error(13): Permission denied
 
 ---
 
-## Simulator mode
-
-### Simulator shows wrong card type
-
-The simulator loads 20 real sysmoISIM-SJA5 profiles. If you are testing SJA2 or SJS1 specific behaviour, use hardware. The simulator covers the common programming workflow but does not emulate every card-type-specific feature.
-
-### Simulator mode left enabled accidentally
-
-Open Settings → uncheck **Simulator Mode**. The status bar shows "SIMULATOR" when active — always verify this indicator before connecting real hardware.
-
----
-
 ## General
 
 ### SimGUI window does not open
@@ -248,6 +236,5 @@ If none of the above resolves your issue, collect the following and open a bug r
 2. Ubuntu version (`lsb_release -a`)
 3. CLI tool in use and version
 4. The full error message from the log panel
-5. Whether the issue reproduces in simulator mode
 
 File issues at the [SimGUI GitHub repository](https://github.com/SeJohnEff/SimGUI).
