@@ -1,3 +1,14 @@
+simgui (0.5.56) unstable; urgency=medium
+
+  * chore: remove simulator mode, simulator package, and all associated files
+    (SimulatorBackend, VirtualCard, CardDeck, SimulatorSettings, simulator/)
+  * chore: remove all user-facing simulator-as-feature references from docs,
+    scripts, and packaging; hardware-only mode is now the sole operational mode
+  * fix: debian/control — remove stale python3-tk dep, promote python3-pyqt6
+    to Depends, add Qt runtime libraries, remove simulator description claim
+
+ -- John Fornehed <john.fornehed@gmail.com>  Sun, 24 May 2026 00:00:00 +0000
+
 simgui (0.5.50) unstable; urgency=medium
 
   * fix: restore network-share ICCID index refresh after share connection
