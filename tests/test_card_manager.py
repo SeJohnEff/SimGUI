@@ -1,6 +1,8 @@
 """Tests for managers.card_manager module."""
 
+import json
 import textwrap
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -327,3 +329,92 @@ class TestPySimVenvInterpreter:
         )
         assert len(captured) == 1
         assert captured[0][0] == '/fake/venv/bin/python'
+
+
+class TestWriteSpnViaShell:
+    """_write_spn_via_shell builds correct pySim-shell script and handles failures."""
+
+    def _sja5_cm(self, tmp_path):
+        """Return a CardManager configured as a non-empty SJA5 card."""
+        (tmp_path / 'pySim-shell.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.SJA5
+        cm._original_card_data = {'ICCID': '8946001234567890123', 'IMSI': '001010123456789'}
+        cm._authenticated_adm1_hex = '3838383838383838'
+        return cm
+
+    def test_spn_and_adm1_builds_expected_shell_script(self, tmp_path, monkeypatch):
+        """verify_adm + select ADF.USIM + select EF.SPN + update_binary_decoded in script."""
+        captured_cmds = []
+        cm = self._sja5_cm(tmp_path)
+
+        def fake_shell_safe(commands, timeout=30):
+            captured_cmds.append(commands)
+            return True, 'OK', ''
+
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe', fake_shell_safe)
+        ok, msg = cm._write_spn_via_shell('MyNetwork', '3838383838383838')
+
+        assert ok is True
+        assert captured_cmds, "pySim-shell was not called"
+        script = captured_cmds[0]
+        assert 'verify_adm --pin-is-hex 3838383838383838' in script
+        assert 'select ADF.USIM' in script
+        assert 'select EF.SPN' in script
+        assert 'update_binary_decoded' in script
+        decoded = json.loads(
+            script.split("update_binary_decoded '")[1].rstrip("'\n")
+        )
+        assert decoded['spn'] == 'MyNetwork'
+        assert decoded['show_in_hplmn'] is True
+
+    def test_no_adm1_skips_spn_shell_write(self, tmp_path, monkeypatch):
+        """_program_via_pysim_prog does not call shell when ADM1 is absent."""
+        cm = self._sja5_cm(tmp_path)
+        cm._authenticated_adm1_hex = None
+
+        shell_called = []
+        monkeypatch.setattr(cm, '_write_spn_via_shell',
+                            lambda *a, **kw: shell_called.append(a) or (True, 'SPN written'))
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {}))
+
+        cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
+        assert not shell_called, "Shell should not be called without ADM1"
+
+    def test_shell_failure_means_spn_not_verified(self, tmp_path, monkeypatch):
+        """If pySim-shell write fails, SPN does not appear in the verified list."""
+        cm = self._sja5_cm(tmp_path)
+
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, '_write_spn_via_shell',
+                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed'))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
+
+        ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
+        assert ok is True
+        assert 'SPN' not in msg or 'verified' not in msg.lower() or (
+            'SPN' not in msg.split('verified')[0]
+        )
+
+    def test_readback_spn_match_appears_in_verified(self, tmp_path, monkeypatch):
+        """When read-back confirms SPN, it appears in the verified output."""
+        cm = self._sja5_cm(tmp_path)
+
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, '_write_spn_via_shell',
+                            lambda *a, **kw: (True, 'SPN written'))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {'SPN': 'MyNetwork'}))
+
+        ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
+        assert ok is True
+        assert 'SPN' in msg
+        assert 'verified' in msg.lower()

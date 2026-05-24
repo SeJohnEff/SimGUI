@@ -729,6 +729,39 @@ class CardManager:
         except Exception as e:
             return False, "", str(e)
 
+    def _write_spn_via_shell(
+            self, spn: str, adm1_hex: str, timeout: int = 20
+    ) -> Tuple[bool, str]:
+        """Write EF.SPN via pySim-shell after pySim-prog.
+
+        pySim-prog's -n flag is silently ignored for some card types.
+        Authenticates via verify_adm and writes EF.SPN with
+        update_binary_decoded.
+
+        Not called for GIALERSIM/blank cards — verify_adm (CHV 0x0A)
+        fails with 6f00 on those cards and would consume retry attempts.
+
+        Returns (success, message).
+        """
+        if self._is_empty_card(None):
+            return False, "SPN shell write not supported for blank/gialersim cards"
+
+        spn_json = json.dumps(
+            {"rfu": 63, "hide_in_oplmn": True, "show_in_hplmn": True, "spn": spn}
+        )
+        commands = (
+            f'verify_adm --pin-is-hex {adm1_hex}\n'
+            'select ADF.USIM\n'
+            'select EF.SPN\n'
+            f"update_binary_decoded '{spn_json}'\n"
+        )
+        ok, stdout, stderr = self._run_pysim_shell_safe(commands, timeout=timeout)
+        if not ok:
+            logger.warning("SPN shell write failed stdout=%r stderr=%r", stdout, stderr)
+            return False, "SPN write via pySim-shell failed"
+        logger.info("SPN written via pySim-shell OK")
+        return True, "SPN written"
+
     def check_adm1_retry_counter(self) -> Optional[int]:
         """Check how many ADM1 authentication attempts remain.
 
@@ -1154,6 +1187,13 @@ class CardManager:
             fields, self._authenticated_adm1_hex, timeout=60)
 
         if ok:
+            spn = fields.get('SPN', '').strip()
+            if spn and self._authenticated_adm1_hex and not self._is_empty_card(None):
+                _spn_ok, _spn_msg = self._write_spn_via_shell(
+                    spn, self._authenticated_adm1_hex)
+                if not _spn_ok:
+                    logger.warning("SPN write skipped: %s", _spn_msg)
+
             v_ok, v_msg, v_data = self.verify_after_program(fields)
             if v_ok:
                 if v_data:
