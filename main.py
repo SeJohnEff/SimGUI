@@ -456,12 +456,15 @@ class SimGUIApp(QMainWindow):
 
         def on_detected(iccid, card_data, file_path):
             self.state_manager.card_state = CardState.DETECTED
+            # Merge pySim-read data with CSV data: CSV wins when both have a value;
+            # pySim-read fills in fields the CSV omits (IMSI, ACC, SPN, FPLMN).
+            raw = self._card_manager.card_info or {}
             self.state_manager.update_card_info(
                 iccid=iccid,
-                imsi=card_data.get("IMSI", ""),
-                acc=card_data.get("ACC", "-"),
-                spn=card_data.get("SPN", "-"),
-                fplmn=card_data.get("FPLMN", "-"),
+                imsi=card_data.get("IMSI", "") or raw.get("IMSI", ""),
+                acc=card_data.get("ACC") or raw.get("ACC", "-"),
+                spn=card_data.get("SPN") or raw.get("SPN", "-"),
+                fplmn=card_data.get("FPLMN") or raw.get("FPLMN", "-"),
                 source_file=file_path,
                 auth_status=False,
             )

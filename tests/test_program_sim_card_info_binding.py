@@ -235,3 +235,71 @@ class TestCSVDataOverridesCardInfo:
         assert panel._field_entries["Ki"].text() == "AA" * 16
         assert panel._field_entries["OPc"].text() == "BB" * 16
         assert panel._field_entries["ADM1"].text() == "12345678"
+
+
+# ---------------------------------------------------------------------------
+# 6. on_card_detected with partial CSV must not clear CardInfo public fields
+# ---------------------------------------------------------------------------
+
+class TestCSVDoesNotClearCardInfoPublicFields:
+    """CSV absent fields must preserve CardInfo (pySim-read) values in the form.
+
+    Typical Fiskarheden CSV has ICCID/IMSI/Ki/OPc/ADM1 but NOT ACC/SPN/FPLMN.
+    pySim-read populates those via CardInfo.  on_card_detected must not clear them.
+    """
+
+    _CSV_PARTIAL = {
+        "ICCID": "8988601234567890123",
+        "IMSI": "310410123456789",
+        "Ki": "AA" * 16,
+        "OPc": "BB" * 16,
+        "ADM1": "12345678",
+    }
+
+    def test_acc_from_card_info_preserved_after_csv_load(self, panel, sm):
+        _set_card(sm, acc="ffff")
+        panel.on_card_detected("8988601234567890123", self._CSV_PARTIAL, "/data/test.csv")
+        assert panel._field_entries["ACC"].text() == "ffff"
+
+    def test_spn_from_card_info_preserved_after_csv_load(self, panel, sm):
+        _set_card(sm, spn="TestNet")
+        panel.on_card_detected("8988601234567890123", self._CSV_PARTIAL, "/data/test.csv")
+        assert panel._field_entries["SPN"].text() == "TestNet"
+
+    def test_fplmn_from_card_info_preserved_after_csv_load(self, panel, sm):
+        _set_card(sm, fplmn="242010")
+        panel.on_card_detected("8988601234567890123", self._CSV_PARTIAL, "/data/test.csv")
+        assert panel._field_entries["FPLMN"].text() == "242010"
+
+    def test_csv_imsi_still_wins_over_card_info_imsi(self, panel, sm):
+        """CSV IMSI takes priority when CSV has a value."""
+        _set_card(sm, imsi="read_imsi")
+        panel.on_card_detected("8988601234567890123", self._CSV_PARTIAL, "/data/test.csv")
+        assert panel._field_entries["IMSI"].text() == "310410123456789"
+
+    def test_protected_fields_cleared_by_csv_when_absent(self, panel, sm):
+        """Ki/OPc/ADM1 absent from CSV should be cleared (they are NOT pySim-read fields)."""
+        _set_card(sm)
+        panel.on_card_detected(
+            "8988601234567890123",
+            {"ICCID": "8988601234567890123", "IMSI": "310410123456789"},
+            "/data/test.csv"
+        )
+        assert panel._field_entries["Ki"].text() == ""
+        assert panel._field_entries["OPc"].text() == ""
+        assert panel._field_entries["ADM1"].text() == ""
+
+    def test_all_public_fields_preserved_when_csv_has_none(self, panel, sm):
+        """CSV with only protected fields keeps all five public CardInfo values."""
+        _set_card(sm, iccid="8988601234567890123", imsi="310410123456789",
+                  acc="ffff", spn="TestNet", fplmn="242010")
+        panel.on_card_detected(
+            "8988601234567890123",
+            {"Ki": "AA" * 16, "OPc": "BB" * 16, "ADM1": "12345678"},
+            "/data/test.csv"
+        )
+        assert panel._field_entries["ICCID"].text() == "8988601234567890123"
+        assert panel._field_entries["IMSI"].text() == "310410123456789"
+        assert panel._field_entries["ACC"].text() == "ffff"
+        assert panel._field_entries["SPN"].text() == "TestNet"
+        assert panel._field_entries["FPLMN"].text() == "242010"

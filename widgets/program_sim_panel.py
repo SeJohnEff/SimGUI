@@ -120,8 +120,11 @@ class ProgramSIMPanel(QWidget):
         if self.state_manager:
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.card_state_changed.connect(self._on_card_state_changed)
-            # Initialize from current state in case card was detected before this panel was created
             self._on_card_state_changed(self.state_manager.card_state)
+            # Bootstrap: if a card is already detected when the panel is created,
+            # populate public fields from the existing CardInfo.
+            if self.state_manager.card_info.iccid:
+                self._on_card_info_changed(self.state_manager.card_info)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -368,7 +371,13 @@ class ProgramSIMPanel(QWidget):
         if card_data:
             normalized = _normalize_card_data(card_data)
             for key, _, _ in _FORM_FIELDS:
-                self._field_entries[key].setText(normalized.get(key, ""))
+                val = normalized.get(key, "")
+                # Public read fields absent from the CSV keep whatever
+                # _on_card_info_changed already set from CardInfo (pySim-read
+                # data).  Protected fields (Ki/OPc/ADM1) and CSV-present public
+                # fields are always set from the CSV.
+                if val or key not in _PUBLIC_READ_FIELDS:
+                    self._field_entries[key].setText(val)
             # Store full normalized record so non-displayed fields (PIN1/PUK1,
             # KIC/KID/KIK, OLD_IMSI, etc.) pass through to programming.
             # Network-share data is authoritative — it is not overwritten by
