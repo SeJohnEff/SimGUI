@@ -63,6 +63,10 @@ _KNOWN_FIELD_NAMES = {
 
 _FORM_FIELD_KEYS = frozenset(k for k, _, _ in _FORM_FIELDS)
 
+# Public fields readable without ADM auth — pre-filled from CardInfo on card read.
+# Protected fields (Ki, OPc, ADM1, PIN*, KIC/KID/KIK) are intentionally absent.
+_PUBLIC_READ_FIELDS = ("ICCID", "IMSI", "ACC", "SPN", "FPLMN")
+
 
 def _normalize_card_data(data: dict) -> dict:
     """Normalize card data keys to canonical field names."""
@@ -246,8 +250,34 @@ class ProgramSIMPanel(QWidget):
             self._update_program_btn_state()
 
     def _on_card_info_changed(self, card_info: CardInfo):
-        # Re-evaluate button state if card info changes
+        """Populate public read fields from shared CardInfo; never touch protected fields.
+
+        Only fills form fields that are currently empty so that:
+        - CSV/index data loaded by on_card_detected is not overwritten
+          (on_card_detected always fires after card_info_changed).
+        - Manual user edits made before card insertion are preserved.
+
+        CardInfo sentinel values ("-") are treated as absent.
+        """
         self._update_program_btn_state()
+
+        if not card_info.iccid:
+            return
+
+        info_values: dict[str, str] = {
+            "ICCID": card_info.iccid if card_info.iccid != "(blank)" else "",
+            "IMSI": card_info.imsi or "",
+            "ACC": card_info.acc if card_info.acc not in ("-", "") else "",
+            "SPN": card_info.spn if card_info.spn not in ("-", "") else "",
+            "FPLMN": card_info.fplmn if card_info.fplmn not in ("-", "") else "",
+        }
+
+        for field_key in _PUBLIC_READ_FIELDS:
+            value = info_values.get(field_key, "")
+            if value and field_key in self._field_entries:
+                entry = self._field_entries[field_key]
+                if not entry.text().strip():
+                    entry.setText(value)
 
     def _set_action_status(self, text: str, style: str = "normal"):
         self._action_status.setPlainText(text)
