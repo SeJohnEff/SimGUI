@@ -296,6 +296,39 @@ class TestProgramCardWithVerify:
         assert "already matches" in msg.lower()
         mock_verify.assert_not_called()
 
+    def test_spn_not_verified_when_readback_empty(self):
+        """SPN requested but read-back returns no SPN → SPN not in success message."""
+        cm = self._make_nonempty_cm()
+        # SPN is absent from _original_card_data, so it is the only delta field.
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
+             patch.object(cm, 'verify_after_program',
+                          return_value=(True, "Verification OK",
+                                        {"ICCID": "899998", "IMSI": "old_imsi"})):
+            ok, msg = cm.program_card(
+                {"IMSI": "old_imsi", "SPN": "Teleauora UK",
+                 "Ki": "cc" * 16, "OPc": "dd" * 16})
+
+        assert ok is True
+        assert "SPN" not in msg
+
+    def test_spn_verified_when_readback_matches(self):
+        """SPN requested and read-back returns matching SPN → SPN in verified message."""
+        cm = self._make_nonempty_cm()
+        with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
+             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
+             patch.object(cm, 'verify_after_program',
+                          return_value=(True, "Verification OK",
+                                        {"ICCID": "899998", "IMSI": "old_imsi",
+                                         "SPN": "Teleauora UK"})):
+            ok, msg = cm.program_card(
+                {"IMSI": "old_imsi", "SPN": "Teleauora UK",
+                 "Ki": "cc" * 16, "OPc": "dd" * 16})
+
+        assert ok is True
+        assert "SPN" in msg
+        assert "verified" in msg.lower()
+
 
 # ---------------------------------------------------------------------------
 # CardWatcher.register_programmed_card() and ATR cache

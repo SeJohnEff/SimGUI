@@ -1159,7 +1159,26 @@ class CardManager:
                 if v_data:
                     for k, v in v_data.items():
                         self.card_info[k] = v
-                return True, f"Card programmed and verified: {summary}"
+                # "verified" = confirmed by fresh pySim-read output only.
+                # Key material (Ki, OPc) cannot be read back \u2014 report separately.
+                _key_material = frozenset({'Ki', 'OPc'})
+                verified = [
+                    k for k in fields
+                    if k not in _key_material
+                    and v_data.get(k, '').strip() == fields[k].strip()
+                ]
+                written_only = [k for k in fields if k in _key_material]
+                parts = []
+                if verified:
+                    parts.append(f"verified: {', '.join(verified)}")
+                if written_only:
+                    parts.append(f"written: {', '.join(written_only)}")
+                if parts:
+                    return True, f"Card programmed \u2014 {'; '.join(parts)}"
+                return True, (
+                    "Card programmed\n"
+                    "(read-back could not confirm fields \u2014 re-insert to verify)"
+                )
             logger.warning("pySim-prog OK but read-back failed: %s", v_msg)
             return True, (
                 f"Card programmed: {summary}\n"
