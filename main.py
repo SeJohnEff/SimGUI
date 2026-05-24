@@ -452,6 +452,10 @@ class SimGUIApp(QMainWindow):
             )
             self._program_panel.on_card_detected(iccid, None, None)
 
+        def on_reader_ready():
+            self.state_manager.card_state = CardState.NO_CARD
+            self.state_manager.status_text = "Reader connected — insert a SIM card"
+
         def on_removed():
             self.state_manager.card_state = CardState.NO_CARD
             self.state_manager.clear_card_info()
@@ -476,6 +480,7 @@ class SimGUIApp(QMainWindow):
                 self.state_manager.card_state = CardState.ERROR
             self.state_manager.report_error(msg)
 
+        self._card_watcher.on_reader_ready = on_reader_ready
         self._card_watcher.on_card_detected = on_detected
         self._card_watcher.on_card_unknown = on_unknown
         self._card_watcher.on_card_removed = on_removed
