@@ -117,6 +117,73 @@ else
     echo "Patch target not found at $GIALERSIM_PATCH_FILE — skipping (pySim may use a different layout)."
 fi
 
+# Apply PCSC protocol reconnect patch
+# pySim's connect() calls setProtocol() on an already-active connection.
+# On macOS, PCSC.framework rejects this with SCARD_E_PROTO_MISMATCH.
+# Fix: disconnect then reconnect with an explicit protocol constant.
+echo ""
+echo "Checking for PCSC protocol reconnect patch..."
+PCSC_TRANSPORT_FILE="$HOME/pysim/pySim/transport/pcsc.py"
+if [ -f "$PCSC_TRANSPORT_FILE" ]; then
+    "$PYTHON" - "$PCSC_TRANSPORT_FILE" <<'PYEOF'
+import sys
+path = sys.argv[1]
+
+MARKER = '# SimGUI patch: disconnect and reconnect'
+OLD = (
+    '            self._con.connect()\n'
+    '            atr = ATR(self._con.getATR())\n'
+    '            if atr.isT0Supported():\n'
+    '                self._con.setProtocol(CardConnection.T0_protocol)\n'
+    '                self.set_tpdu_format(0)\n'
+    '            elif atr.isT1Supported():\n'
+    '                self._con.setProtocol(CardConnection.T1_protocol)\n'
+    '                self.set_tpdu_format(1)\n'
+    '            else:\n'
+    "                raise ReaderError('Unsupported card protocol')\n"
+)
+NEW = (
+    '            self._con.connect()\n'
+    '            atr = ATR(self._con.getATR())\n'
+    '            # SimGUI patch: disconnect and reconnect with explicit protocol to avoid\n'
+    '            # SCARD_E_PROTO_MISMATCH on macOS where setProtocol() cannot change\n'
+    '            # an already-negotiated protocol on an active connection.\n'
+    '            self._con.disconnect()\n'
+    '            if atr.isT0Supported():\n'
+    '                self._con.connect(CardConnection.T0_protocol)\n'
+    '                self.set_tpdu_format(0)\n'
+    '            elif atr.isT1Supported():\n'
+    '                self._con.connect(CardConnection.T1_protocol)\n'
+    '                self.set_tpdu_format(1)\n'
+    '            else:\n'
+    "                raise ReaderError('Unsupported card protocol')\n"
+)
+
+try:
+    text = open(path).read()
+    if MARKER in text:
+        print('PCSC reconnect patch already applied.')
+        sys.exit(0)
+    if OLD not in text:
+        print('Error: expected pattern not found in ' + path, file=sys.stderr)
+        print('pySim source layout may have changed — patch could not be applied.', file=sys.stderr)
+        print('SCARD_E_PROTO_MISMATCH / protocol mismatch will occur on macOS until this is resolved.', file=sys.stderr)
+        sys.exit(1)
+    open(path, 'w').write(text.replace(OLD, NEW, 1))
+    print('PCSC reconnect patch applied.')
+except Exception as e:
+    print('Error: ' + str(e), file=sys.stderr)
+    sys.exit(1)
+PYEOF
+    if grep -q "SimGUI patch: disconnect and reconnect" "$PCSC_TRANSPORT_FILE"; then
+        echo "PCSC reconnect patch verified OK."
+    else
+        echo "Warning: PCSC reconnect patch could not be verified."
+    fi
+else
+    echo "Patch target not found at $PCSC_TRANSPORT_FILE — skipping (pySim may use a different layout)."
+fi
+
 echo ""
 echo "pySim installed at ~/pysim (dependencies in ~/pysim/.venv)"
 echo ""

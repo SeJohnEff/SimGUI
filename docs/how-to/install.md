@@ -140,8 +140,8 @@ bash scripts/build-macos.sh
 
 This creates a `.venv` in the project root, installs PyQt6, pyscard, and other runtime
 dependencies into it, clones pySim to `~/pysim` with its own isolated venv, and applies
-the GialerSim SPN patch. Git (from Xcode Command Line Tools) must be available.
-No Homebrew required.
+the GialerSim SPN patch and the PCSC protocol reconnect patch. Git (from Xcode Command
+Line Tools) must be available. No Homebrew required.
 
 3. **Launch SimGUI:**
 
@@ -184,6 +184,7 @@ Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point S
 |---|---|
 | "No reader detected" | Plug in your USB card reader; quit and restart SimGUI |
 | "CLI tool not found" | Run `bash ~/SimGUI/scripts/build-macos.sh` to reinstall pySim |
+| `SCARD_E_PROTO_MISMATCH` or "Card protocol mismatch" | PCSC reconnect patch not applied; re-run `bash ~/SimGUI/scripts/build-macos.sh` |
 | Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
 | pySim not found | Run `bash ~/SimGUI/scripts/build-macos.sh`; pySim must be at `~/pysim` or set `PYSIM_PATH` |
 | PyQt6 not found | Run `bash ~/SimGUI/scripts/build-macos.sh` to recreate `.venv` and install dependencies |

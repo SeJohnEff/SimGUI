@@ -165,6 +165,15 @@ if [ "$PYSIM_FOUND" != "found" ]; then
 fi
 echo "  pySim CLI found OK"
 
+# Validate PCSC reconnect patch (applied by install-macos.sh above)
+if grep -q "SimGUI patch: disconnect and reconnect" ~/pysim/pySim/transport/pcsc.py 2>/dev/null; then
+    echo "  PCSC reconnect patch OK"
+else
+    echo "Error: PCSC reconnect patch not found in ~/pysim/pySim/transport/pcsc.py"
+    echo "Re-run: bash scripts/build-macos.sh"
+    exit 1
+fi
+
 echo ""
 echo "Setup complete."
 echo ""
