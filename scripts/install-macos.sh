@@ -61,6 +61,26 @@ if ! ~/pysim/.venv/bin/python -m pip install -r ~/pysim/requirements.txt --quiet
 fi
 echo "pySim dependencies installed."
 
+# pyscard: pre-built universal2 wheels are ABI-incompatible with some Python
+# distributions (including Xcode CLT Python 3.9). Always validate and rebuild
+# from source so the native _scard extension matches the running interpreter.
+echo "Validating pyscard in ~/pysim/.venv ..."
+if ! ~/pysim/.venv/bin/python -c "from smartcard.System import readers" 2>/dev/null; then
+    echo "  Rebuilding pyscard from source in ~/pysim/.venv ..."
+    if ! ~/pysim/.venv/bin/python -m pip install pyscard --no-binary pyscard --no-cache-dir --force-reinstall --quiet; then
+        echo ""
+        echo "Error: pyscard build failed in ~/pysim/.venv."
+        echo "Install Apple Command Line Tools or use python.org Python 3.12+."
+        echo ""
+        echo "  Apple CLT:   xcode-select --install"
+        echo "  python.org:  https://python.org/downloads"
+        echo ""
+        echo "After installing, delete ~/pysim/.venv and re-run: bash scripts/build-macos.sh"
+        exit 1
+    fi
+fi
+echo "  pyscard OK"
+
 # Apply GialerSim SPN patch
 echo ""
 echo "Checking for GialerSim SPN patch..."

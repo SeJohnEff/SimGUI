@@ -102,6 +102,14 @@ if [ ! -f ~/pysim/pySim-read.py ]; then
 fi
 echo "  pySim at ~/pysim OK"
 
+# Validate pySim venv pyscard (install-macos.sh builds from source, but verify)
+if ! ~/pysim/.venv/bin/python -c "from smartcard.System import readers" 2>/dev/null; then
+    echo "Error: pySim venv pyscard is not functional."
+    echo "Delete ~/pysim/.venv and re-run: bash scripts/build-macos.sh"
+    exit 1
+fi
+echo "  pySim venv pyscard OK"
+
 # --- Validate imports inside the venv ----------------------------------------
 echo ""
 echo "Validating Python environment ..."
