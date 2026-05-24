@@ -7,11 +7,11 @@ Standards-Version: 4.5.0
 
 Package: simgui
 Architecture: all
-Depends: python3 (>= 3.8), python3-tk, python3-pip, libpcsclite-dev, swig, cifs-utils, nfs-common, smbclient, avahi-utils
-Recommends: python3-venv, python3-pyqt6
+Depends: python3 (>= 3.8), python3-pyqt6, python3-pip, libpcsclite-dev, swig, cifs-utils, nfs-common, smbclient, avahi-utils, libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0
+Recommends: python3-venv
 Description: GUI wrapper for SIM card programming tools
  SimGUI is a lightweight GUI wrapper for sysmo-usim-tool and pySim.
  It provides a desktop interface for SIM card detection, ADM1
- authentication, CSV batch editing, and card programming. Includes
- a built-in simulator mode for hardware-free testing with 20 real
- sysmoISIM-SJA5 card profiles.
+ authentication, CSV batch editing, and card programming.
+ Hardware-only mode: pySim or sysmo-usim-tool is required for all
+ SIM card operations. A USB PCSC-compatible card reader is needed.
