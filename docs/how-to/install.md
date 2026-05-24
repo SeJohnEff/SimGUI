@@ -132,38 +132,29 @@ git clone https://github.com/SeJohnEff/SimGUI.git ~/SimGUI
 cd ~/SimGUI
 ```
 
-2. **Install SimGUI dependencies:**
+2. **Run the setup script** (installs Python dependencies and pySim):
 
 ```bash
 bash scripts/build-macos.sh
 ```
 
-3. **Launch SimGUI:**
+This installs PyQt6, pyscard, and pySim, and applies the GialerSim SPN patch.
+Homebrew and git must be installed before running.
 
-```bash
-python3 main.py
-```
-
-pySim is required for all SIM card operations. Install it with the script below.
-
----
-
-### Hardware Support — Real SIM Card Programming
-
-To enable hardware card reader support, install pySim:
-
-```bash
-bash ~/SimGUI/scripts/install-macos.sh
-```
-
-This script clones pySim to `~/pysim` and installs its Python dependencies. After it
-completes, set the environment variable (add to `~/.zshrc` or `~/.bash_profile`):
+3. **Set the pySim path** (add to `~/.zshrc` or `~/.bash_profile` for permanence):
 
 ```bash
 export PYSIM_PATH=~/pysim
 ```
 
-Relaunch SimGUI — it will auto-detect pySim and enable hardware card operations.
+4. **Launch SimGUI:**
+
+```bash
+python3 main.py
+```
+
+SimGUI auto-detects pySim at `$PYSIM_PATH` on startup. A USB PCSC-compatible card
+reader is required for all SIM card operations.
 
 ### PCSC Reader Detection
 

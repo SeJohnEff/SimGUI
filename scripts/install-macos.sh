@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Install SimGUI and pySim for macOS with full hardware support
-# This script is for developers and users who want to program real SIM cards.
-# Casual users should just download SimGUI.app and run it.
+# Install pySim for macOS — required for all SimGUI SIM card operations.
+# Called automatically by scripts/build-macos.sh; also safe to run standalone.
 
 set -e
 
-echo "SimGUI for macOS — Developer Installation"
-echo "==========================================="
+echo "SimGUI for macOS — pySim Setup"
+echo "================================"
 echo ""
 echo "This script will install:"
 echo "  • pySim (cloned to ~/pysim)"
-echo "  • Python dependencies (pyscard, etc.)"
+echo "  • pySim Python dependencies"
 echo ""
 
 # Check for Homebrew
@@ -63,35 +62,56 @@ echo "Virtual environment activated"
 
 # Install pySim dependencies
 echo "Installing pySim dependencies..."
-pip install --upgrade pip setuptools wheel
-pip install -r ~/pysim/requirements.txt
+pip install --upgrade pip setuptools wheel --quiet
+pip install -r ~/pysim/requirements.txt --quiet
 
-# Apply GialerSIM SPN patch (optional, non-fatal)
+# Apply GialerSim SPN patch
 echo ""
-echo "Checking for GialerSIM SPN patch..."
-GIALERSIM_PATCH_FILE="/opt/pysim/pySim/legacy/cards.py"
+echo "Checking for GialerSim SPN patch..."
+GIALERSIM_PATCH_FILE="$HOME/pysim/pySim/legacy/cards.py"
 if [ -f "$GIALERSIM_PATCH_FILE" ]; then
-    if ! grep -q "'name':" "$GIALERSIM_PATCH_FILE"; then
-        echo "Applying GialerSIM SPN support patch..."
-        # This would require editing the file; skipping for now as pySim may be updated
-        echo "(Note: GialerSIM SPN support may require a manual pySim patch)"
+    if grep -q "'name'" "$GIALERSIM_PATCH_FILE"; then
+        echo "GialerSim SPN patch already applied."
+    else
+        echo "Applying GialerSim SPN support patch..."
+        python3 - "$GIALERSIM_PATCH_FILE" <<'PYEOF'
+import sys
+path = sys.argv[1]
+try:
+    text = open(path).read()
+    old = "'opc': lambda opc: self.update_uicc_auth_key(ki=None, opc=opc),"
+    new = (old + "\n            'name': lambda name: self.update_spn("
+           "name=name, show_in_hplmn=True, hide_in_oplmn=False),")
+    if old in text and "'name'" not in text:
+        open(path, 'w').write(text.replace(old, new))
+        print("Patch applied.")
+    else:
+        print("Patch skipped (already applied or pattern not found).")
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+        if grep -q "'name'" "$GIALERSIM_PATCH_FILE"; then
+            echo "GialerSim SPN patch applied successfully."
+        else
+            echo "Warning: GialerSim SPN patch could not be applied — SPN writes to blank cards will be silently skipped."
+        fi
     fi
+else
+    echo "Patch target not found at $GIALERSIM_PATCH_FILE — skipping (pySim may use a different layout)."
 fi
 
-# Install SimGUI dependencies
-echo ""
-echo "Installing SimGUI dependencies (system)..."
-pip3 install --user pyscard PyQt6
+deactivate 2>/dev/null || true
 
-# Set environment variable for pySim discovery
 echo ""
-echo "Done! To use SimGUI with real SIM cards:"
+echo "pySim installed at ~/pysim"
 echo ""
-echo "  1. Plug in your USB card reader (OMNIKEY 3x21 or compatible)"
-echo "  2. Set the PYSIM_PATH environment variable:"
+echo "To complete setup:"
+echo "  1. Add to ~/.zshrc or ~/.bash_profile:"
 echo "     export PYSIM_PATH=~/pysim"
 echo ""
-echo "  3. Run SimGUI:"
-echo "     cd /path/to/SimGUI && python3 main.py"
+echo "  2. Plug in your USB card reader (OMNIKEY 3x21 or compatible)"
 echo ""
-echo "Or, download SimGUI.app and set the env var before launching it."
+echo "  3. Launch SimGUI:"
+echo "     python3 main.py"
+echo ""

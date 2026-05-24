@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Set up SimGUI to run from source on macOS.
+# Installs Python dependencies and pySim (required for SIM card operations).
 # Usage: bash scripts/build-macos.sh
-# After this completes, launch SimGUI with: python3 main.py
+# After this completes: export PYSIM_PATH=~/pysim && python3 main.py
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "SimGUI — macOS Source Setup"
-echo "============================"
+echo "SimGUI — macOS Setup"
+echo "====================="
 echo ""
 
 if [[ "$OSTYPE" != "darwin"* ]]; then
@@ -34,15 +35,13 @@ fi
 echo "Python $(python3 --version | cut -d' ' -f2) OK"
 echo ""
 
+echo "Upgrading pip..."
+python3 -m pip install --upgrade pip --quiet
+
 echo "Installing SimGUI runtime dependencies..."
-pip3 install --user PyQt6 Pillow pyscard pytlv
+python3 -m pip install --user PyQt6 Pillow pyscard pytlv
 
 echo ""
-echo "Setup complete."
+echo "Installing pySim (required for SIM card operations)..."
 echo ""
-echo "To launch SimGUI:"
-echo "  cd $PROJECT_ROOT && python3 main.py"
-echo ""
-echo "To enable hardware card support, also install pySim:"
-echo "  bash $SCRIPT_DIR/install-macos.sh"
-echo ""
+bash "$SCRIPT_DIR/install-macos.sh"
