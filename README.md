@@ -32,7 +32,6 @@ to run card operations from a desktop GUI.
 git clone https://github.com/SeJohnEff/SimGUI
 cd SimGUI
 bash scripts/build-macos.sh   # installs Python deps and pySim
-export PYSIM_PATH=~/pysim
 python3 main.py
 ```
 

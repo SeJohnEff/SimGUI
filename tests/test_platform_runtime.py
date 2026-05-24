@@ -335,6 +335,23 @@ class TestFindCliToolFallback:
         assert path == "/custom/sysmo"
         assert backend == CLIBackend.SYSMO
 
+    def test_find_cli_tool_finds_home_pysim_without_env_var(self):
+        """_find_cli_tool() finds ~/pysim automatically without PYSIM_PATH set."""
+        home_pysim = os.path.abspath(os.path.expanduser("~/pysim"))
+        path, backend = _call_find_cli_tool(None, [home_pysim])
+        assert path == home_pysim
+        assert backend == CLIBackend.PYSIM
+
+    def test_find_cli_tool_finds_home_pysim_via_platform_runtime_macos(self):
+        """_find_cli_tool() finds ~/pysim via platform_runtime (macOS simulation)."""
+        home_pysim = os.path.abspath(os.path.expanduser("~/pysim"))
+        macos_pr = types.ModuleType("platform_runtime")
+        macos_pr.sysmo_search_dirs = lambda: ["/opt/sysmo-usim-tool"]
+        macos_pr.pysim_search_dirs = lambda: [home_pysim]
+        path, backend = _call_find_cli_tool(macos_pr, [home_pysim])
+        assert path == home_pysim
+        assert backend == CLIBackend.PYSIM
+
 
 # ---------------------------------------------------------------------------
 # 4. Static guardrail self-verification

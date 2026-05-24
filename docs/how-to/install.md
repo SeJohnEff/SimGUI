@@ -138,23 +138,23 @@ cd ~/SimGUI
 bash scripts/build-macos.sh
 ```
 
-This installs PyQt6, pyscard, and pySim, and applies the GialerSim SPN patch.
+This installs PyQt6, pyscard, and pySim at `~/pysim`, and applies the GialerSim SPN patch.
 Homebrew and git must be installed before running.
 
-3. **Set the pySim path** (add to `~/.zshrc` or `~/.bash_profile` for permanence):
-
-```bash
-export PYSIM_PATH=~/pysim
-```
-
-4. **Launch SimGUI:**
+3. **Launch SimGUI:**
 
 ```bash
 python3 main.py
 ```
 
-SimGUI auto-detects pySim at `$PYSIM_PATH` on startup. A USB PCSC-compatible card
-reader is required for all SIM card operations.
+SimGUI auto-detects pySim at `~/pysim` on startup — no environment variable needed.
+A USB PCSC-compatible card reader is required for all SIM card operations.
+
+**Advanced:** if pySim is installed at a non-standard location, set:
+
+```bash
+export PYSIM_PATH=/path/to/your/pysim
+```
 
 ### PCSC Reader Detection
 
@@ -183,7 +183,7 @@ Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point S
 | "No reader detected" | Plug in your USB card reader; quit and restart SimGUI |
 | "CLI tool not found" | Run `bash ~/SimGUI/scripts/install-macos.sh` to install pySim |
 | Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
-| pySim import errors | Set `export PYSIM_PATH=~/pysim` and restart |
+| pySim not found | Run `bash ~/SimGUI/scripts/install-macos.sh`; pySim must be at `~/pysim` or set `PYSIM_PATH` |
 | PyQt6 not found | Run `bash ~/SimGUI/scripts/build-macos.sh` to install dependencies |
 
 ---
