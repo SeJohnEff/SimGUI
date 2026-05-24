@@ -40,6 +40,8 @@ _PUBLIC_DISPLAY = [
     ("iccid", "ICCID"),
     ("imsi", "IMSI"),
     ("acc", "ACC"),
+    ("spn", "SPN"),
+    ("fplmn", "FPLMN"),
     ("msisdn", "MSISDN"),
     ("mnc_length", "MNC Length"),
     ("pin1", "PIN1"),
@@ -264,6 +266,10 @@ class ReadSIMPanel(QWidget):
             pub["imsi"] = card_info.imsi
         if card_info.acc and card_info.acc != "-":
             pub["acc"] = card_info.acc
+        if card_info.spn and card_info.spn != "-":
+            pub["spn"] = card_info.spn
+        if card_info.fplmn and card_info.fplmn != "-":
+            pub["fplmn"] = card_info.fplmn
 
         self._public_data = pub
         for key, field in self._pub_fields.items():

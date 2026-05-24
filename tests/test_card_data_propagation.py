@@ -144,6 +144,22 @@ class TestReadSIMPanelCardInfoBinding:
         sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", acc="ffff")
         assert panel._pub_fields["acc"].text() == "ffff"
 
+    def test_spn_shown_when_present(self, panel, sm):
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", spn="BOLIDEN")
+        assert panel._pub_fields["spn"].text() == "BOLIDEN"
+
+    def test_fplmn_shown_when_present(self, panel, sm):
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", fplmn="24007;24001")
+        assert panel._pub_fields["fplmn"].text() == "24007;24001"
+
+    def test_spn_shows_dash_when_absent(self, panel, sm):
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789")
+        assert panel._pub_fields["spn"].text() == "-"
+
+    def test_fplmn_shows_dash_when_absent(self, panel, sm):
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789")
+        assert panel._pub_fields["fplmn"].text() == "-"
+
     def test_fields_cleared_after_clear_card_info(self, panel, sm):
         """Fields must clear when card is removed (clear_card_info fires).
 
@@ -285,3 +301,50 @@ class TestCardStatusPanelIMSIBinding:
         sm.card_state = CardState.NO_CARD
         # CardStatusPanel._on_card_state_changed(NO_CARD) calls self.clear_card_info()
         assert status_panel._info_vars["imsi"].text() == "Not available"
+
+
+# ---------------------------------------------------------------------------
+# 5. Widget-level: ProgramSIMPanel populates ACC/SPN/FPLMN from CardInfo
+# ---------------------------------------------------------------------------
+
+class TestProgramSIMPanelPublicFieldsFromCardInfo:
+    """ProgramSIMPanel must fill ACC/SPN/FPLMN from CardInfo when fields are empty."""
+
+    @pytest.fixture()
+    def panel(self, qapp, sm):
+        from managers.card_manager import CardManager
+        from widgets.program_sim_panel import ProgramSIMPanel
+
+        cm = CardManager()
+        p = ProgramSIMPanel(None, cm, state_manager=sm)
+        yield p
+        p.deleteLater()
+
+    def test_acc_populated_from_card_info(self, panel, sm):
+        sm.card_state = CardState.DETECTED
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", acc="0001")
+        assert panel._field_entries["ACC"].text() == "0001"
+
+    def test_spn_populated_from_card_info(self, panel, sm):
+        sm.card_state = CardState.DETECTED
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", spn="BOLIDEN")
+        assert panel._field_entries["SPN"].text() == "BOLIDEN"
+
+    def test_fplmn_populated_from_card_info(self, panel, sm):
+        sm.card_state = CardState.DETECTED
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", fplmn="24007;24001")
+        assert panel._field_entries["FPLMN"].text() == "24007;24001"
+
+    def test_acc_populates_over_placeholder(self, panel, sm):
+        """acc must overwrite a '-' placeholder left in the field."""
+        panel._field_entries["ACC"].setText("-")
+        sm.card_state = CardState.DETECTED
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", acc="ffff")
+        assert panel._field_entries["ACC"].text() == "ffff"
+
+    def test_user_entered_acc_not_overwritten(self, panel, sm):
+        """A real user-entered ACC value must not be overwritten by CardInfo."""
+        panel._field_entries["ACC"].setText("0002")
+        sm.card_state = CardState.DETECTED
+        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", acc="0001")
+        assert panel._field_entries["ACC"].text() == "0002"

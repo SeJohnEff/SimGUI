@@ -279,7 +279,8 @@ class ProgramSIMPanel(QWidget):
             value = info_values.get(field_key, "")
             if value and field_key in self._field_entries:
                 entry = self._field_entries[field_key]
-                if not entry.text().strip():
+                current = entry.text().strip()
+                if not current or current == "-":
                     entry.setText(value)
 
     def _set_action_status(self, text: str, style: str = "normal"):
