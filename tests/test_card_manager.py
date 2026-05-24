@@ -232,3 +232,98 @@ class TestPcscReaderIndex:
         cm = CardManager(pcsc_reader_index=99)
         result = cm.check_adm1_retry_counter()
         assert result is None
+
+
+class TestPySimVenvInterpreter:
+    """pySim subprocesses use _venv_python when present, sys.executable otherwise."""
+
+    def _mock_subprocess(self, monkeypatch):
+        """Patch subprocess.run in card_manager and return captured call list."""
+        import managers.card_manager as cm_mod
+        from unittest.mock import MagicMock
+        captured = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(list(cmd))
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = ''
+            r.stderr = ''
+            return r
+
+        monkeypatch.setattr(cm_mod.subprocess, 'run', fake_run)
+        return captured
+
+    # --- _find_venv_python unit tests ---
+
+    def test_find_venv_python_returns_path_when_present(self, tmp_path):
+        from managers.card_manager import _find_venv_python
+        venv_python = tmp_path / '.venv' / 'bin' / 'python'
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text('#!/bin/sh\nexec python3 "$@"\n')
+        venv_python.chmod(0o755)
+        assert _find_venv_python(str(tmp_path)) == str(venv_python)
+
+    def test_find_venv_python_returns_none_when_absent(self, tmp_path):
+        from managers.card_manager import _find_venv_python
+        assert _find_venv_python(str(tmp_path)) is None
+
+    def test_find_venv_python_returns_none_when_not_executable(self, tmp_path):
+        from managers.card_manager import _find_venv_python
+        venv_python = tmp_path / '.venv' / 'bin' / 'python'
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text('#!/bin/sh\n')
+        venv_python.chmod(0o644)
+        assert _find_venv_python(str(tmp_path)) is None
+
+    # --- subprocess invocation tests ---
+
+    def test_run_cli_uses_venv_python_when_set(self, tmp_path, monkeypatch):
+        captured = self._mock_subprocess(monkeypatch)
+        (tmp_path / 'pySim-read.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/fake/venv/bin/python'
+        cm._run_cli('pySim-read.py', '-p0')
+        assert len(captured) == 1
+        assert captured[0][0] == '/fake/venv/bin/python'
+
+    def test_run_cli_falls_back_to_sys_executable_when_no_venv(self, tmp_path, monkeypatch):
+        import sys
+        captured = self._mock_subprocess(monkeypatch)
+        (tmp_path / 'pySim-read.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = None
+        cm._run_cli('pySim-read.py', '-p0')
+        assert len(captured) == 1
+        assert captured[0][0] == sys.executable
+
+    def test_run_pysim_shell_impl_uses_venv_python_when_set(self, tmp_path, monkeypatch):
+        captured = self._mock_subprocess(monkeypatch)
+        (tmp_path / 'pySim-shell.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/fake/venv/bin/python'
+        cm.card_type = CardType.SJA5
+        cm._run_pysim_shell_impl(adm1_hex=None, commands='')
+        assert len(captured) == 1
+        assert captured[0][0] == '/fake/venv/bin/python'
+
+    def test_run_pysim_prog_uses_venv_python_when_set(self, tmp_path, monkeypatch):
+        captured = self._mock_subprocess(monkeypatch)
+        (tmp_path / 'pySim-prog.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = '/fake/venv/bin/python'
+        cm.card_type = CardType.GIALERSIM
+        cm._run_pysim_prog(
+            {'IMSI': '999880001000001', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
+            adm1_hex='3838383838383838',
+        )
+        assert len(captured) == 1
+        assert captured[0][0] == '/fake/venv/bin/python'

@@ -110,6 +110,16 @@ if ! ~/pysim/.venv/bin/python -c "from smartcard.System import readers" 2>/dev/n
 fi
 echo "  pySim venv pyscard OK"
 
+# Validate that pySim-read.py is fully importable via the pySim venv interpreter.
+# This is the exact invocation SimGUI uses at runtime (_venv_python = ~/pysim/.venv/bin/python).
+if ! ~/pysim/.venv/bin/python ~/pysim/pySim-read.py --help >/dev/null 2>&1; then
+    echo "Error: ~/pysim/.venv/bin/python ~/pysim/pySim-read.py --help failed."
+    echo "pySim imports may be broken. Delete ~/pysim/.venv and re-run:"
+    echo "  bash scripts/build-macos.sh"
+    exit 1
+fi
+echo "  pySim-read --help via venv OK"
+
 # --- Validate imports inside the venv ----------------------------------------
 echo ""
 echo "Validating Python environment ..."
