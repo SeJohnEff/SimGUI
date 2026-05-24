@@ -2,7 +2,7 @@
 # Set up SimGUI to run from source on macOS.
 # Installs Python dependencies and pySim (required for SIM card operations).
 # Usage: bash scripts/build-macos.sh
-# After this completes: export PYSIM_PATH=~/pysim && python3 main.py
+# After this completes: python3 main.py   (pySim is auto-detected at ~/pysim)
 
 set -e
 
@@ -45,3 +45,19 @@ echo ""
 echo "Installing pySim (required for SIM card operations)..."
 echo ""
 bash "$SCRIPT_DIR/install-macos.sh"
+
+echo ""
+echo "Verifying pySim installation..."
+if [ ! -d ~/pysim ]; then
+    echo "Error: ~/pysim not found after install."
+    echo "Re-run: bash scripts/install-macos.sh"
+    exit 1
+fi
+if [ ! -f ~/pysim/pySim-read.py ]; then
+    echo "Error: pySim-read.py not found in ~/pysim."
+    echo "The pySim clone may be incomplete. Remove ~/pysim and re-run this script."
+    exit 1
+fi
+echo "pySim verified at ~/pysim (auto-detected on startup — no PYSIM_PATH needed)"
+echo ""
+echo "Setup complete. To launch SimGUI: python3 main.py"

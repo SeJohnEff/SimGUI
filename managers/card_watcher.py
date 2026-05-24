@@ -422,6 +422,17 @@ class CardWatcher:
                         self.on_card_removed()
                     except Exception:
                         pass
+            else:
+                # No card was previously present.  Fire on_error so the UI
+                # reflects the actual state (reader missing, tool missing,
+                # etc.) rather than remaining at the initial display
+                # indefinitely.  Mirrors _handle_probe_result which always
+                # fires on_error in the no-reader / error case.
+                if self.on_error:
+                    try:
+                        self.on_error(msg)
+                    except Exception:
+                        pass
 
     def _handle_new_card(self, iccid: str):
         """Process a newly detected card."""
