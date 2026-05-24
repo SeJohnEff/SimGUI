@@ -16,6 +16,7 @@ CSV editing and offline preparation; card operations simply return an
 error message.
 """
 
+import json
 import logging
 import os
 import subprocess
@@ -429,12 +430,14 @@ class CardManager:
                 ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
             if ok:
                 self._parse_pysim_output(stdout)
+                self._read_public_fields_via_shell()
                 self._original_card_data = dict(self.card_info)  # snapshot
                 return True, "Card detected via pySim"
             # Also check stdout - pySim sometimes prints data before failing
             if stdout:
                 self._parse_pysim_output(stdout)
                 if self.card_info.get('ICCID'):
+                    self._read_public_fields_via_shell()
                     self._original_card_data = dict(self.card_info)
                     return True, "Card detected via pySim"
                 # Blank/gialersim: pySim-read detected the card type but exited
@@ -1320,6 +1323,66 @@ class CardManager:
         'sysmousim-sjs1': CardType.SJS1,
         'gialersim': CardType.GIALERSIM,
     }
+
+    def _read_public_fields_via_shell(self) -> None:
+        """Enrich card_info with ACC, SPN, FPLMN read via pySim-shell.
+
+        Only runs for non-blank cards (ICCID present). Per-field failures
+        are silently ignored so the overall card detection is never blocked.
+        """
+        if not self.card_info.get('ICCID'):
+            return
+        commands = (
+            'select ADF.USIM\n'
+            'select EF.ACC\n'
+            'read_binary_decoded --oneline\n'
+            'select ADF.USIM\n'
+            'select EF.SPN\n'
+            'read_binary_decoded --oneline\n'
+            'select ADF.USIM\n'
+            'select EF.FPLMN\n'
+            'read_binary_decoded --oneline\n'
+        )
+        # Brief settle after pySim-read released the reader
+        time.sleep(0.3)
+        _ok, stdout, _stderr = self._run_pysim_shell_safe(commands, timeout=15)
+        if stdout:
+            self._parse_shell_public_fields(stdout)
+
+    def _parse_shell_public_fields(self, output: str) -> None:
+        """Parse JSON lines from pySim-shell read_binary_decoded --oneline output.
+
+        Identifies each field by its JSON structure:
+          - dict with 'ACC0' key  → EF.ACC
+          - dict with 'spn'  key  → EF.SPN
+          - list               → EF.FPLMN
+        """
+        for line in output.splitlines():
+            line = line.strip()
+            if not (line.startswith('{') or line.startswith('[')):
+                continue
+            try:
+                data = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(data, dict) and 'ACC0' in data:
+                enabled = [f'ACC{i}' for i in range(16) if data.get(f'ACC{i}')]
+                self.card_info['ACC'] = ','.join(enabled)
+            elif isinstance(data, dict) and 'spn' in data:
+                spn = data.get('spn', '')
+                if spn:
+                    self.card_info['SPN'] = spn
+            elif isinstance(data, list):
+                plmns = []
+                for entry in data:
+                    if entry is None:
+                        continue
+                    try:
+                        plmns.append(f"{entry['mcc']}{entry['mnc'].zfill(2)}")
+                    except (KeyError, TypeError, AttributeError):
+                        continue
+                if plmns:
+                    self.card_info['FPLMN'] = ','.join(plmns)
 
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info.
