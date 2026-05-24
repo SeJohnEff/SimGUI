@@ -132,19 +132,21 @@ git clone https://github.com/SeJohnEff/SimGUI.git ~/SimGUI
 cd ~/SimGUI
 ```
 
-2. **Run the setup script** (installs Python dependencies and pySim):
+2. **Run the setup script** (creates project venv, installs dependencies, and sets up pySim):
 
 ```bash
 bash scripts/build-macos.sh
 ```
 
-This installs PyQt6, pyscard, and pySim at `~/pysim`, and applies the GialerSim SPN patch.
-Git (from Xcode Command Line Tools) must be available. No Homebrew required.
+This creates a `.venv` in the project root, installs PyQt6, pyscard, and other runtime
+dependencies into it, clones pySim to `~/pysim` with its own isolated venv, and applies
+the GialerSim SPN patch. Git (from Xcode Command Line Tools) must be available.
+No Homebrew required.
 
 3. **Launch SimGUI:**
 
 ```bash
-python3 main.py
+.venv/bin/python main.py
 ```
 
 SimGUI auto-detects pySim at `~/pysim` on startup — no environment variable needed.
@@ -181,10 +183,10 @@ Alternatively, use Finder natively: **Cmd+K** > `smb://server/share` and point S
 | Symptom | Fix |
 |---|---|
 | "No reader detected" | Plug in your USB card reader; quit and restart SimGUI |
-| "CLI tool not found" | Run `bash ~/SimGUI/scripts/install-macos.sh` to install pySim |
+| "CLI tool not found" | Run `bash ~/SimGUI/scripts/build-macos.sh` to reinstall pySim |
 | Mount permission denied | Ensure you have sudo access; try mounting via Finder first |
-| pySim not found | Run `bash ~/SimGUI/scripts/install-macos.sh`; pySim must be at `~/pysim` or set `PYSIM_PATH` |
-| PyQt6 not found | Run `bash ~/SimGUI/scripts/build-macos.sh` to install dependencies |
+| pySim not found | Run `bash ~/SimGUI/scripts/build-macos.sh`; pySim must be at `~/pysim` or set `PYSIM_PATH` |
+| PyQt6 not found | Run `bash ~/SimGUI/scripts/build-macos.sh` to recreate `.venv` and install dependencies |
 
 ---
 

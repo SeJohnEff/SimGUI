@@ -31,8 +31,8 @@ to run card operations from a desktop GUI.
 ```bash
 git clone https://github.com/SeJohnEff/SimGUI
 cd SimGUI
-bash scripts/build-macos.sh   # installs Python deps and pySim
-python3 main.py
+bash scripts/build-macos.sh   # creates .venv, installs deps, sets up pySim
+.venv/bin/python main.py
 ```
 
 **Note**: PyInstaller `.pkg` bundle is in progress (v0.5.37 fixed Python 3.9 compatibility; GUI asset loading blocked v0.5.38 release).
