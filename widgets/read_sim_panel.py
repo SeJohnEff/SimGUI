@@ -227,13 +227,49 @@ class ReadSIMPanel(QWidget):
         main_layout.addLayout(btn_layout, row, 0, 1, 2)
 
     def _on_card_state_changed(self, card_state: CardState):
-        """Signal handler for card state changes."""
-        if card_state == CardState.NO_CARD:
-            self.refresh()
+        """Reset auth/protected state when a new card arrives or card is removed."""
+        if card_state in (CardState.DETECTED, CardState.BLANK):
+            # New card — invalidate previous auth and protected fields
+            self._authenticated = False
+            self._read_btn.setEnabled(False)
+            self._read_status.setText("Authenticate first")
+            self._protected_data = {}
+            for field in self._prot_fields.values():
+                field.setText("-")
+        # NO_CARD: public-field clearing is handled by _on_card_info_changed
+        # when StateManager fires card_info_changed after clear_card_info().
+        # Never call refresh() here — it reads stale CardManager data.
 
     def _on_card_info_changed(self, card_info: CardInfo):
-        """Signal handler for card info changes."""
-        pass
+        """Update public display fields from StateManager when card data changes."""
+        iccid = card_info.iccid
+
+        # Card removed or cleared — wipe all public fields
+        if not iccid:
+            self._public_data = {}
+            self._detected_iccid = ""
+            for field in self._pub_fields.values():
+                field.setText("-")
+            self._last_read_data.clear()
+            return
+
+        # Blank gialersim cards use sentinel "(blank)" — no real ICCID to verify
+        self._detected_iccid = iccid if iccid != "(blank)" else ""
+
+        # Map available CardInfo fields to the lowercase display keys
+        pub: dict = {}
+        if iccid != "(blank)":
+            pub["iccid"] = iccid
+        if card_info.imsi:
+            pub["imsi"] = card_info.imsi
+        if card_info.acc and card_info.acc != "-":
+            pub["acc"] = card_info.acc
+
+        self._public_data = pub
+        for key, field in self._pub_fields.items():
+            val = pub.get(key, "")
+            field.setText(val if val else "-")
+        self._update_shared_read_data()
 
     # ---- public interface (called by main.py) --------------------------
 

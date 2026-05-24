@@ -475,8 +475,13 @@ class SimGUIApp(QMainWindow):
             else:
                 self.state_manager.card_state = CardState.BLANK
                 self.state_manager.status_text = "Blank card detected (no ICCID)"
+            raw = self._card_manager.card_info or {}
             self.state_manager.update_card_info(
                 iccid=iccid or "(blank)",
+                imsi=raw.get("IMSI", ""),
+                acc=raw.get("ACC", "-"),
+                spn=raw.get("SPN", "-"),
+                fplmn=raw.get("FPLMN", "-"),
                 auth_status=False,
             )
             self._program_panel.on_card_detected(iccid, None, None)
