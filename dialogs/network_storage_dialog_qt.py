@@ -32,6 +32,7 @@ class NetworkStorageDialogQt(QDialog):
         self.resize(500, 350)
         self.ns_manager = ns_manager
         self._build_ui()
+        self._prefill_from_saved()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -101,6 +102,35 @@ class NetworkStorageDialogQt(QDialog):
         button_layout.addWidget(self.cancel_btn)
 
         layout.addLayout(button_layout)
+
+    def _prefill_from_saved(self):
+        """Populate form fields from the first mounted (or auto-connect) profile."""
+        if not self.ns_manager:
+            return
+        profiles = self.ns_manager.load_profiles()
+        # Prefer a profile that is currently mounted
+        for p in profiles:
+            if self.ns_manager.is_mounted(p):
+                self._populate(p)
+                return
+        # Fall back to the first profile with auto_connect enabled
+        for p in profiles:
+            if p.auto_connect:
+                self._populate(p)
+                return
+
+    def _populate(self, profile: "StorageProfile") -> None:
+        """Fill all form fields from *profile*."""
+        idx = self.protocol_combo.findText(profile.protocol.upper())
+        if idx >= 0:
+            self.protocol_combo.setCurrentIndex(idx)
+        self.server_input.setText(profile.server)
+        self.share_input.setText(profile.share)
+        self.username_input.setText(profile.username)
+        if profile.password:
+            self.password_input.setText(profile.password)
+        self.label_input.setText(profile.label)
+        self.auto_connect.setChecked(profile.auto_connect)
 
     def _on_test(self):
         """Test the connection without saving."""
