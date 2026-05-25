@@ -142,7 +142,7 @@ class _ScanSharesWorker(QObject):
         for label, mount_path in self._mounts:
             try:
                 result = self._iccid_index.scan_directory(mount_path)
-                index_size = self._iccid_index.stats().get("total_cards", "?")
+                index_size = self._iccid_index.stats.get("total_cards", "?")
                 logger.info("ICCID rescan [%s] path=%s: %d cards in %d file(s), "
                             "%d skipped, %d error(s); index total=%s",
                             label, mount_path, result.total_cards, result.files_scanned,

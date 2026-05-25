@@ -446,6 +446,11 @@ class CardWatcher:
     def _handle_new_card(self, iccid: str):
         """Process a newly detected card."""
         if self._index:
+            # Refresh stale files before lookup — CSV may have been replaced
+            # since the last scan (changed ADM1, new file, deleted file).
+            # rescan_if_stale is a fast mtime check; it only re-parses changed files.
+            for d in self._index.scanned_dirs:
+                self._index.rescan_if_stale(d)
             entry = self._index.lookup(iccid)
             if entry:
                 # Found in index — load full card data

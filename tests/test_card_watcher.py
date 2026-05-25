@@ -45,12 +45,21 @@ class FakeIndex:
     def __init__(self, entries=None, card_data=None):
         self._entries = entries or {}
         self._card_data = card_data or {}
+        self.rescan_calls = []
 
     def lookup(self, iccid):
         return self._entries.get(iccid)
 
     def load_card(self, iccid):
         return self._card_data.get(iccid)
+
+    @property
+    def scanned_dirs(self):
+        return frozenset()
+
+    def rescan_if_stale(self, directory):
+        self.rescan_calls.append(directory)
+        return None
 
 
 class FakeIndexEntry:
@@ -904,3 +913,136 @@ class TestReadAndNotifyClassification:
         w._check_once()
         assert len(removed) == 1
         assert w._card_present is False
+
+
+# ---------------------------------------------------------------------------
+# Rescan-on-miss and stats property tests
+# ---------------------------------------------------------------------------
+
+class TestRescanOnLookupMiss:
+    """_handle_new_card rescans known dirs on a lookup miss before giving up."""
+
+    def _make_cm(self, iccid):
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = iccid
+        return cm
+
+    def test_stats_is_property_not_callable(self):
+        """IccidIndex.stats is a dict property — accessing it must not raise."""
+        from managers.iccid_index import IccidIndex
+        idx = IccidIndex()
+        s = idx.stats
+        assert isinstance(s, dict)
+        assert "total_cards" in s
+
+    def test_lookup_miss_triggers_rescan_then_finds_iccid(self):
+        """On first-insert miss, rescan is called and card is found on retry."""
+        entry = FakeIndexEntry("batch.csv")
+        card = {"ICCID": "ICCID_LATE", "ADM1": "72762965"}
+
+        class RescanPopulatesIndex(FakeIndex):
+            """Simulates a stale index: lookup misses until after rescan."""
+            def __init__(self):
+                super().__init__()
+                self._rescanned = False
+
+            @property
+            def scanned_dirs(self):
+                return frozenset(["/mnt/share"])
+
+            def lookup(self, iccid):
+                # Only return the entry after a rescan has been called
+                if self._rescanned:
+                    return entry
+                return None
+
+            def rescan_if_stale(self, directory):
+                self._rescanned = True
+                self.rescan_calls.append(directory)
+                return None
+
+            def load_card(self, iccid):
+                if self._rescanned:
+                    return card
+                return None
+
+        idx = RescanPopulatesIndex()
+        cm = self._make_cm("ICCID_LATE")
+
+        detected = []
+        w = CardWatcher(cm, idx)
+        w.on_card_detected = lambda ic, d, fp: detected.append((ic, d, fp))
+        w._check_once()
+
+        assert idx.rescan_calls == ["/mnt/share"], "rescan_if_stale must be called once"
+        assert len(detected) == 1
+        assert detected[0][0] == "ICCID_LATE"
+        assert detected[0][1]["ADM1"] == "72762965"
+
+    def test_lookup_still_missing_after_rescan_fires_on_card_unknown(self):
+        """If ICCID is still absent after rescan, on_card_unknown is called."""
+        class AlwaysMissIndex(FakeIndex):
+            @property
+            def scanned_dirs(self):
+                return frozenset(["/mnt/share"])
+
+            def rescan_if_stale(self, directory):
+                self.rescan_calls.append(directory)
+                return None
+
+        idx = AlwaysMissIndex()
+        cm = self._make_cm("ICCID_REALLY_GONE")
+
+        unknown = []
+        w = CardWatcher(cm, idx)
+        w.on_card_unknown = lambda ic: unknown.append(ic)
+        w._check_once()
+
+        assert idx.rescan_calls == ["/mnt/share"], "rescan_if_stale must be called"
+        assert unknown == ["ICCID_REALLY_GONE"]
+
+    def test_rescan_on_miss_uses_fresh_csv_adm1(self, tmp_path):
+        """Integration: card insert after CSV replacement finds new ADM1."""
+        import csv as _csv
+        from managers.iccid_index import IccidIndex
+
+        iccid = "8949440000001775004"
+        csv_path = str(tmp_path / "batch.csv")
+
+        # Write initial file with old ADM1
+        with open(csv_path, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=["ICCID", "ADM1"])
+            w.writeheader()
+            w.writerow({"ICCID": iccid, "ADM1": "3838383838383838"})
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+
+        # Prime cache with old data
+        card_old = idx.load_card(iccid)
+        assert card_old["ADM1"] == "3838383838383838"
+
+        # Replace file with new ADM1, bump mtime
+        with open(csv_path, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=["ICCID", "ADM1"])
+            w.writeheader()
+            w.writerow({"ICCID": iccid, "ADM1": "72762965"})
+        import os
+        new_mtime = os.path.getmtime(csv_path) + 1
+        os.utime(csv_path, (new_mtime, new_mtime))
+
+        # Simulate card insert: lookup misses (stale), rescan fires, retry succeeds
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = iccid
+
+        detected = []
+        w2 = CardWatcher(cm, idx)
+        w2.on_card_detected = lambda ic, d, fp: detected.append((ic, d, fp))
+        w2._check_once()
+
+        assert len(detected) == 1, "Card must be detected after rescan"
+        assert detected[0][1]["ADM1"] == "72762965", (
+            f"Expected fresh ADM1 '72762965', got '{detected[0][1]['ADM1']}'"
+        )

@@ -491,6 +491,11 @@ class IccidIndex:
             "scanned_dirs": len(self._scanned_dirs),
         }
 
+    @property
+    def scanned_dirs(self) -> frozenset:
+        """Return the set of directories scanned so far (read-only)."""
+        return frozenset(self._scanned_dirs)
+
     # ---- Internal helpers -----------------------------------------------
 
     @staticmethod
