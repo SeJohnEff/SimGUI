@@ -574,6 +574,7 @@ class SimGUIApp(QMainWindow):
         self.state_manager.update_share_status(mounts)
 
     def _on_worker_index_updated(self) -> None:
+        self._card_watcher.index = self._iccid_index
         self.state_manager.notify_index_updated()
         self._batch_panel.refresh_standards()
 
