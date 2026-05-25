@@ -55,42 +55,50 @@ class NetworkStorageDialogQt(QDialog):
         form = QGridLayout()
         form.setSpacing(8)
 
+        # Saved-profile selector (row 0) — UI-only field population, no network ops
+        form.addWidget(QLabel("Saved:"), 0, 0)
+        self.profiles_combo = QComboBox()
+        self._saved_profiles: list = []
+        self._load_saved_profiles_combo()
+        self.profiles_combo.currentIndexChanged.connect(self._on_profile_selected)
+        form.addWidget(self.profiles_combo, 0, 1)
+
         # Protocol
-        form.addWidget(QLabel("Protocol:"), 0, 0)
+        form.addWidget(QLabel("Protocol:"), 1, 0)
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItems(["SMB", "NFS"])
-        form.addWidget(self.protocol_combo, 0, 1)
+        form.addWidget(self.protocol_combo, 1, 1)
 
         # Server / Host
-        form.addWidget(QLabel("Server / Host:"), 1, 0)
+        form.addWidget(QLabel("Server / Host:"), 2, 0)
         self.server_input = QLineEdit()
         self.server_input.setPlaceholderText("nas.local or 192.168.1.10")
-        form.addWidget(self.server_input, 1, 1)
+        form.addWidget(self.server_input, 2, 1)
 
         # Share / Export
-        form.addWidget(QLabel("Share / Export:"), 2, 0)
+        form.addWidget(QLabel("Share / Export:"), 3, 0)
         self.share_input = QLineEdit()
         self.share_input.setPlaceholderText("share_name or /export/path")
-        form.addWidget(self.share_input, 2, 1)
+        form.addWidget(self.share_input, 3, 1)
 
         # Username (SMB only)
-        form.addWidget(QLabel("Username:"), 3, 0)
+        form.addWidget(QLabel("Username:"), 4, 0)
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("Optional")
-        form.addWidget(self.username_input, 3, 1)
+        form.addWidget(self.username_input, 4, 1)
 
         # Password (SMB only)
-        form.addWidget(QLabel("Password:"), 4, 0)
+        form.addWidget(QLabel("Password:"), 5, 0)
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("Optional")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addWidget(self.password_input, 4, 1)
+        form.addWidget(self.password_input, 5, 1)
 
         # Label / Name
-        form.addWidget(QLabel("Label:"), 5, 0)
+        form.addWidget(QLabel("Label:"), 6, 0)
         self.label_input = QLineEdit()
         self.label_input.setPlaceholderText("e.g., SIM Data NAS")
-        form.addWidget(self.label_input, 5, 1)
+        form.addWidget(self.label_input, 6, 1)
 
         layout.addLayout(form)
 
@@ -107,7 +115,7 @@ class NetworkStorageDialogQt(QDialog):
         self.test_btn.clicked.connect(self._on_test)
         button_layout.addWidget(self.test_btn)
 
-        self.connect_btn = QPushButton("Connect & Save")
+        self.connect_btn = QPushButton("Save & Connect")
         self.connect_btn.clicked.connect(self._on_connect)
         button_layout.addWidget(self.connect_btn)
 
@@ -116,6 +124,25 @@ class NetworkStorageDialogQt(QDialog):
         button_layout.addWidget(self.cancel_btn)
 
         layout.addLayout(button_layout)
+
+    def _load_saved_profiles_combo(self) -> None:
+        """Populate the saved-profiles dropdown from the manager (UI-only, no I/O)."""
+        self.profiles_combo.blockSignals(True)
+        self.profiles_combo.clear()
+        self.profiles_combo.addItem("— Select saved profile —")
+        self._saved_profiles = []
+        if self.ns_manager:
+            for p in self.ns_manager.load_profiles()[:5]:
+                self._saved_profiles.append(p)
+                entry = p.label or f"{p.server}/{p.share}"
+                self.profiles_combo.addItem(entry)
+        self.profiles_combo.blockSignals(False)
+
+    def _on_profile_selected(self, idx: int) -> None:
+        """Populate form fields from the chosen saved profile (UI-only, no network ops)."""
+        if idx <= 0 or idx > len(self._saved_profiles):
+            return
+        self._populate(self._saved_profiles[idx - 1])
 
     def _prefill_from_saved(self):
         """Populate form fields from the first mounted (or auto-connect) profile."""
@@ -127,12 +154,23 @@ class NetworkStorageDialogQt(QDialog):
         for p in profiles:
             if self.ns_manager.is_tracked_as_mounted(p):
                 self._populate(p)
+                self._select_profile_in_combo(p)
                 return
         # Fall back to the first profile with auto_connect enabled
         for p in profiles:
             if p.auto_connect:
                 self._populate(p)
+                self._select_profile_in_combo(p)
                 return
+
+    def _select_profile_in_combo(self, profile: "StorageProfile") -> None:
+        """Sync the saved-profiles combo to show *profile* as selected."""
+        for i, p in enumerate(self._saved_profiles):
+            if p.label == profile.label:
+                self.profiles_combo.blockSignals(True)
+                self.profiles_combo.setCurrentIndex(i + 1)
+                self.profiles_combo.blockSignals(False)
+                break
 
     def _populate(self, profile: "StorageProfile") -> None:
         """Fill all form fields from *profile*."""
