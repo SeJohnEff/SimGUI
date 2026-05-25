@@ -453,3 +453,110 @@ class TestCacheInvalidation:
         assert "b_second" in entry.file_path, (
             f"Expected b_second.csv to win, but entry points to {entry.file_path}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: auto-artifact directory exclusion (Bug 1)
+# ---------------------------------------------------------------------------
+
+class TestAutoArtifactExclusion:
+    """scan_directory must never index files inside auto-artifact directories."""
+
+    def test_scan_skips_auto_artifact_subdirectory(self, tmp_path):
+        """Files inside auto-artifact/ are not indexed."""
+        iccids = _make_sysmocom_iccids("89494400000017750", 0, 1)
+
+        # Source CSV at root of scan dir
+        _write_csv(str(tmp_path / "source.csv"),
+                   [{"ICCID": ic, "IMSI": "999700000177500", "ADM1": "aaaaaaaa"}
+                    for ic in iccids])
+
+        # Artifact CSV inside auto-artifact/ — same ICCID, different IMSI
+        artifact_dir = tmp_path / "auto-artifact"
+        artifact_dir.mkdir()
+        _write_csv(str(artifact_dir / "8949440000017750000_20260525_161754.csv"),
+                   [{"ICCID": ic, "IMSI": "999880001000001", "ADM1": "aaaaaaaa"}
+                    for ic in iccids])
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+
+        entry = idx.lookup(iccids[0])
+        assert entry is not None, "ICCID from source.csv must be indexed"
+        assert "auto-artifact" not in entry.file_path, (
+            f"Lookup must point to source.csv, not an artifact: {entry.file_path}"
+        )
+
+    def test_scan_skips_nested_auto_artifact_directory(self, tmp_path):
+        """auto-artifact/ inside a batch subdir is also excluded."""
+        iccids = _make_sysmocom_iccids("89494400000017750", 0, 1)
+
+        batch_dir = tmp_path / "batch-01"
+        batch_dir.mkdir()
+        _write_csv(str(batch_dir / "batch.csv"),
+                   [{"ICCID": ic, "IMSI": "999700000177500", "ADM1": "aaaaaaaa"}
+                    for ic in iccids])
+
+        # Artifact inside batch-01/auto-artifact/
+        artifact_dir = batch_dir / "auto-artifact"
+        artifact_dir.mkdir()
+        _write_csv(str(artifact_dir / "artifact.csv"),
+                   [{"ICCID": ic, "IMSI": "artifact", "ADM1": "bbbbbbbb"}
+                    for ic in iccids])
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+
+        entry = idx.lookup(iccids[0])
+        assert entry is not None
+        assert "auto-artifact" not in entry.file_path, (
+            f"Nested auto-artifact must not win: {entry.file_path}"
+        )
+        assert "batch.csv" in entry.file_path
+
+    def test_scan_only_counts_source_files(self, tmp_path):
+        """files_scanned count must not include artifact files."""
+        iccids = _make_sysmocom_iccids("89494400000017750", 0, 3)
+
+        _write_csv(str(tmp_path / "source.csv"),
+                   [{"ICCID": ic, "ADM1": "aaaaaaaa"} for ic in iccids])
+
+        artifact_dir = tmp_path / "auto-artifact"
+        artifact_dir.mkdir()
+        _write_csv(str(artifact_dir / "artifact.csv"),
+                   [{"ICCID": iccids[0], "ADM1": "bbbbbbbb"}])
+
+        idx = IccidIndex()
+        result = idx.scan_directory(str(tmp_path))
+
+        assert result.files_scanned == 1, (
+            f"Only source.csv should be scanned; got {result.files_scanned}"
+        )
+
+    def test_lookup_prefers_source_csv_over_artifact_path_via_add_iccid(self, tmp_path):
+        """When add_iccid registers an artifact path, lookup still returns
+        the original source entry for the range; the artifact entry is the
+        single-card override but its file_path points to the artifact — both
+        are expected.  The critical invariant is that scan_directory alone
+        (without add_iccid) never yields an artifact entry.
+        """
+        iccids = _make_sysmocom_iccids("89494400000017750", 0, 5)
+
+        _write_csv(str(tmp_path / "source.csv"),
+                   [{"ICCID": ic, "ADM1": "aaaaaaaa"} for ic in iccids])
+
+        artifact_dir = tmp_path / "auto-artifact"
+        artifact_dir.mkdir()
+        artifact_path = str(artifact_dir / "artifact.csv")
+        _write_csv(artifact_path,
+                   [{"ICCID": iccids[0], "ADM1": "bbbbbbbb"}])
+
+        idx = IccidIndex()
+        # Fresh scan — must not index the artifact
+        idx.scan_directory(str(tmp_path))
+
+        entry = idx.lookup(iccids[0])
+        assert entry is not None
+        assert "auto-artifact" not in entry.file_path, (
+            "After scan only, lookup must not return artifact path"
+        )

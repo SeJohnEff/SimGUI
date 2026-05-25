@@ -177,7 +177,9 @@ class IccidIndex:
 
         if recursive:
             all_files = []
-            for dirpath, _dirnames, filenames in os.walk(directory):
+            for dirpath, dirnames, filenames in os.walk(directory):
+                # auto-artifact dirs are output-only; never index them as source data.
+                dirnames[:] = [d for d in dirnames if d != "auto-artifact"]
                 for fname in sorted(filenames):
                     all_files.append((dirpath, fname))
         else:

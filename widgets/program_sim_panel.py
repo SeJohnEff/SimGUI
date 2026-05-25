@@ -387,9 +387,11 @@ class ProgramSIMPanel(QWidget):
             # Network-share data is authoritative — it is not overwritten by
             # card-read values from StateManager signals.
             self._extra_card_data = normalized
-            self._original_form_data = {
-                k: self._field_entries[k].text() for k, _, _ in _FORM_FIELDS
-            }
+            # Do NOT capture target form fields as original_data.  The delta
+            # baseline must come from CardManager._original_card_data (physical
+            # card read-back).  Leaving this empty causes program_card to fall
+            # through to the card manager's own baseline.
+            self._original_form_data = {}
             src = os.path.basename(file_path) if file_path else "index"
             self._set_action_status(
                 f"Card detected — data loaded from {src}",
