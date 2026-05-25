@@ -92,3 +92,96 @@ def test_on_worker_index_updated_assigns_index_to_card_watcher():
     assert subject._card_watcher.index is sentinel, (
         "card_watcher.index must be assigned iccid_index in _on_worker_index_updated"
     )
+
+
+# ---------------------------------------------------------------------------
+# 3. If CardWatcher is replaced/recreated, refreshed index is preserved
+# ---------------------------------------------------------------------------
+
+def test_card_watcher_index_preserved_if_recreated():
+    """If card_watcher is replaced, next _on_worker_index_updated wires index to new watcher."""
+    from main import SimGUIApp
+
+    class _FakeWatcher:
+        index = None
+
+    class _FakeApp:
+        def __init__(self):
+            self._card_watcher = _FakeWatcher()
+            self._iccid_index = object()
+            self.state_manager = MagicMock()
+            self._batch_panel = MagicMock()
+
+    subject = _FakeApp()
+    sentinel = subject._iccid_index
+
+    # First wiring
+    SimGUIApp._on_worker_index_updated(subject)
+    assert subject._card_watcher.index is sentinel
+
+    # Simulate watcher recreation
+    subject._card_watcher = _FakeWatcher()
+    assert subject._card_watcher.index is None  # new watcher starts unwired
+
+    # Next rescan restores the wiring
+    SimGUIApp._on_worker_index_updated(subject)
+    assert subject._card_watcher.index is sentinel
+
+
+# ---------------------------------------------------------------------------
+# 4. Connected share updates bottom status label with share label + mount path
+# ---------------------------------------------------------------------------
+
+def test_connected_share_shows_label_and_mount_path(qt_app):
+    """Status label shows share label and local mount path when connected."""
+    from main import SimGUIApp
+
+    class _FakeStatus:
+        connected = True
+        display_text = "Connected"
+
+    class _FakeLabel:
+        def __init__(self):
+            self._text = ""
+        def setText(self, t):
+            self._text = t
+        def setStyleSheet(self, _):
+            pass
+
+    class _FakeApp:
+        def __init__(self):
+            self._share_label = _FakeLabel()
+            self._active_mounts = [("SIM NAS", "/mnt/simdata")]
+
+    subject = _FakeApp()
+    SimGUIApp._on_share_status_changed(subject, _FakeStatus())
+
+    assert "SIM NAS" in subject._share_label._text
+    assert "/mnt/simdata" in subject._share_label._text
+
+
+def test_disconnected_shows_fallback_display_text(qt_app):
+    """Status label falls back to status.display_text when not connected."""
+    from main import SimGUIApp
+
+    class _FakeStatus:
+        connected = False
+        display_text = "Not connected"
+
+    class _FakeLabel:
+        def __init__(self):
+            self._text = ""
+        def setText(self, t):
+            self._text = t
+        def setStyleSheet(self, _):
+            pass
+
+    class _FakeApp:
+        def __init__(self):
+            self._share_label = _FakeLabel()
+            self._active_mounts = []
+
+    subject = _FakeApp()
+    SimGUIApp._on_share_status_changed(subject, _FakeStatus())
+
+    assert subject._share_label._text == "Not connected"

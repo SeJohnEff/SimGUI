@@ -225,6 +225,7 @@ class SimGUIApp(QMainWindow):
         self._last_programmed_card: Optional[dict] = None
         self._startup_worker_thread: Optional[QThread] = None
         self._rescan_timer: Optional[QTimer] = None
+        self._active_mounts: list = []
 
         # ---- Build UI ----
         self._build_menu()
@@ -434,7 +435,11 @@ class SimGUIApp(QMainWindow):
         pass
 
     def _on_share_status_changed(self, status) -> None:
-        self._share_label.setText(status.display_text)
+        if status.connected and self._active_mounts:
+            parts = [f"{label} ({path})" for label, path in self._active_mounts]
+            self._share_label.setText(" | ".join(parts))
+        else:
+            self._share_label.setText(status.display_text)
         if status.connected:
             self._share_label.setStyleSheet(f"color: {QtTheme.get_color('success')};")
         else:
@@ -571,10 +576,13 @@ class SimGUIApp(QMainWindow):
         self.state_manager.status_text = msg
 
     def _on_worker_mounts(self, mounts: list) -> None:
+        self._active_mounts = mounts or []
         self.state_manager.update_share_status(mounts)
 
     def _on_worker_index_updated(self) -> None:
         self._card_watcher.index = self._iccid_index
+        logger.info("Index refreshed: watcher.index is iccid_index=%s",
+                    self._card_watcher.index is self._iccid_index)
         self.state_manager.notify_index_updated()
         self._batch_panel.refresh_standards()
 
@@ -632,6 +640,11 @@ class SimGUIApp(QMainWindow):
         except Exception as exc:
             logger.warning("sync_os_mounts failed: %s", exc)
         mounts = self._ns_manager.get_active_mount_paths()
+        logger.info("_rescan_shares_background: %d active mount(s): %s",
+                    len(mounts or []), mounts)
+        if mounts:
+            self._active_mounts = mounts
+            self.state_manager.update_share_status(mounts)
         if not mounts:
             return
         worker = _ScanSharesWorker(mounts, self._iccid_index, self._standards_mgr)
@@ -648,11 +661,15 @@ class SimGUIApp(QMainWindow):
         """When the ICCID index refreshes, try to autofill if card already in reader."""
         if self.state_manager.card_state not in (
                 CardState.DETECTED, CardState.AUTHENTICATED):
+            logger.info("_on_index_updated: skipped (state=%s)",
+                        self.state_manager.card_state)
             return
         iccid = self.state_manager.card_info.iccid
         if not iccid or iccid == "(blank)":
+            logger.info("_on_index_updated: skipped (iccid=%r)", iccid)
             return
         card_data = self._iccid_index.load_card(iccid)
+        logger.info("_on_index_updated: ICCID=%s found=%s", iccid, card_data is not None)
         if card_data:
             entry = self._iccid_index.lookup(iccid)
             file_path = entry.file_path if entry else None
