@@ -38,6 +38,8 @@ from utils import get_browse_initial_dir
 
 logger = logging.getLogger(__name__)
 
+SPN_UNSUPPORTED_PLACEHOLDER = "-- not yet implemented --"
+
 _FORM_FIELDS = [
     ("ICCID", "ICCID", False),
     ("IMSI", "IMSI", True),
@@ -271,7 +273,7 @@ class ProgramSIMPanel(QWidget):
             "ICCID": card_info.iccid if card_info.iccid != "(blank)" else "",
             "IMSI": card_info.imsi or "",
             "ACC": card_info.acc if card_info.acc not in ("-", "") else "",
-            "SPN": card_info.spn if card_info.spn not in ("-", "") else "",
+            "SPN": SPN_UNSUPPORTED_PLACEHOLDER if (card_info.spn and card_info.spn not in ("-", "")) else "",
             "FPLMN": card_info.fplmn if card_info.fplmn not in ("-", "") else "",
         }
 
@@ -378,7 +380,8 @@ class ProgramSIMPanel(QWidget):
                 # data).  Protected fields (Ki/OPc/ADM1) and CSV-present public
                 # fields are always set from the CSV.
                 if val or key not in _PUBLIC_READ_FIELDS:
-                    self._field_entries[key].setText(val)
+                    display_val = SPN_UNSUPPORTED_PLACEHOLDER if key == "SPN" and val else val
+                    self._field_entries[key].setText(display_val)
             # Store full normalized record so non-displayed fields (PIN1/PUK1,
             # KIC/KID/KIK, OLD_IMSI, etc.) pass through to programming.
             # Network-share data is authoritative — it is not overwritten by
@@ -486,7 +489,9 @@ class ProgramSIMPanel(QWidget):
             return
         normalized = _normalize_card_data(card)
         for key, _, _ in _FORM_FIELDS:
-            self._field_entries[key].setText(normalized.get(key, ""))
+            val = normalized.get(key, "")
+            display_val = SPN_UNSUPPORTED_PLACEHOLDER if key == "SPN" and val else val
+            self._field_entries[key].setText(display_val)
         # Preserve extra fields (PIN1/PUK1, KIC/KID/KIK, etc.) from CSV row
         self._extra_card_data = normalized
 
@@ -512,6 +517,7 @@ class ProgramSIMPanel(QWidget):
                      if k not in _FORM_FIELD_KEYS}
         card_data.update({k: self._field_entries[k].text().strip()
                           for k, _, _ in _FORM_FIELDS})
+        card_data.pop('SPN', None)
 
         if self._card_watcher:
             self._card_watcher.pause()

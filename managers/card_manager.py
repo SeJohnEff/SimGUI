@@ -1191,6 +1191,7 @@ class CardManager:
             changed = {k: v.strip() for k, v in card_data.items() if v.strip()}
 
         changed.pop('ADM1', None)
+        changed.pop('SPN', None)
 
         if not changed:
             return True, "No changes to program \u2014 card data already matches"
@@ -1209,6 +1210,7 @@ class CardManager:
         """
         fields = fields.copy()
         fields.pop('ADM1', None)
+        fields.pop('SPN', None)
         summary = ', '.join(k for k in fields) or 'all fields'
         logger.info("Programming card via pySim-prog: %s", summary)
 
@@ -1216,10 +1218,6 @@ class CardManager:
             fields, self._authenticated_adm1_hex, timeout=60)
 
         if ok:
-            spn = fields.get('SPN', '').strip()
-            if spn:
-                logger.info("SPN write disabled — SPN programming not supported yet")
-
             v_ok, v_msg, v_data = self.verify_after_program(fields)
             if v_ok:
                 if v_data:
@@ -1230,7 +1228,7 @@ class CardManager:
                 _key_material = frozenset({'Ki', 'OPc'})
                 verified = [
                     k for k in fields
-                    if k not in _key_material and k != 'SPN'
+                    if k not in _key_material
                     and v_data.get(k, '').strip() == fields[k].strip()
                 ]
                 written_only = [k for k in fields if k in _key_material]
@@ -1239,9 +1237,6 @@ class CardManager:
                     parts.append(f"verified: {', '.join(verified)}")
                 if written_only:
                     parts.append(f"written: {', '.join(written_only)}")
-                if spn:
-                    parts.append(
-                        "SPN: not written — SPN programming not supported yet, not verified")
                 if parts:
                     return True, f"Card programmed \u2014 {'; '.join(parts)}"
                 return True, (
