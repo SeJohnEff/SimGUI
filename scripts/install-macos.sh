@@ -184,6 +184,48 @@ else
     echo "Patch target not found at $PCSC_TRANSPORT_FILE — skipping (pySim may use a different layout)."
 fi
 
+# Apply Python 3.9 staticmethod patch for pySim-shell
+# In Python 3.10+, staticmethod descriptors became directly callable.
+# In Python 3.9, calling one from a class body raises:
+#   TypeError: 'staticmethod' object is not callable
+# Fix: replace bare __add_pin_nr_to_ArgumentParser(p) calls with
+# __add_pin_nr_to_ArgumentParser.__func__(p), which works in 3.9 and 3.10+.
+echo ""
+echo "Checking for pySim-shell Python 3.9 staticmethod patch..."
+PYSIMSHELL_FILE="$HOME/pysim/pySim-shell.py"
+if [ -f "$PYSIMSHELL_FILE" ]; then
+    "$PYTHON" - "$PYSIMSHELL_FILE" <<'PYEOF'
+import sys
+path = sys.argv[1]
+
+OLD = '    __add_pin_nr_to_ArgumentParser('
+NEW = '    __add_pin_nr_to_ArgumentParser.__func__('
+
+try:
+    text = open(path).read()
+    if NEW in text:
+        print('pySim-shell Python 3.9 staticmethod patch already applied.')
+        sys.exit(0)
+    count = text.count(OLD)
+    if count == 0:
+        print('Warning: expected pattern not found in ' + path)
+        print('pySim-shell may not work with Python 3.9 — source layout may have changed.')
+        sys.exit(0)
+    open(path, 'w').write(text.replace(OLD, NEW))
+    print('pySim-shell Python 3.9 staticmethod patch applied (' + str(count) + ' call sites).')
+except Exception as e:
+    print('Error: ' + str(e), file=sys.stderr)
+    sys.exit(1)
+PYEOF
+    if grep -q "__add_pin_nr_to_ArgumentParser\.__func__" "$PYSIMSHELL_FILE"; then
+        echo "pySim-shell Python 3.9 staticmethod patch verified OK."
+    else
+        echo "Warning: pySim-shell Python 3.9 staticmethod patch could not be verified."
+    fi
+else
+    echo "pySim-shell.py not found at $PYSIMSHELL_FILE — skipping."
+fi
+
 echo ""
 echo "pySim installed at ~/pysim (dependencies in ~/pysim/.venv)"
 echo ""
