@@ -549,6 +549,20 @@ class CardManager:
         return self._run_pysim_shell_impl(
             adm1_hex=None, commands=commands, timeout=timeout)
 
+    def _run_pysim_shell(self, adm1_hex: str, commands: str,
+                         timeout: int = 30) -> Tuple[bool, str, str]:
+        """Run pySim-shell.py WITH -A (auto-authentication at startup).
+
+        **WARNING**: Using -A sends a VERIFY APDU at startup, consuming
+        one ADM1 attempt even if the key is wrong.  Only call this
+        method from ``_program_nonempty_card`` after ICCID cross-check
+        has confirmed the card matches the data row.
+
+        Returns (success, stdout, stderr).
+        """
+        return self._run_pysim_shell_impl(
+            adm1_hex=adm1_hex, commands=commands, timeout=timeout)
+
     def _run_pysim_shell_impl(
             self, adm1_hex: Optional[str], commands: str,
             timeout: int = 30) -> Tuple[bool, str, str]:
@@ -1125,16 +1139,14 @@ class CardManager:
     def program_card(self, card_data: Dict[str, str],
                      original_data: Optional[Dict[str, str]] = None
                      ) -> Tuple[bool, str]:
-        """Program a card with the given parameters via pySim-prog.
+        """Program a card with the given parameters.
 
-        All card types (SJA5, gialersim, blank) use pySim-prog as the
-        single write engine.  For non-empty cards only changed fields are
-        written (delta-write); for empty/blank cards all non-empty fields
-        are written in one invocation.
+        For **non-empty cards** (SJA5/SJA2 — already have ICCID/IMSI),
+        only the fields that differ from *original_data* are written via
+        ``pySim-shell.py`` (delta-write, authenticated with -A flag).
 
-        pySim-prog selects the correct auth path per card type:
-          - gialersim: ``-t gialersim -a <ascii_adm1>``
-          - SJA5/others: ``-t <type> -A <hex_adm1>``
+        For **empty / blank / gialersim cards**, all non-empty fields are
+        written in a single ``pySim-prog.py`` invocation.
 
         Args:
             card_data: Dict of field values to write (IMSI, Ki, OPc, etc.).
@@ -1198,7 +1210,9 @@ class CardManager:
 
         # Brief pause after retry-counter check to let the reader settle
         time.sleep(0.3)
-        return self._program_via_pysim_prog(changed)
+        if empty_card:
+            return self._program_via_pysim_prog(changed)
+        return self._program_nonempty_card(card_data, changed)
 
     def _program_via_pysim_prog(self, fields: Dict[str, str]
                                  ) -> Tuple[bool, str]:
@@ -1252,6 +1266,134 @@ class CardManager:
 
         if 'not found' in stderr.lower():
             return False, "pySim-prog.py not found \u2014 cannot program card"
+
+        error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
+        return False, f"Programming failed: {error_msg}"
+
+    # ------------------------------------------------------------------
+    # pySim-shell write command builders (non-empty / SJA5 cards)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pysim_write_imsi(imsi: str) -> List[str]:
+        """Commands to write IMSI via pySim-shell."""
+        return [
+            'select MF/ADF.USIM/EF.IMSI',
+            f'update_binary_decoded \'{{"imsi": "{imsi}"}}\'',
+        ]
+
+    @staticmethod
+    def _pysim_write_ki_opc(ki: str, opc: str) -> List[str]:
+        """Commands to write Ki and OPc via pySim-shell."""
+        import json as _json
+        payload = _json.dumps({
+            "cfg": {
+                "only_4bytes_res_in_3g": False,
+                "sres_deriv_func_in_2g": 1,
+                "use_opc_instead_of_op": True,
+                "algorithm": "milenage",
+            },
+            "key": ki.lower(),
+            "op_opc": opc.lower(),
+        })
+        return [
+            'select MF/ADF.USIM/EF.USIM_AUTH_KEY',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_write_fplmn(fplmn_str: str) -> List[str]:
+        """Commands to write FPLMN list via pySim-shell."""
+        import json as _json
+        plmns = [p.strip() for p in fplmn_str.split(';') if p.strip()]
+        plmn_list = []
+        for p in plmns:
+            if len(p) in (5, 6):
+                plmn_list.append({"mcc": p[:3], "mnc": p[3:]})
+        payload = _json.dumps(plmn_list)
+        return [
+            'select MF/ADF.USIM/EF.FPLMN',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_write_acc(acc: str) -> List[str]:
+        """Commands to write ACC via pySim-shell."""
+        acc_hex = acc.strip().lower().zfill(4)
+        return [
+            'select MF/ADF.USIM/EF.ACC',
+            f'update_binary {acc_hex}',
+        ]
+
+    def _program_nonempty_card(self, card_data: Dict[str, str],
+                               changed: Dict[str, str]
+                               ) -> Tuple[bool, str]:
+        """Delta-write to a non-empty (SJA5/SJA2) card via pySim-shell.py."""
+        commands: List[str] = []
+        fields_written: List[str] = []
+
+        # Ki and OPc share the same EF \u2014 write together if either changed
+        ki_changed = 'Ki' in changed
+        opc_changed = 'OPc' in changed
+        if ki_changed or opc_changed:
+            ki_val = changed.get('Ki', card_data.get('Ki', ''))
+            opc_val = changed.get('OPc', card_data.get('OPc', ''))
+            if ki_val and opc_val:
+                commands.extend(self._pysim_write_ki_opc(ki_val, opc_val))
+                fields_written.append('Ki/OPc')
+            elif ki_val:
+                logger.warning("Ki changed but OPc not provided; skipping Ki/OPc write")
+            changed.pop('Ki', None)
+            changed.pop('OPc', None)
+
+        if 'IMSI' in changed:
+            commands.extend(self._pysim_write_imsi(changed.pop('IMSI')))
+            fields_written.append('IMSI')
+
+        if 'FPLMN' in changed:
+            commands.extend(self._pysim_write_fplmn(changed.pop('FPLMN')))
+            fields_written.append('FPLMN')
+
+        if 'ACC' in changed:
+            commands.extend(self._pysim_write_acc(changed.pop('ACC')))
+            fields_written.append('ACC')
+
+        # ICCID is factory-assigned on non-empty cards \u2014 never overwrite
+        changed.pop('ICCID', None)
+        changed.pop('ADM1', None)
+        changed.pop('SPN', None)
+
+        for key in changed:
+            logger.warning("_program_nonempty_card: field '%s' has no write handler, skipped", key)
+
+        if not commands:
+            return True, "No programmable fields changed"
+
+        cmd_str = '\n'.join(commands)
+        logger.info("Programming non-empty card via pySim-shell: fields=%s", fields_written)
+        logger.debug("pySim-shell commands:\n%s", cmd_str)
+
+        ok, stdout, stderr = self._run_pysim_shell(
+            self._authenticated_adm1_hex, cmd_str, timeout=30)
+
+        if ok:
+            summary = ', '.join(fields_written)
+            v_ok, v_msg, v_data = self.verify_after_program(card_data)
+            if v_ok:
+                if v_data:
+                    for k, v in v_data.items():
+                        self.card_info[k] = v
+                return True, f"Card programmed and verified: {summary}"
+            logger.warning("Card programmed but verification failed: %s", v_msg)
+            return False, (
+                f"Programming commands sent ({summary}) but "
+                f"read-back verification FAILED.\n{v_msg}"
+            )
+
+        combined = (stdout + '\n' + stderr).lower()
+        if 'sw mismatch' in combined:
+            error_detail = self._clean_pysim_error(stderr) if stderr else "write error"
+            return False, f"Programming failed (write error): {error_detail}"
 
         error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
         return False, f"Programming failed: {error_msg}"

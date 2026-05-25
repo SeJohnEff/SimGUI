@@ -399,8 +399,8 @@ class TestWriteSpnViaShell:
         cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert not shell_write_called, "_write_spn_via_shell must not be called (SPN disabled globally)"
 
-    def test_spn_reports_not_supported_for_sja5(self, tmp_path, monkeypatch):
-        """SPN requested for SJA5: message reports SPN not written/not supported."""
+    def test_spn_silently_ignored_by_pysim_prog(self, tmp_path, monkeypatch):
+        """SPN is silently dropped by _program_via_pysim_prog — ok=True, no error."""
         cm = self._sja5_cm(tmp_path)
 
         monkeypatch.setattr(cm, '_run_pysim_prog',
@@ -410,8 +410,8 @@ class TestWriteSpnViaShell:
 
         ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
         assert ok is True
-        assert 'SPN: not written' in msg
-        assert 'not verified' in msg
+        assert 'fail' not in msg.lower()
+        assert 'error' not in msg.lower()
 
     def _gialersim_cm(self, tmp_path):
         """Return a CardManager configured as a blank gialersim card."""
@@ -439,8 +439,8 @@ class TestWriteSpnViaShell:
         cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert not shell_write_called, "_write_spn_via_shell must not be called for gialersim"
 
-    def test_gialersim_spn_reports_not_written(self, tmp_path, monkeypatch):
-        """gialersim + SPN: result message must indicate SPN was not written."""
+    def test_gialersim_spn_silently_ignored(self, tmp_path, monkeypatch):
+        """gialersim + SPN: SPN is silently ignored — ok=True, no error, IMSI verified."""
         cm = self._gialersim_cm(tmp_path)
 
         monkeypatch.setattr(cm, '_run_pysim_prog',
@@ -451,11 +451,11 @@ class TestWriteSpnViaShell:
         ok, msg = cm._program_via_pysim_prog(
             {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert ok is True
-        assert 'SPN: not written' in msg
-        assert 'not verified' in msg
+        assert 'fail' not in msg.lower()
+        assert 'error' not in msg.lower()
 
-    def test_gialersim_spn_not_written_blocks_clean_success(self, tmp_path, monkeypatch):
-        """gialersim SPN not-written message contains 'not verified' — blocks artifact save."""
+    def test_gialersim_spn_ignored_does_not_block_artifact(self, tmp_path, monkeypatch):
+        """SPN ignored — artifact save is NOT blocked (no 'not verified' in message)."""
         from widgets.program_sim_panel import ProgramSIMPanel
         cm = self._gialersim_cm(tmp_path)
 
@@ -467,7 +467,7 @@ class TestWriteSpnViaShell:
         ok, msg = cm._program_via_pysim_prog(
             {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert ok is True
-        assert ProgramSIMPanel._is_clean_success(ok, msg) is False
+        assert ProgramSIMPanel._is_clean_success(ok, msg) is True
 
 
 class TestEncodeSpnRaw:
@@ -585,8 +585,8 @@ class TestWriteSpnScript:
         assert ok is True
         assert verified == 'Net'
 
-    def test_program_card_spn_written_not_confirmed(self, tmp_path, monkeypatch):
-        """Shell ok but read-back empty → 'written but not confirmed' in result."""
+    def test_program_card_spn_silently_ignored(self, tmp_path, monkeypatch):
+        """SPN in fields → silently dropped, ok=True, no SPN mention in result."""
         cm = self._sja5_cm(tmp_path)
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
@@ -596,4 +596,5 @@ class TestWriteSpnScript:
                             lambda *a, **kw: (True, 'OK', {}))
         ok, msg = cm._program_via_pysim_prog({'SPN': 'Net'})
         assert ok is True
-        assert 'SPN: written but not confirmed' in msg
+        assert 'fail' not in msg.lower()
+        assert 'error' not in msg.lower()

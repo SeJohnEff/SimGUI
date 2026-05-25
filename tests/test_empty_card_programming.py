@@ -460,16 +460,16 @@ class TestProgramCardRouting:
         mock_prog.assert_called_once()
         assert ok is True
 
-    def test_nonempty_card_routes_to_pysim_prog(self, tmp_path):
-        """Non-empty card with a changed field → _program_via_pysim_prog."""
+    def test_nonempty_card_routes_to_pysim_shell(self, tmp_path):
+        """Non-empty card with a changed field → _program_nonempty_card (pySim-shell)."""
         cm = _auth_manager(tmp_path,
                            original_data={'ICCID': '999', 'IMSI': 'old'})
-        with patch.object(cm, '_program_via_pysim_prog',
-                          return_value=(True, 'OK')) as mock_prog:
+        with patch.object(cm, '_program_nonempty_card',
+                          return_value=(True, 'OK')) as mock_shell:
             ok, msg = cm.program_card(
                 {'ICCID': '999', 'IMSI': 'new'},
                 original_data={'ICCID': '999', 'IMSI': 'old'})
-        mock_prog.assert_called_once()
+        mock_shell.assert_called_once()
         assert ok is True
 
     def test_no_changes_returns_early(self, tmp_path):
@@ -485,10 +485,10 @@ class TestProgramCardRouting:
         orig = {'ICCID': '999', 'IMSI': 'old'}
         cm = _auth_manager(tmp_path, original_data=orig)
         captured = {}
-        def capture(fields):
-            captured['fields'] = fields
+        def capture(card_data, changed):
+            captured['fields'] = changed
             return True, 'OK'
-        with patch.object(cm, '_program_via_pysim_prog', side_effect=capture):
+        with patch.object(cm, '_program_nonempty_card', side_effect=capture):
             cm.program_card({'ICCID': '999', 'IMSI': 'new'}, original_data=orig)
         assert 'ICCID' not in captured.get('fields', {})
         assert 'IMSI' in captured.get('fields', {})
@@ -501,10 +501,10 @@ class TestProgramCardRouting:
         card_data['Ki'] = 'A' * 32  # only Ki changed
 
         captured = {}
-        def capture(fields):
-            captured['fields'] = fields
+        def capture(card_data, changed):
+            captured['fields'] = changed
             return True, 'OK'
-        with patch.object(cm, '_program_via_pysim_prog', side_effect=capture):
+        with patch.object(cm, '_program_nonempty_card', side_effect=capture):
             cm.program_card(card_data, original_data=orig)
         assert 'Ki' in captured.get('fields', {})
         assert 'OPc' in captured.get('fields', {})  # paired with Ki
@@ -602,26 +602,28 @@ class TestProgramCardIntegration:
         assert 'IMSI' in prog_fields
 
     def test_nonempty_card_full_flow(self, tmp_path):
-        """Non-empty card: delta → _run_pysim_prog with only changed fields."""
+        """Non-empty card: delta → _program_nonempty_card with only changed fields."""
         orig = {'ICCID': '999', 'IMSI': 'old', 'Ki': 'C' * 32,
                 'OPc': 'D' * 32}
         cm = _auth_manager(tmp_path, original_data=orig)
         card_data = dict(orig)
         card_data['IMSI'] = 'new_imsi'
+
+        captured = {}
+        def capture(card_data, changed):
+            captured['changed'] = dict(changed)
+            return True, 'OK'
+
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3):
-            with patch.object(cm, '_run_pysim_prog',
-                              return_value=(True, 'Done', '')) as mock_prog:
-                with patch.object(cm, 'verify_after_program',
-                                  return_value=(True, 'OK', {})):
-                    ok, msg = cm.program_card(card_data, original_data=orig)
+            with patch.object(cm, '_program_nonempty_card', side_effect=capture):
+                ok, msg = cm.program_card(card_data, original_data=orig)
 
         assert ok is True
-        mock_prog.assert_called_once()
-        prog_fields = mock_prog.call_args[0][0]
-        assert 'ICCID' not in prog_fields  # factory-assigned, not changed
-        assert 'IMSI' in prog_fields       # only changed field
-        assert 'Ki' not in prog_fields     # unchanged
-        assert 'OPc' not in prog_fields    # unchanged
+        changed = captured.get('changed', {})
+        assert 'ICCID' not in changed  # factory-assigned, excluded
+        assert 'IMSI' in changed       # only changed field
+        assert 'Ki' not in changed     # unchanged
+        assert 'OPc' not in changed    # unchanged
 
     def test_original_data_empty_dict_treated_as_empty_card(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={})
@@ -632,3 +634,113 @@ class TestProgramCardIntegration:
                               return_value=(True, 'OK', {})):
                 ok, _ = cm.program_card(card_data, original_data=None)
         assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# SJA5 programming path — must use pySim-shell, never pySim-prog
+# ---------------------------------------------------------------------------
+
+def _sja5_auth_manager(tmp_path):
+    cm = _make_hw_manager(tmp_path)
+    cm.card_type = CardType.SJA5
+    cm._original_card_data = {
+        'ICCID': '8946001234567890123',
+        'IMSI': '240070000000001',
+        'Ki': 'C' * 32,
+        'OPc': 'D' * 32,
+    }
+    cm.authenticated = True
+    cm._authenticated_adm1_hex = '3838383838383838'
+    return cm
+
+
+class TestSJA5ProgrammingPath:
+    """SJA5 cards must use pySim-shell for delta-writes; pySim-prog never called."""
+
+    def test_sja5_program_card_does_not_call_run_pysim_prog(self, tmp_path):
+        """program_card for SJA5 must not call _run_pysim_prog."""
+        cm = _sja5_auth_manager(tmp_path)
+        orig = dict(cm._original_card_data)
+        card_data = dict(orig)
+        card_data['IMSI'] = '240070000000002'
+
+        prog_called = []
+        def fake_prog(*a, **kw):
+            prog_called.append(True)
+            return True, 'Should not be called', ''
+
+        with patch.object(cm, '_run_pysim_prog', side_effect=fake_prog):
+            with patch.object(cm, '_program_nonempty_card',
+                              return_value=(True, 'OK')):
+                cm.program_card(card_data, original_data=orig)
+
+        assert not prog_called, "_run_pysim_prog must not be called for SJA5"
+
+    def test_sja5_program_card_calls_program_nonempty_card(self, tmp_path):
+        """program_card for SJA5 routes to _program_nonempty_card (pySim-shell)."""
+        cm = _sja5_auth_manager(tmp_path)
+        orig = dict(cm._original_card_data)
+        card_data = dict(orig)
+        card_data['IMSI'] = '240070000000002'
+
+        with patch.object(cm, '_program_nonempty_card',
+                          return_value=(True, 'OK')) as mock_shell:
+            cm.program_card(card_data, original_data=orig)
+
+        mock_shell.assert_called_once()
+
+    def test_sja5_delta_excludes_iccid(self, tmp_path):
+        """ICCID is never rewritten for SJA5 (factory-assigned)."""
+        cm = _sja5_auth_manager(tmp_path)
+        orig = dict(cm._original_card_data)
+        card_data = dict(orig)
+        card_data['IMSI'] = '240070000000002'
+
+        captured = {}
+        def capture(card_data_arg, changed):
+            captured['changed'] = dict(changed)
+            return True, 'OK'
+
+        with patch.object(cm, '_program_nonempty_card', side_effect=capture):
+            cm.program_card(card_data, original_data=orig)
+
+        assert 'ICCID' not in captured.get('changed', {})
+        assert 'IMSI' in captured.get('changed', {})
+
+    def test_sja5_partial_delta_no_pysim_prog_number_error(self, tmp_path):
+        """Partial/delta change for SJA5 does not pass ICCID/IMSI to pySim-prog."""
+        cm = _sja5_auth_manager(tmp_path)
+        orig = dict(cm._original_card_data)
+        card_data = dict(orig)
+        card_data['Ki'] = 'A' * 32  # only Ki changed
+
+        prog_args = []
+        def fake_prog(fields, adm1, **kw):
+            prog_args.append(dict(fields))
+            return True, '', ''
+
+        with patch.object(cm, '_run_pysim_prog', side_effect=fake_prog):
+            with patch.object(cm, '_program_nonempty_card',
+                              return_value=(True, 'OK')):
+                cm.program_card(card_data, original_data=orig)
+
+        assert not prog_args, "_run_pysim_prog must not be called for SJA5 delta write"
+
+    def test_sja5_spn_ignored(self, tmp_path):
+        """SPN in card_data for SJA5 is silently ignored — not passed to shell."""
+        cm = _sja5_auth_manager(tmp_path)
+        orig = dict(cm._original_card_data)
+        card_data = dict(orig)
+        card_data['IMSI'] = '240070000000002'
+        card_data['SPN'] = 'TestNetwork'
+
+        captured = {}
+        def capture(card_data_arg, changed):
+            captured['changed'] = dict(changed)
+            return True, 'OK'
+
+        with patch.object(cm, '_program_nonempty_card', side_effect=capture):
+            ok, msg = cm.program_card(card_data, original_data=orig)
+
+        assert ok is True
+        assert 'SPN' not in captured.get('changed', {})
