@@ -341,3 +341,115 @@ class TestIccidIndex:
 
         # Cache should only hold the most recent ones
         assert idx.stats["cached_cards"] <= 3
+
+
+# ---------------------------------------------------------------------------
+# Cache invalidation and stale-data tests
+# ---------------------------------------------------------------------------
+
+class TestCacheInvalidation:
+    def test_rescan_loads_updated_adm1(self, tmp_path):
+        """After file content changes, load_card returns new ADM1, not cached value."""
+        iccids = _make_sysmocom_iccids("89494400000017", 500, 3)
+        rows_v1 = [{"ICCID": ic, "ADM1": "3838383838383838"}
+                   for ic in iccids]
+        csv_path = str(tmp_path / "batch.csv")
+        _write_csv(csv_path, rows_v1)
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+
+        # Prime cache with old ADM1
+        card = idx.load_card(iccids[0])
+        assert card is not None
+        assert card["ADM1"] == "3838383838383838"
+
+        # Replace file with new ADM1 — must bump mtime for rescan to fire
+        rows_v2 = [{"ICCID": ic, "ADM1": "72762965"}
+                   for ic in iccids]
+        os.remove(csv_path)
+        _write_csv(csv_path, rows_v2)
+        # Bump mtime explicitly so the index sees the change
+        new_mtime = os.path.getmtime(csv_path) + 1
+        os.utime(csv_path, (new_mtime, new_mtime))
+
+        idx.scan_directory(str(tmp_path))
+
+        card2 = idx.load_card(iccids[0])
+        assert card2 is not None
+        assert card2["ADM1"] == "72762965", (
+            f"Expected new ADM1 '72762965', got '{card2['ADM1']}' — stale cache"
+        )
+
+    def test_deleted_file_removes_iccid_from_index(self, tmp_path):
+        """After a CSV is deleted and directory is rescanned, its ICCIDs disappear."""
+        iccids_a = _make_sysmocom_iccids("89494400000017", 700, 5)
+        iccids_b = _make_sysmocom_iccids("89494400000017", 800, 5)
+        _write_csv(str(tmp_path / "batch_a.csv"),
+                   [{"ICCID": ic} for ic in iccids_a])
+        _write_csv(str(tmp_path / "batch_b.csv"),
+                   [{"ICCID": ic} for ic in iccids_b])
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+        assert idx.lookup(iccids_a[0]) is not None
+        assert idx.lookup(iccids_b[0]) is not None
+
+        # Delete batch_a — rescan must prune its entries
+        os.remove(str(tmp_path / "batch_a.csv"))
+        idx.scan_directory(str(tmp_path))
+
+        assert idx.lookup(iccids_a[0]) is None, (
+            "Stale index entry for deleted file should have been removed"
+        )
+        assert idx.lookup(iccids_b[0]) is not None, (
+            "Entry for surviving file must still be present"
+        )
+
+    def test_rescan_if_stale_detects_deletion(self, tmp_path):
+        """rescan_if_stale triggers a rescan when the only change is file deletion."""
+        iccids = _make_sysmocom_iccids("89494400000017", 900, 3)
+        csv_path = str(tmp_path / "batch.csv")
+        _write_csv(csv_path, [{"ICCID": ic} for ic in iccids])
+
+        idx = IccidIndex()
+        idx.scan_directory(str(tmp_path))
+        assert idx.lookup(iccids[0]) is not None
+
+        os.remove(csv_path)
+
+        # rescan_if_stale must notice the deletion and return a ScanResult
+        result = idx.rescan_if_stale(str(tmp_path))
+        assert result is not None, (
+            "rescan_if_stale should return ScanResult when a file was deleted"
+        )
+        assert idx.lookup(iccids[0]) is None, (
+            "ICCID from deleted file must be removed after rescan_if_stale"
+        )
+
+    def test_duplicate_iccid_logs_warning_and_last_wins(self, tmp_path, caplog):
+        """Overlapping ICCID ranges across two files log a warning; last scan wins."""
+        import logging
+        iccids = _make_sysmocom_iccids("89494400000017", 1000, 5)
+
+        # Two files with identical ICCIDs — deterministic winner is last by name
+        _write_csv(str(tmp_path / "a_first.csv"),
+                   [{"ICCID": ic, "ADM1": "aaaaaaaa"} for ic in iccids])
+        _write_csv(str(tmp_path / "b_second.csv"),
+                   [{"ICCID": ic, "ADM1": "bbbbbbbb"} for ic in iccids])
+
+        idx = IccidIndex()
+        with caplog.at_level(logging.WARNING, logger="managers.iccid_index"):
+            idx.scan_directory(str(tmp_path))
+
+        # Warning must have been emitted
+        assert any("duplicate" in rec.message.lower() for rec in caplog.records), (
+            "Expected a duplicate ICCID warning in the log"
+        )
+
+        # Last file scanned (b_second.csv) wins
+        entry = idx.lookup(iccids[0])
+        assert entry is not None
+        assert "b_second" in entry.file_path, (
+            f"Expected b_second.csv to win, but entry points to {entry.file_path}"
+        )

@@ -161,6 +161,7 @@ class IccidIndex:
 
         Builds range entries from ICCIDs only (no full card parse).
         Skips files whose mtime hasn't changed since last scan.
+        Removes entries for files that no longer exist.
 
         When *recursive* is True (the default), subdirectories are
         walked automatically so that network shares with nested folder
@@ -185,6 +186,9 @@ class IccidIndex:
                 for fname in sorted(os.listdir(directory))
             ]
 
+        # Track data-file paths seen in this walk (for deletion detection)
+        found_paths: set = set()
+
         for dirpath, fname in all_files:
             lower = fname.lower()
             if not (lower.endswith(".eml") or lower.endswith(".csv")
@@ -194,6 +198,8 @@ class IccidIndex:
             fpath = os.path.join(dirpath, fname)
             if not os.path.isfile(fpath):
                 continue
+
+            found_paths.add(fpath)
 
             # Check mtime — skip unchanged files
             try:
@@ -223,9 +229,13 @@ class IccidIndex:
             self._entries = [e for e in self._entries
                             if e.file_path != fpath]
 
-            # Detect ranges
+            # Evict card cache — stale data may be cached for this file
+            self._card_cache.clear()
+
+            # Detect ranges and check for duplicates with other files
             iccid_length = len(iccids[0])
             ranges = _detect_ranges(iccids)
+            new_entries = []
             for prefix, rstart, rend, suffix_len in ranges:
                 count = rend - rstart + 1
                 entry = IndexEntry(
@@ -237,17 +247,56 @@ class IccidIndex:
                     card_count=count,
                     iccid_length=iccid_length,
                 )
-                self._entries.append(entry)
+                new_entries.append(entry)
                 result.entries_created += 1
                 result.total_cards += count
 
-        if result.files_scanned > 0:
+            for new_entry in new_entries:
+                for existing in self._entries:
+                    if (existing.prefix == new_entry.prefix
+                            and existing.suffix_len == new_entry.suffix_len
+                            and existing.range_start <= new_entry.range_end
+                            and new_entry.range_start <= existing.range_end):
+                        logger.warning(
+                            "ICCID index: duplicate ICCID range overlap "
+                            "between %s and %s; %s wins (last scanned)",
+                            os.path.basename(existing.file_path),
+                            os.path.basename(fpath),
+                            os.path.basename(fpath),
+                        )
+
+            self._entries.extend(new_entries)
+
+        # Prune entries for files that were deleted from this directory
+        dir_prefix = directory.rstrip(os.sep) + os.sep
+        if recursive:
+            stale_paths = [
+                p for p in list(self._file_mtimes.keys())
+                if p.startswith(dir_prefix) and p not in found_paths
+            ]
+        else:
+            stale_paths = [
+                p for p in list(self._file_mtimes.keys())
+                if os.path.dirname(p) == directory and p not in found_paths
+            ]
+        for sp in stale_paths:
+            logger.info(
+                "ICCID index: removing stale entries for deleted file %s",
+                os.path.basename(sp),
+            )
+            del self._file_mtimes[sp]
+            self._entries = [e for e in self._entries if e.file_path != sp]
+        if stale_paths:
+            self._card_cache.clear()
+
+        if result.files_scanned > 0 or stale_paths:
             logger.info(
                 "ICCID index scan: %d files parsed, %d skipped, "
-                "%d cards in %d range(s)%s",
+                "%d cards in %d range(s)%s%s",
                 result.files_scanned, result.files_skipped,
                 result.total_cards, result.entries_created,
                 f" ({len(result.errors)} errors)" if result.errors else "",
+                f" ({len(stale_paths)} deleted)" if stale_paths else "",
             )
         elif result.files_skipped > 0:
             logger.debug(
@@ -306,7 +355,7 @@ class IccidIndex:
 
     def rescan_if_stale(self, directory: str,
                         max_age_s: float = 30.0) -> Optional[ScanResult]:
-        """Re-scan *directory* only if any file mtimes changed.
+        """Re-scan *directory* only if files changed or were deleted.
 
         Returns a ScanResult if a rescan was performed, None if
         everything was up-to-date.
@@ -314,14 +363,18 @@ class IccidIndex:
         if not os.path.isdir(directory):
             return None
 
-        # Quick check: any mtime changed?
+        found: set = set()
         stale = False
+
         for fname in os.listdir(directory):
             lower = fname.lower()
             if not (lower.endswith(".eml") or lower.endswith(".csv")
                     or lower.endswith(".txt")):
                 continue
             fpath = os.path.join(directory, fname)
+            if not os.path.isfile(fpath):
+                continue
+            found.add(fpath)
             try:
                 mtime = os.path.getmtime(fpath)
             except OSError:
@@ -332,6 +385,14 @@ class IccidIndex:
             if mtime != self._file_mtimes[fpath]:
                 stale = True
                 break
+
+        if not stale:
+            # Also stale if any previously-known file in this dir was deleted
+            dir_prefix = directory.rstrip(os.sep) + os.sep
+            for p in self._file_mtimes:
+                if os.path.dirname(p) == directory and p not in found:
+                    stale = True
+                    break
 
         if not stale:
             return None
