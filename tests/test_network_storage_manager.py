@@ -220,39 +220,87 @@ class TestAutoConnectDefault:
         assert p.auto_connect is False
 
 
-class TestSmbClientMissingMessage:
-    """_test_smb FileNotFoundError message must be platform-appropriate."""
+class TestMacOSSmbTest:
+    """On macOS, _test_smb must use socket probe — no smbclient, no subprocess."""
 
-    def _make_manager(self):
+    def _ns(self):
         return NetworkStorageManager()
 
-    def _smb_profile(self):
+    def _profile(self):
         return StorageProfile(
             label="t", protocol="smb", server="192.168.131.188",
             share="SIM", username="simgui", password="pw",
         )
 
-    def test_macos_missing_smbclient_no_apt_message(self, monkeypatch):
+    def test_macos_does_not_call_smbclient(self, monkeypatch):
+        """subprocess.run must never be called for the macOS SMB test path."""
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
-        ns = self._make_manager()
         import subprocess
+        calls = []
+        original_run = subprocess.run
+
+        def spy(*a, **kw):
+            calls.append(a)
+            return original_run(*a, **kw)
+
+        monkeypatch.setattr(subprocess, "run", spy)
+        import socket
         monkeypatch.setattr(
-            subprocess, "run",
-            lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("smbclient")),
+            socket, "create_connection",
+            lambda *a, **kw: _FakeSocket(),
         )
-        ok, msg = ns._test_smb(self._smb_profile())
-        assert not ok
-        assert "apt" not in msg
-        assert "macOS" in msg
+        self._ns()._test_smb(self._profile())
+        assert calls == [], "subprocess.run must not be called on macOS SMB test"
+
+    def test_macos_no_install_or_dependency_message(self, monkeypatch):
+        """Success and failure messages must not mention apt, brew, or smbclient."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+        import socket
+
+        # success case
+        monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: _FakeSocket())
+        ok, msg = self._ns()._test_smb(self._profile())
+        assert ok
+        for bad in ("apt", "brew", "smbclient", "install"):
+            assert bad not in msg.lower(), f"Unexpected word '{bad}' in success message: {msg}"
+
+        # failure case
+        monkeypatch.setattr(
+            socket, "create_connection",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("refused")),
+        )
+        ok2, msg2 = self._ns()._test_smb(self._profile())
+        assert not ok2
+        for bad in ("apt", "brew", "smbclient", "install"):
+            assert bad not in msg2.lower(), f"Unexpected word '{bad}' in failure message: {msg2}"
+
+    def test_macos_succeeds_when_port_reachable(self, monkeypatch):
+        """Returns (True, <msg>) when TCP port 445 is reachable."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+        import socket
+        monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: _FakeSocket())
+        ok, msg = self._ns()._test_smb(self._profile())
+        assert ok
+        assert "192.168.131.188" in msg
 
     def test_linux_missing_smbclient_shows_apt_message(self, monkeypatch):
+        """Linux path unchanged: FileNotFoundError → apt install smbclient."""
         monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
-        ns = self._make_manager()
         import subprocess
         monkeypatch.setattr(
             subprocess, "run",
             lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("smbclient")),
         )
-        ok, msg = ns._test_smb(self._smb_profile())
+        ok, msg = self._ns()._test_smb(self._profile())
         assert not ok
         assert "apt install smbclient" in msg
+
+
+class _FakeSocket:
+    """Minimal context-manager socket stub."""
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        pass
+    def close(self):
+        pass

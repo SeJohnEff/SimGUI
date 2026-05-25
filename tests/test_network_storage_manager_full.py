@@ -316,10 +316,15 @@ class TestBuildMountCmd:
 # ---------------------------------------------------------------------------
 
 class TestConnectionTest:
-    """Tests for _test_smb and _test_nfs (mocked subprocess)."""
+    """Tests for _test_smb and _test_nfs (mocked subprocess).
 
-    def test_smb_success_no_username(self):
+    The smbclient-based tests exercise the Linux code path; they must
+    monkeypatch _MACOS=False so the macOS socket-probe branch is not taken.
+    """
+
+    def test_smb_success_no_username(self, monkeypatch):
         """_test_smb succeeds when smbclient returns 0 (no auth)."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
         ns = NetworkStorageManager()
         p = StorageProfile(label="x", protocol="smb",
                            server="nas", share="pub")
@@ -329,8 +334,9 @@ class TestConnectionTest:
         assert ok is True
         assert "successful" in msg.lower()
 
-    def test_smb_success_with_username(self):
+    def test_smb_success_with_username(self, monkeypatch):
         """_test_smb succeeds with username/password."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
         ns = NetworkStorageManager()
         p = _make_smb_profile(username="admin", password="pass",
                               domain="CORP")
@@ -339,8 +345,9 @@ class TestConnectionTest:
             ok, msg = ns._test_smb(p)
         assert ok is True
 
-    def test_smb_failure_nonzero_returncode(self):
+    def test_smb_failure_nonzero_returncode(self, monkeypatch):
         """_test_smb returns failure when smbclient exits non-zero."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
         ns = NetworkStorageManager()
         p = _make_smb_profile()
         mock_result = MagicMock(returncode=1, stderr="NT_STATUS_LOGON_FAILURE",
@@ -350,8 +357,9 @@ class TestConnectionTest:
         assert ok is False
         assert "NT_STATUS" in msg
 
-    def test_smb_smbclient_not_found(self):
+    def test_smb_smbclient_not_found(self, monkeypatch):
         """_test_smb returns error when smbclient binary is missing."""
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
         ns = NetworkStorageManager()
         p = _make_smb_profile()
         with patch("subprocess.run", side_effect=FileNotFoundError):
@@ -359,9 +367,10 @@ class TestConnectionTest:
         assert ok is False
         assert "smbclient" in msg.lower()
 
-    def test_smb_timeout(self):
+    def test_smb_timeout(self, monkeypatch):
         """_test_smb returns timeout error on subprocess.TimeoutExpired."""
         import subprocess
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
         ns = NetworkStorageManager()
         p = _make_smb_profile()
         with patch("subprocess.run",

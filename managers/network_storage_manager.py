@@ -467,7 +467,13 @@ class NetworkStorageManager:
                 "-o", ",".join(opts_parts), src, mp]
 
     def _test_smb(self, profile: StorageProfile) -> tuple[bool, str]:
-        """Test SMB connectivity with smbclient."""
+        """Test SMB connectivity.
+
+        macOS: probes TCP port 445 using stdlib socket — no smbclient needed.
+        Linux: uses smbclient for a full auth/listing test.
+        """
+        if _MACOS:
+            return self._test_smb_macos(profile)
         src = profile.source_path
         if profile.username:
             cmd = ["smbclient", src,
@@ -483,11 +489,24 @@ class NetworkStorageManager:
                 return True, "Connection successful"
             return False, (r.stderr or r.stdout).strip()[:200]
         except FileNotFoundError:
-            if _MACOS:
-                return False, "smbclient not available on macOS — use 'Connect' to test the connection directly"
             return False, "smbclient not installed (apt install smbclient)"
         except subprocess.TimeoutExpired:
             return False, "Connection timed out"
+
+    def _test_smb_macos(self, profile: StorageProfile) -> tuple[bool, str]:
+        """Test SMB connectivity on macOS via TCP port 445 probe.
+
+        Uses stdlib socket only — no smbclient, no Homebrew, no apt required.
+        mount_smbfs handles the full auth; this confirms the server is reachable
+        before the user attempts a mount.
+        """
+        import socket
+        try:
+            with socket.create_connection((profile.server, 445), timeout=5):
+                pass
+            return True, f"{profile.server} reachable on SMB port 445"
+        except OSError as exc:
+            return False, f"Cannot reach {profile.server} on SMB port 445: {exc}"
 
     def _test_nfs(self, profile: StorageProfile) -> tuple[bool, str]:
         """Test NFS connectivity with showmount."""
