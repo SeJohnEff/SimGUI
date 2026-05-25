@@ -19,6 +19,7 @@ error message.
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -729,38 +730,66 @@ class CardManager:
         except Exception as e:
             return False, "", str(e)
 
+    @staticmethod
+    def _encode_spn_raw(spn: str) -> str:
+        """Encode SPN to 17-byte raw hex string for update_binary.
+
+        Layout: 0x01 (display flags: show in HPLMN) || 16-byte ASCII SPN
+        field padded with 0xFF.  Returns 34 lowercase hex characters.
+        """
+        spn_bytes = spn.encode('ascii', errors='replace')[:16]
+        padded = spn_bytes + b'\xff' * (16 - len(spn_bytes))
+        return '01' + padded.hex()
+
+    @staticmethod
+    def _parse_spn_readback(stdout: str) -> str:
+        """Extract SPN string from pySim-shell read_binary_decoded output.
+
+        Handles both Python dict repr and JSON-style output from
+        read_binary_decoded.  Returns empty string if not found.
+        """
+        match = re.search(r"['\"]spn['\"]:\s*['\"]([^'\"]*)['\"]", stdout or "")
+        if match:
+            return match.group(1)
+        return ""
+
     def _write_spn_via_shell(
             self, spn: str, adm1_hex: str, timeout: int = 20
-    ) -> Tuple[bool, str]:
-        """Write EF.SPN via pySim-shell after pySim-prog.
+    ) -> Tuple[bool, str, str]:
+        """Write EF.SPN via pySim-shell and verify with immediate read-back.
 
-        pySim-prog's -n flag is silently ignored for some card types.
-        Authenticates via verify_adm and writes EF.SPN with
-        update_binary_decoded.
+        Authenticates via verify_adm, writes raw update_binary to both
+        MF/ADF.USIM/EF.SPN and MF/DF.GSM/EF.SPN, then reads back from
+        ADF.USIM to confirm.
 
-        Not called for GIALERSIM/blank cards — verify_adm (CHV 0x0A)
-        fails with 6f00 on those cards and would consume retry attempts.
-
-        Returns (success, message).
+        Returns (write_ok, message, verified_spn).
+        verified_spn is the SPN string read back; empty if not confirmed.
         """
-        if self._is_empty_card(None):
-            return False, "SPN shell write not supported for blank/gialersim cards"
-
-        spn_json = json.dumps(
-            {"rfu": 63, "hide_in_oplmn": True, "show_in_hplmn": True, "spn": spn}
-        )
+        raw_hex = self._encode_spn_raw(spn)
         commands = (
             f'verify_adm --pin-is-hex {adm1_hex}\n'
-            'select ADF.USIM\n'
-            'select EF.SPN\n'
-            f"update_binary_decoded '{spn_json}'\n"
+            'select MF/ADF.USIM/EF.SPN\n'
+            f'update_binary {raw_hex}\n'
+            'select MF/DF.GSM/EF.SPN\n'
+            f'update_binary {raw_hex}\n'
+            'select MF/ADF.USIM/EF.SPN\n'
+            'read_binary_decoded\n'
         )
         ok, stdout, stderr = self._run_pysim_shell_safe(commands, timeout=timeout)
         if not ok:
-            logger.warning("SPN shell write failed stdout=%r stderr=%r", stdout, stderr)
-            return False, "SPN write via pySim-shell failed"
-        logger.info("SPN written via pySim-shell OK")
-        return True, "SPN written"
+            logger.warning(
+                "SPN shell write FAILED\n"
+                "  stdout: %s\n"
+                "  stderr: %s",
+                stdout or "(empty)", stderr or "(empty)",
+            )
+            return False, "SPN write via pySim-shell failed", ""
+        verified_spn = self._parse_spn_readback(stdout)
+        logger.info(
+            "SPN shell write OK; read-back=%r\n  stdout: %s",
+            verified_spn, stdout or "(empty)",
+        )
+        return True, "SPN written", verified_spn
 
     def check_adm1_retry_counter(self) -> Optional[int]:
         """Check how many ADM1 authentication attempts remain.
@@ -1188,11 +1217,13 @@ class CardManager:
 
         if ok:
             spn = fields.get('SPN', '').strip()
-            if spn and self._authenticated_adm1_hex and not self._is_empty_card(None):
-                _spn_ok, _spn_msg = self._write_spn_via_shell(
+            _spn_write_ok = True
+            _spn_verified = ''
+            if spn and self._authenticated_adm1_hex:
+                _spn_write_ok, _spn_msg, _spn_verified = self._write_spn_via_shell(
                     spn, self._authenticated_adm1_hex)
-                if not _spn_ok:
-                    logger.warning("SPN write skipped: %s", _spn_msg)
+                if not _spn_write_ok:
+                    logger.warning("SPN not written: %s", _spn_msg)
 
             v_ok, v_msg, v_data = self.verify_after_program(fields)
             if v_ok:
@@ -1204,7 +1235,7 @@ class CardManager:
                 _key_material = frozenset({'Ki', 'OPc'})
                 verified = [
                     k for k in fields
-                    if k not in _key_material
+                    if k not in _key_material and k != 'SPN'
                     and v_data.get(k, '').strip() == fields[k].strip()
                 ]
                 written_only = [k for k in fields if k in _key_material]
@@ -1213,6 +1244,14 @@ class CardManager:
                     parts.append(f"verified: {', '.join(verified)}")
                 if written_only:
                     parts.append(f"written: {', '.join(written_only)}")
+                # SPN verified by pySim-shell read-back, not pySim-read.
+                if spn:
+                    if _spn_write_ok and _spn_verified == spn:
+                        parts.append("SPN: verified")
+                    elif not _spn_write_ok:
+                        parts.append("SPN: write failed, not verified")
+                    else:
+                        parts.append("SPN: written but not confirmed by read-back")
                 if parts:
                     return True, f"Card programmed \u2014 {'; '.join(parts)}"
                 return True, (

@@ -346,29 +346,27 @@ class TestWriteSpnViaShell:
         return cm
 
     def test_spn_and_adm1_builds_expected_shell_script(self, tmp_path, monkeypatch):
-        """verify_adm + select ADF.USIM + select EF.SPN + update_binary_decoded in script."""
+        """Script contains verify_adm, both EF.SPN selects, update_binary, and read-back."""
         captured_cmds = []
         cm = self._sja5_cm(tmp_path)
 
         def fake_shell_safe(commands, timeout=30):
             captured_cmds.append(commands)
-            return True, 'OK', ''
+            return True, "{'spn': 'MyNetwork'}", ''
 
         monkeypatch.setattr(cm, '_run_pysim_shell_safe', fake_shell_safe)
-        ok, msg = cm._write_spn_via_shell('MyNetwork', '3838383838383838')
+        ok, msg, verified = cm._write_spn_via_shell('MyNetwork', '3838383838383838')
 
         assert ok is True
         assert captured_cmds, "pySim-shell was not called"
         script = captured_cmds[0]
         assert 'verify_adm --pin-is-hex 3838383838383838' in script
-        assert 'select ADF.USIM' in script
-        assert 'select EF.SPN' in script
-        assert 'update_binary_decoded' in script
-        decoded = json.loads(
-            script.split("update_binary_decoded '")[1].rstrip("'\n")
-        )
-        assert decoded['spn'] == 'MyNetwork'
-        assert decoded['show_in_hplmn'] is True
+        assert 'MF/ADF.USIM/EF.SPN' in script
+        assert 'MF/DF.GSM/EF.SPN' in script
+        assert 'update_binary' in script
+        assert 'update_binary_decoded' not in script
+        assert 'read_binary_decoded' in script
+        assert verified == 'MyNetwork'
 
     def test_no_adm1_skips_spn_shell_write(self, tmp_path, monkeypatch):
         """_program_via_pysim_prog does not call shell when ADM1 is absent."""
@@ -377,7 +375,7 @@ class TestWriteSpnViaShell:
 
         shell_called = []
         monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: shell_called.append(a) or (True, 'SPN written'))
+                            lambda *a, **kw: shell_called.append(a) or (True, 'SPN written', ''))
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, 'verify_after_program',
@@ -393,15 +391,13 @@ class TestWriteSpnViaShell:
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed'))
+                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed', ''))
         monkeypatch.setattr(cm, 'verify_after_program',
                             lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
 
         ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert ok is True
-        assert 'SPN' not in msg or 'verified' not in msg.lower() or (
-            'SPN' not in msg.split('verified')[0]
-        )
+        assert 'SPN: write failed' in msg
 
     def test_readback_spn_match_appears_in_verified(self, tmp_path, monkeypatch):
         """When read-back confirms SPN, it appears in the verified output."""
@@ -410,11 +406,181 @@ class TestWriteSpnViaShell:
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: (True, 'SPN written'))
+                            lambda *a, **kw: (True, 'SPN written', 'MyNetwork'))
         monkeypatch.setattr(cm, 'verify_after_program',
-                            lambda *a, **kw: (True, 'OK', {'SPN': 'MyNetwork'}))
+                            lambda *a, **kw: (True, 'OK', {}))
 
         ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
         assert ok is True
-        assert 'SPN' in msg
-        assert 'verified' in msg.lower()
+        assert 'SPN: verified' in msg
+
+    def _gialersim_cm(self, tmp_path):
+        """Return a CardManager configured as a blank gialersim card."""
+        (tmp_path / 'pySim-shell.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.GIALERSIM
+        cm._original_card_data = {}
+        cm._authenticated_adm1_hex = '3838383838383838'
+        return cm
+
+    def test_gialersim_with_spn_and_adm1_attempts_shell_write(self, tmp_path, monkeypatch):
+        """gialersim card with SPN + ADM1 must attempt shell write, not skip."""
+        cm = self._gialersim_cm(tmp_path)
+        shell_called = []
+
+        def fake_shell_safe(commands, timeout=30):
+            shell_called.append(commands)
+            return True, 'OK', ''
+
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe', fake_shell_safe)
+        ok, msg, verified = cm._write_spn_via_shell('MyNetwork', '3838383838383838')
+
+        assert shell_called, "pySim-shell was not called for gialersim"
+        assert ok is True
+
+    def test_gialersim_shell_failure_reports_spn_not_written(self, tmp_path, monkeypatch):
+        """If shell write fails for gialersim, caller reports SPN not written/verified."""
+        cm = self._gialersim_cm(tmp_path)
+
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, '_write_spn_via_shell',
+                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed', ''))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
+
+        ok, msg = cm._program_via_pysim_prog(
+            {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
+        assert ok is True
+        assert 'SPN: write failed' in msg
+
+
+class TestEncodeSpnRaw:
+    """Unit tests for CardManager._encode_spn_raw and _parse_spn_readback."""
+
+    def test_teleauora_uk_encoding(self):
+        """'Teleauora UK' encodes to the expected 34-char hex string."""
+        result = CardManager._encode_spn_raw('Teleauora UK')
+        expected = '01' + 'Teleauora UK'.encode('ascii').hex() + 'ff' * 4
+        assert result == expected
+        assert result == '0154656c6561756f726120554bffffffff'
+
+    def test_always_17_bytes(self):
+        """Output is always 34 hex chars (17 bytes) regardless of SPN length."""
+        for spn in ('', 'A', 'x' * 16, 'x' * 20):
+            result = CardManager._encode_spn_raw(spn)
+            assert len(result) == 34, f"Expected 34 chars for spn={spn!r}, got {len(result)}"
+
+    def test_short_spn_padded_with_ff(self):
+        """Short SPN is padded to 16 bytes with 0xFF."""
+        result = CardManager._encode_spn_raw('AB')
+        assert result.startswith('01')
+        assert result == '01' + '4142' + 'ff' * 14
+
+    def test_long_spn_truncated_to_16_bytes(self):
+        """SPN longer than 16 chars is truncated; total still 17 bytes."""
+        result = CardManager._encode_spn_raw('x' * 20)
+        assert len(result) == 34
+        assert result == '01' + '78' * 16
+
+    def test_parse_spn_readback_python_repr(self):
+        """Parses SPN from Python dict repr output."""
+        stdout = "pySIM> {'rfu': 0, 'hide_in_oplmn': False, 'show_in_hplmn': True, 'spn': 'Teleauora UK'}"
+        assert CardManager._parse_spn_readback(stdout) == 'Teleauora UK'
+
+    def test_parse_spn_readback_json_style(self):
+        """Parses SPN from JSON-style output."""
+        stdout = '{"rfu": 0, "spn": "MyNetwork", "show_in_hplmn": true}'
+        assert CardManager._parse_spn_readback(stdout) == 'MyNetwork'
+
+    def test_parse_spn_readback_empty_returns_empty(self):
+        """Returns empty string when stdout contains no SPN."""
+        assert CardManager._parse_spn_readback('') == ''
+        assert CardManager._parse_spn_readback('some random output') == ''
+        assert CardManager._parse_spn_readback(None) == ''
+
+
+class TestWriteSpnScript:
+    """_write_spn_via_shell script content and failure handling."""
+
+    def _sja5_cm(self, tmp_path):
+        (tmp_path / 'pySim-shell.py').touch()
+        cm = CardManager()
+        cm.cli_path = str(tmp_path)
+        cm.cli_backend = CLIBackend.PYSIM
+        cm.card_type = CardType.SJA5
+        cm._original_card_data = {'ICCID': '8946001234567890123', 'IMSI': '001010123456789'}
+        cm._authenticated_adm1_hex = '3838383838383838'
+        return cm
+
+    def test_script_writes_both_ef_spn_targets(self, tmp_path, monkeypatch):
+        """Script writes to both MF/ADF.USIM/EF.SPN and MF/DF.GSM/EF.SPN."""
+        captured = []
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: captured.append(cmds) or (True, '', ''))
+        cm._write_spn_via_shell('Net', '3838383838383838')
+        script = captured[0]
+        assert 'MF/ADF.USIM/EF.SPN' in script
+        assert 'MF/DF.GSM/EF.SPN' in script
+
+    def test_script_has_no_raw_apdu_command(self, tmp_path, monkeypatch):
+        """No raw 'apdu' command is ever generated."""
+        captured = []
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: captured.append(cmds) or (True, '', ''))
+        cm._write_spn_via_shell('Net', '3838383838383838')
+        assert 'apdu' not in captured[0]
+
+    def test_script_includes_read_back(self, tmp_path, monkeypatch):
+        """Script ends with read_binary_decoded for verification."""
+        captured = []
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: captured.append(cmds) or (True, '', ''))
+        cm._write_spn_via_shell('Net', '3838383838383838')
+        assert 'read_binary_decoded' in captured[0]
+
+    def test_shell_failure_returns_false_empty_verified(self, tmp_path, monkeypatch):
+        """Shell failure → (False, msg, '') — write failed, not verified."""
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: (False, 'error output', 'err'))
+        ok, msg, verified = cm._write_spn_via_shell('Net', '3838383838383838')
+        assert ok is False
+        assert verified == ''
+
+    def test_shell_success_readback_empty_not_confirmed(self, tmp_path, monkeypatch):
+        """Shell OK but stdout has no SPN → write_ok=True, verified=''."""
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: (True, 'no spn data here', ''))
+        ok, msg, verified = cm._write_spn_via_shell('Net', '3838383838383838')
+        assert ok is True
+        assert verified == ''
+
+    def test_shell_success_readback_matches_spn(self, tmp_path, monkeypatch):
+        """Shell OK and stdout contains matching SPN → verified equals requested SPN."""
+        cm = self._sja5_cm(tmp_path)
+        stdout = "pySIM> {'rfu': 0, 'spn': 'Net'}"
+        monkeypatch.setattr(cm, '_run_pysim_shell_safe',
+                            lambda cmds, timeout=30: (True, stdout, ''))
+        ok, msg, verified = cm._write_spn_via_shell('Net', '3838383838383838')
+        assert ok is True
+        assert verified == 'Net'
+
+    def test_program_card_spn_written_not_confirmed(self, tmp_path, monkeypatch):
+        """Shell ok but read-back empty → 'written but not confirmed' in result."""
+        cm = self._sja5_cm(tmp_path)
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, '_write_spn_via_shell',
+                            lambda *a, **kw: (True, 'SPN written', ''))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {}))
+        ok, msg = cm._program_via_pysim_prog({'SPN': 'Net'})
+        assert ok is True
+        assert 'SPN: written but not confirmed' in msg
