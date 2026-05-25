@@ -341,17 +341,23 @@ class IccidIndex:
         if cards is None:
             return None
 
-        # Cache all cards from this file (up to cache limit)
+        # Cache all cards from this file (up to cache limit).
+        # Capture the requested card during iteration — the eviction loop
+        # below can pop it out of the cache when the file has more cards
+        # than cache_size (e.g. 100-card file, 50-slot cache).
+        target_card = None
         for card in cards:
             card_iccid = card.get("ICCID", "")
             if card_iccid:
                 self._card_cache[card_iccid] = card
                 self._card_cache.move_to_end(card_iccid)
+                if card_iccid == iccid:
+                    target_card = card
         # Evict oldest
         while len(self._card_cache) > self._cache_size:
             self._card_cache.popitem(last=False)
 
-        return self._card_cache.get(iccid)
+        return target_card
 
     def rescan_if_stale(self, directory: str,
                         max_age_s: float = 30.0) -> Optional[ScanResult]:
