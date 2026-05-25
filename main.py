@@ -435,14 +435,15 @@ class SimGUIApp(QMainWindow):
         pass
 
     def _on_share_status_changed(self, status) -> None:
-        if status.connected and self._active_mounts:
-            parts = [f"{label} ({path})" for label, path in self._active_mounts]
-            self._share_label.setText(" | ".join(parts))
-        else:
-            self._share_label.setText(status.display_text)
         if status.connected:
+            if status.mount_paths:
+                parts = [f"● {label} ({path})" for label, path in status.mount_paths]
+                self._share_label.setText(" | ".join(parts))
+            else:
+                self._share_label.setText(status.display_text)
             self._share_label.setStyleSheet(f"color: {QtTheme.get_color('success')};")
         else:
+            self._share_label.setText("")
             self._share_label.setStyleSheet("")
 
     # ---- CardWatcher → StateManager bridge ----------------------------

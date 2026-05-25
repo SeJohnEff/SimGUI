@@ -191,13 +191,16 @@ class NetworkStorageManager:
             return True, "Not mounted"
 
         try:
+            # macOS: mount_smbfs is user-executable (no sudo needed); sudo would
+            # open /dev/tty to prompt for a password even with stdin=DEVNULL.
+            cmd = [_UMOUNT_MACOS, mp] if _MACOS else [_SUDO, _UMOUNT, mp]
             result = subprocess.run(
-                [_SUDO, _UMOUNT, mp],
-                capture_output=True, text=True, timeout=15,
+                cmd, capture_output=True, text=True, timeout=15,
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode != 0:
                 err = (result.stderr or result.stdout).strip()
-                if self._is_sudo_permission_error(err):
+                if not _MACOS and self._is_sudo_permission_error(err):
                     return False, self._sudo_fix_message()
                 return False, f"Unmount failed: {err}"
         except subprocess.TimeoutExpired:

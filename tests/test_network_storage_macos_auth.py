@@ -465,3 +465,138 @@ class TestMaskedUrlLogging:
         masked = _mask_smb_url(cmd)
         assert "p%40ss!" not in masked[0]
         assert "***" in masked[0]
+
+
+# ---------------------------------------------------------------------------
+# 9. macOS unmount uses _UMOUNT_MACOS without sudo (no /dev/tty prompt)
+# ---------------------------------------------------------------------------
+
+class TestMacosUnmountNoSudo:
+    """unmount() on macOS must not use sudo so quit path is non-interactive."""
+
+    def test_unmount_macos_uses_umount_macos_not_sudo(self):
+        """On macOS, unmount cmd is [_UMOUNT_MACOS, mp] — no sudo prefix."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="TestShare")
+        ns._active_mounts["TestShare"] = p
+
+        captured_cmds = []
+
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._UMOUNT_MACOS", "/sbin/umount"), \
+             patch.object(ns, "is_mounted", return_value=True), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("os.rmdir"):
+            ok, msg = ns.unmount(p)
+
+        assert ok is True
+        assert captured_cmds, "subprocess.run was never called"
+        cmd = captured_cmds[0]
+        assert "/sbin/umount" in cmd, f"Expected /sbin/umount in cmd, got {cmd}"
+        assert not any("sudo" in str(part) for part in cmd), (
+            f"sudo must not appear in macOS unmount cmd: {cmd}"
+        )
+
+    def test_unmount_macos_passes_stdin_devnull(self):
+        """unmount() on macOS passes stdin=DEVNULL so no /dev/tty is opened."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="TestShare2")
+        ns._active_mounts["TestShare2"] = p
+
+        run_kwargs = {}
+
+        def fake_run(cmd, **kwargs):
+            run_kwargs.update(kwargs)
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._UMOUNT_MACOS", "/sbin/umount"), \
+             patch.object(ns, "is_mounted", return_value=True), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("os.rmdir"):
+            ns.unmount(p)
+
+        assert run_kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_unmount_linux_still_uses_sudo(self):
+        """On Linux, unmount cmd retains the sudo prefix."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="LinuxShare")
+        ns._active_mounts["LinuxShare"] = p
+
+        captured_cmds = []
+
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        with patch("managers.network_storage_manager._MACOS", False), \
+             patch.object(ns, "is_mounted", return_value=True), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("os.rmdir"):
+            ok, msg = ns.unmount(p)
+
+        assert ok is True
+        cmd = captured_cmds[0]
+        assert cmd[0] == "/usr/bin/sudo", f"Linux unmount must start with sudo, got {cmd[0]!r}"
+
+
+# ---------------------------------------------------------------------------
+# 10. Connected share updates bottom status bar with label and mount path
+# ---------------------------------------------------------------------------
+
+class TestShareStatusLabel:
+    """_on_share_status_changed must show '● label (path)' when connected."""
+
+    def _make_app_stub(self):
+        import types
+        import main as main_mod
+        stub = MagicMock()
+        stub._on_share_status_changed = types.MethodType(
+            main_mod.SimGUIApp._on_share_status_changed, stub)
+        return stub
+
+    def test_connected_status_shows_label_and_path(self):
+        """Handler sets _share_label text to include both label and mount path."""
+        from state_manager import ShareStatus
+        stub = self._make_app_stub()
+
+        status = ShareStatus(
+            connected=True,
+            labels=["NAS"],
+            mount_paths=[("NAS", "/tmp/simgui-mounts/NAS")],
+        )
+        with patch("main.QtTheme") as mock_theme:
+            mock_theme.get_color.return_value = "#00ff00"
+            stub._on_share_status_changed(status)
+
+        text = stub._share_label.setText.call_args[0][0]
+        assert "NAS" in text
+        assert "/tmp/simgui-mounts/NAS" in text
+
+    def test_disconnected_status_clears_label(self):
+        """Handler sets _share_label to empty string when not connected."""
+        from state_manager import ShareStatus
+        stub = self._make_app_stub()
+
+        status = ShareStatus(connected=False, labels=[], mount_paths=[])
+        stub._on_share_status_changed(status)
+
+        stub._share_label.setText.assert_called_with("")
+
+    def test_connected_no_paths_falls_back_to_display_text(self):
+        """Handler falls back to display_text when mount_paths is empty."""
+        from state_manager import ShareStatus
+        stub = self._make_app_stub()
+
+        status = ShareStatus(connected=True, labels=["NAS"], mount_paths=[])
+        with patch("main.QtTheme") as mock_theme:
+            mock_theme.get_color.return_value = "#00ff00"
+            stub._on_share_status_changed(status)
+
+        text = stub._share_label.setText.call_args[0][0]
+        assert "NAS" in text
