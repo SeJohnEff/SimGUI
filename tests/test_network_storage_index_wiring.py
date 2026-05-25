@@ -185,3 +185,64 @@ def test_disconnected_shows_fallback_display_text(qt_app):
     SimGUIApp._on_share_status_changed(subject, _FakeStatus())
 
     assert subject._share_label._text == "Not connected"
+
+
+# ---------------------------------------------------------------------------
+# 5. _rescan_shares_background: active mount causes scan_directory call
+# ---------------------------------------------------------------------------
+
+def test_rescan_background_active_mount_calls_scan_directory(qt_app):
+    """Active mount path causes scan_directory(path) call in _ScanSharesWorker."""
+    from main import _ScanSharesWorker
+
+    mock_index = MagicMock()
+    mock_index.scan_directory.return_value = MagicMock(
+        total_cards=3, files_scanned=1, files_skipped=0, errors=[])
+    mock_index.stats.return_value = {"total_cards": 3}
+
+    mounts = [("simgui", "/tmp/simgui-mounts/simgui")]
+    worker = _ScanSharesWorker(mounts, mock_index)
+    worker.run()
+
+    mock_index.scan_directory.assert_called_once_with("/tmp/simgui-mounts/simgui")
+
+
+def test_rescan_background_emits_index_updated_after_scan(qt_app):
+    """After scan_directory completes, index_updated signal fires."""
+    from main import _ScanSharesWorker
+
+    mock_index = MagicMock()
+    mock_index.scan_directory.return_value = MagicMock(
+        total_cards=2, files_scanned=1, files_skipped=0, errors=[])
+    mock_index.stats.return_value = {"total_cards": 2}
+
+    emitted = []
+    mounts = [("simgui", "/tmp/simgui-mounts/simgui")]
+    worker = _ScanSharesWorker(mounts, mock_index)
+    worker.index_updated.connect(lambda: emitted.append(True))
+    worker.run()
+
+    assert emitted, "index_updated must fire after scan"
+    mock_index.scan_directory.assert_called_once()
+
+
+def test_rescan_background_scan_exception_is_logged_not_swallowed(qt_app, caplog):
+    """scan_directory exception is logged and index_updated still fires."""
+    import logging
+    from main import _ScanSharesWorker
+
+    mock_index = MagicMock()
+    mock_index.scan_directory.side_effect = OSError("disk read error")
+    mock_index.stats.return_value = {"total_cards": 0}
+
+    emitted = []
+    mounts = [("simgui", "/tmp/simgui-mounts/simgui")]
+    worker = _ScanSharesWorker(mounts, mock_index)
+    worker.index_updated.connect(lambda: emitted.append(True))
+
+    with caplog.at_level(logging.ERROR):
+        worker.run()
+
+    assert any("disk read error" in r.message for r in caplog.records), (
+        "exception message must appear in logs")
+    assert emitted, "index_updated must still fire even after scan exception"

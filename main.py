@@ -142,21 +142,22 @@ class _ScanSharesWorker(QObject):
         for label, mount_path in self._mounts:
             try:
                 result = self._iccid_index.scan_directory(mount_path)
-                logger.info("ICCID rescan [%s]: %d cards in %d file(s), "
-                            "%d skipped, %d error(s)",
-                            label, result.total_cards, result.files_scanned,
-                            result.files_skipped, len(result.errors))
+                index_size = self._iccid_index.stats().get("total_cards", "?")
+                logger.info("ICCID rescan [%s] path=%s: %d cards in %d file(s), "
+                            "%d skipped, %d error(s); index total=%s",
+                            label, mount_path, result.total_cards, result.files_scanned,
+                            result.files_skipped, len(result.errors), index_size)
                 for err in result.errors:
                     logger.warning("Scan error [%s]: %s", label, err)
             except Exception as exc:
-                logger.warning("ICCID scan failed for %s: %s",
-                               mount_path, exc)
+                logger.exception("ICCID scan failed for %s: %s", mount_path, exc)
             if self._standards_mgr:
                 try:
                     self._standards_mgr.load_from_directory(mount_path)
                 except Exception as exc:
                     logger.warning("Standards load failed for %s: %s",
                                    mount_path, exc)
+        logger.info("_ScanSharesWorker: emitting index_updated")
         self.index_updated.emit()
         self.finished.emit()
 
@@ -649,6 +650,7 @@ class SimGUIApp(QMainWindow):
         if not mounts:
             return
         worker = _ScanSharesWorker(mounts, self._iccid_index, self._standards_mgr)
+        self._rescan_worker = worker  # keep strong ref so GC doesn't collect before thread fires
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.index_updated.connect(self._on_worker_index_updated)
@@ -656,6 +658,7 @@ class SimGUIApp(QMainWindow):
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.started.connect(worker.run)
+        logger.info("_rescan_shares_background: starting worker for %d mount(s)", len(mounts))
         thread.start()
 
     def _on_index_updated(self) -> None:
