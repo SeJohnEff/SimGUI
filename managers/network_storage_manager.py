@@ -15,6 +15,7 @@ under ``~/.config/simgui/`` — never in the JSON settings.
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,14 @@ _UMOUNT = "/usr/bin/umount"
 #   macOS  → /sbin/mount_smbfs  (built-in, URL-based credential syntax)
 #   Linux  → /usr/bin/mount     (used with -t cifs and -o options)
 _MOUNT_SMB_FS = "/sbin/mount_smbfs" if _MACOS else "/usr/bin/mount"
+
+# macOS umount path (setuid; usable without sudo for user-owned mounts)
+_UMOUNT_MACOS = "/sbin/umount"
+
+
+def _mask_smb_url(cmd: list) -> list:
+    """Return cmd with any SMB password in URLs replaced by ***."""
+    return [re.sub(r"(//[^:]+:)[^@]+(@)", r"\1***\2", str(part)) for part in cmd]
 
 
 @dataclass
@@ -456,11 +465,14 @@ class NetworkStorageManager:
 
         if _MACOS:
             # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
+            # mount_smbfs is user-executable (no sudo needed); sudo would
+            # open /dev/tty to prompt for a password even with stdin=DEVNULL.
             url = self._smb_url(profile)
-            cmd = [_SUDO, _MOUNT_SMB_FS]
+            cmd = [_MOUNT_SMB_FS]
             if profile.mount_options:
                 cmd.extend(["-o", profile.mount_options])
             cmd.extend([url, mp])
+            logger.debug("SMB mount cmd: %s", _mask_smb_url(cmd))
             return cmd
 
         # Linux CIFS: mount -t cifs with uid/gid/credentials options
@@ -494,13 +506,47 @@ class NetworkStorageManager:
         except subprocess.TimeoutExpired:
             return False, "Connection timed out"
 
-    def _test_smb_macos(self, profile: StorageProfile) -> tuple[bool, str]:
-        """Test SMB connectivity and authentication on macOS via temporary mount.
+    def _macos_find_smb_mount(self, profile: StorageProfile) -> Optional[str]:
+        """Return the path where the SMB share is already mounted, or None.
 
-        Performs a real mount attempt to a temporary directory, then immediately
-        unmounts.  This verifies both reachability and credentials without
-        leaving any permanent state.  No smbclient or Homebrew required.
+        Checks our own profile mount point first, then the system mount list
+        for any path mounting ``//server/share`` — e.g. a Finder connection.
         """
+        if os.path.ismount(profile.mount_point):
+            return profile.mount_point
+        share = profile.share.strip("/")
+        server = profile.server
+        try:
+            r = subprocess.run(
+                ["/sbin/mount"], capture_output=True, text=True, timeout=5,
+                stdin=subprocess.DEVNULL,
+            )
+            for line in r.stdout.splitlines():
+                # Format: //[user@]server/share on /mountpoint (smbfs, ...)
+                if f"{server}/{share}" in line and " on " in line:
+                    mp = line.split(" on ", 1)[1].split(" ")[0]
+                    if mp and os.path.isdir(mp):
+                        return mp
+        except Exception:
+            pass
+        return None
+
+    def _test_smb_macos(self, profile: StorageProfile) -> tuple[bool, str]:
+        """Test SMB connectivity and authentication on macOS.
+
+        1. Returns success immediately if the share is already mounted anywhere
+           (our own mount point or a Finder connection).
+        2. Fails early if username is set but password is blank.
+        3. Performs a temporary mount using URL-encoded credentials to verify
+           both reachability and authentication.  No smbclient required.
+
+        mount_smbfs is user-executable on macOS; no sudo wrapper is used so
+        that sudo never opens /dev/tty to prompt for a password.
+        """
+        existing = self._macos_find_smb_mount(profile)
+        if existing:
+            return True, f"Share already mounted at {existing}"
+
         if profile.username and not profile.password:
             return False, (
                 "Password required: username is set but password is blank.\n"
@@ -509,17 +555,18 @@ class NetworkStorageManager:
         tmp_mp = tempfile.mkdtemp(prefix="simgui-test-")
         try:
             url = self._smb_url(profile)
-            cmd = [_SUDO, _MOUNT_SMB_FS]
+            cmd = [_MOUNT_SMB_FS]
             if profile.mount_options:
                 cmd.extend(["-o", profile.mount_options])
             cmd.extend([url, tmp_mp])
+            logger.debug("Test mount cmd: %s", _mask_smb_url(cmd))
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=15,
                 stdin=subprocess.DEVNULL,
             )
             if result.returncode == 0:
                 subprocess.run(
-                    [_SUDO, _UMOUNT, tmp_mp],
+                    [_UMOUNT_MACOS, tmp_mp],
                     capture_output=True, timeout=10,
                     stdin=subprocess.DEVNULL,
                 )

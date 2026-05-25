@@ -304,11 +304,17 @@ class TestBuildMountCmd:
         assert "dir_mode=" in opts
 
     def test_sudo_first_argument(self):
-        """All mount commands start with absolute-path sudo."""
+        """NFS always uses sudo; macOS SMB uses mount_smbfs directly (no sudo)."""
         ns = NetworkStorageManager()
-        for p in [_make_smb_profile(), _make_nfs_profile()]:
-            cmd = ns._build_mount_cmd(p)
-            assert cmd[0] == "/usr/bin/sudo"
+        # NFS uses sudo on all platforms
+        nfs_cmd = ns._build_mount_cmd(_make_nfs_profile())
+        assert nfs_cmd[0] == "/usr/bin/sudo"
+        # SMB: macOS omits sudo (mount_smbfs is user-executable); Linux uses sudo
+        smb_cmd = ns._build_mount_cmd(_make_smb_profile())
+        if _MACOS:
+            assert smb_cmd[0] == "/sbin/mount_smbfs"
+        else:
+            assert smb_cmd[0] == "/usr/bin/sudo"
 
 
 # ---------------------------------------------------------------------------
@@ -1147,12 +1153,11 @@ class TestBuildMountCmdMacOS:
             return ns._build_mount_cmd(profile)
 
     def test_smb_guest_uses_mount_smbfs(self):
-        """macOS guest SMB: command uses mount_smbfs binary."""
+        """macOS guest SMB: command starts with mount_smbfs (no sudo)."""
         p = StorageProfile(label="guest", protocol="smb",
                            server="nas.local", share="simdata")
         cmd = self._build(p)
-        assert cmd[0] == "/usr/bin/sudo"
-        assert cmd[1] == "/sbin/mount_smbfs"
+        assert cmd[0] == "/sbin/mount_smbfs"
 
     def test_smb_guest_url_no_credentials(self):
         """macOS guest SMB URL: //server/share with no credential prefix."""

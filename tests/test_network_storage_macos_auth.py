@@ -4,17 +4,24 @@ Covers:
 1. macOS Test Connection does not use socket-only success.
 2. macOS Test Connection includes credentials/auth path (temp mount).
 3. macOS Connect & Save includes password non-interactively (URL encoding).
-4. Blank password fails in GUI before mount command runs.
+4. Blank password fails before subprocess if share is not already mounted.
 5. Linux smbclient path unchanged.
+6. Already-mounted share succeeds without a new mount command.
+7. _build_mount_cmd does not include sudo on macOS.
+8. Masked URL logging hides password.
 """
 
 import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from managers.network_storage_manager import NetworkStorageManager, StorageProfile
+from managers.network_storage_manager import (
+    NetworkStorageManager,
+    StorageProfile,
+    _mask_smb_url,
+)
 
 
 def _smb_profile(**kwargs):
@@ -39,10 +46,18 @@ class TestMacosTestConnectionNotSocketOnly:
         ns = NetworkStorageManager()
         p = _smb_profile(password="wrongpass")
 
-        mock_result = MagicMock(returncode=1, stderr="NT_STATUS_LOGON_FAILURE", stdout="")
-        with patch("subprocess.run", return_value=mock_result), \
+        # First call: /sbin/mount (existing-mount check) — returns empty output
+        # Second call: mount_smbfs (temp mount) — returns auth failure
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "/sbin/mount":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stderr="NT_STATUS_LOGON_FAILURE", stdout="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
              patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-fake"), \
-             patch("os.rmdir"):
+             patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=False):
             ok, msg = ns._test_smb_macos(p)
 
         assert ok is False
@@ -53,9 +68,13 @@ class TestMacosTestConnectionNotSocketOnly:
         ns = NetworkStorageManager()
         p = _smb_profile()
 
-        with patch("subprocess.run", return_value=MagicMock(returncode=0, stderr="", stdout="")), \
+        def fake_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
              patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-fake"), \
              patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
              patch("socket.create_connection") as mock_socket, \
              patch("managers.network_storage_manager._MACOS", True), \
              patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
@@ -79,20 +98,21 @@ class TestMacosTestConnectionIncludesAuth:
         captured_cmds = []
 
         def fake_run(cmd, **kwargs):
-            captured_cmds.append(cmd)
-            return MagicMock(returncode=0, stderr="", stdout="")
+            captured_cmds.append(list(cmd))
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-fake"), \
              patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
              patch("managers.network_storage_manager._MACOS", True), \
              patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
             ok, msg = ns._test_smb_macos(p)
 
         assert ok is True
-        # First call is the mount attempt
-        mount_cmd = captured_cmds[0]
-        assert any("mount_smbfs" in str(part) for part in mount_cmd)
+        # Find the mount_smbfs call among all subprocess calls
+        mount_calls = [c for c in captured_cmds if any("mount_smbfs" in str(p) for p in c)]
+        assert mount_calls, "mount_smbfs was never called"
 
     def test_credentials_appear_in_mount_url(self):
         """The mount command URL contains the username and password."""
@@ -103,16 +123,18 @@ class TestMacosTestConnectionIncludesAuth:
 
         def fake_run(cmd, **kwargs):
             captured_cmds.append(list(cmd))
-            return MagicMock(returncode=0, stderr="", stdout="")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-fake"), \
              patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
              patch("managers.network_storage_manager._MACOS", True), \
              patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
             ok, _ = ns._test_smb_macos(p)
 
-        mount_cmd = captured_cmds[0]
+        # Find the mount_smbfs call
+        mount_cmd = next(c for c in captured_cmds if any("mount_smbfs" in str(x) for x in c))
         url = next(a for a in mount_cmd if a.startswith("//"))
         assert "user" in url
         assert "pass" in url
@@ -122,9 +144,13 @@ class TestMacosTestConnectionIncludesAuth:
         ns = NetworkStorageManager()
         p = _smb_profile()
 
-        with patch("subprocess.run", return_value=MagicMock(returncode=0, stderr="", stdout="")), \
+        def fake_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
              patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-fake"), \
              patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
              patch("managers.network_storage_manager._MACOS", True), \
              patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
             ok, msg = ns._test_smb_macos(p)
@@ -153,6 +179,22 @@ class TestMacosConnectSavePasswordNonInteractive:
         assert "admin" in url
         assert "s3cr3t" in url
 
+    def test_build_mount_cmd_does_not_include_sudo_on_macos(self):
+        """_build_mount_cmd macOS path must not include sudo (sudo opens /dev/tty)."""
+        ns = NetworkStorageManager()
+        p = _smb_profile()
+
+        with patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            cmd = ns._build_mount_cmd(p)
+
+        assert cmd[0] == "/sbin/mount_smbfs", (
+            f"First element should be mount_smbfs, got {cmd[0]!r}"
+        )
+        assert not any("sudo" in str(part) for part in cmd), (
+            "sudo must not appear in macOS mount command"
+        )
+
     def test_mount_passes_stdin_devnull(self):
         """subprocess.run inside mount() is called with stdin=DEVNULL."""
         ns = NetworkStorageManager()
@@ -175,7 +217,7 @@ class TestMacosConnectSavePasswordNonInteractive:
 
 
 # ---------------------------------------------------------------------------
-# 4. Blank password fails in GUI before mount command runs
+# 4. Blank password fails before subprocess if not already mounted
 # ---------------------------------------------------------------------------
 
 class TestBlankPasswordFailsBeforeMount:
@@ -196,18 +238,31 @@ class TestBlankPasswordFailsBeforeMount:
         assert "password" in msg.lower()
         mock_run.assert_not_called()
 
-    def test_test_connection_returns_failure_for_blank_password_on_macos(self):
-        """_test_smb_macos() returns (False, message) without running subprocess."""
+    def test_test_connection_returns_failure_for_blank_password_when_not_mounted(self):
+        """_test_smb_macos() fails with a clear message when share is not mounted
+        and password is blank (subprocess is not called for the mount attempt)."""
         ns = NetworkStorageManager()
         p = _smb_profile(password="")  # username set, password blank
 
-        with patch("subprocess.run") as mock_run, \
-             patch("managers.network_storage_manager._MACOS", True):
+        mount_smbfs_calls = []
+
+        def fake_run(cmd, **kwargs):
+            if _MOUNT_SMB_FS_VAL in str(cmd):
+                mount_smbfs_calls.append(cmd)
+            # Return empty mount list so existing-mount check finds nothing
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        _MOUNT_SMB_FS_VAL = "/sbin/mount_smbfs"
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.path.ismount", return_value=False), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", _MOUNT_SMB_FS_VAL):
             ok, msg = ns._test_smb_macos(p)
 
         assert ok is False
         assert "password" in msg.lower()
-        mock_run.assert_not_called()
+        assert not mount_smbfs_calls, "mount_smbfs must not be called when password is blank"
 
     def test_mount_linux_not_affected_by_blank_password_guard(self):
         """Linux mount() does not apply the macOS blank-password guard."""
@@ -279,3 +334,134 @@ class TestLinuxSmbclientUnchanged:
 
         assert ok is False
         assert "smbclient" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# 6. Already-mounted share succeeds without a new mount command
+# ---------------------------------------------------------------------------
+
+class TestAlreadyMountedShareSucceeds:
+    """If the share is already mounted, Test Connection must succeed
+    without running any mount_smbfs command."""
+
+    def test_test_connection_succeeds_when_own_mount_point_active(self):
+        """_test_smb_macos returns success when profile mount point is mounted."""
+        ns = NetworkStorageManager()
+        p = _smb_profile()
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.ismount", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert ok is True
+        assert "already mounted" in msg.lower()
+        # No mount_smbfs invocation needed
+        mount_calls = [c for c in mock_run.call_args_list
+                       if "mount_smbfs" in str(c)]
+        assert not mount_calls
+
+    def test_test_connection_succeeds_when_finder_mounted(self):
+        """_test_smb_macos returns success when share is mounted by Finder."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(server="nas.local", share="simdata")
+
+        mount_output = (
+            "//admin@nas.local/simdata on /Volumes/simdata (smbfs, nodev, nosuid)\n"
+        )
+
+        captured_cmds = []
+
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            return MagicMock(returncode=0, stdout=mount_output, stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert ok is True
+        assert "/Volumes/simdata" in msg
+        # Only /sbin/mount was called (to list mounts) — no mount_smbfs
+        assert all("mount_smbfs" not in str(c) for c in captured_cmds)
+
+    def test_macos_find_smb_mount_parses_mount_output(self):
+        """_macos_find_smb_mount returns path when share appears in mount output."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(server="nas.local", share="simdata")
+
+        mount_output = (
+            "devfs on /dev (devfs, local, nobrowse)\n"
+            "//user@nas.local/simdata on /Volumes/simdata (smbfs, nodev)\n"
+        )
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            result = ns._macos_find_smb_mount(p)
+
+        assert result == "/Volumes/simdata"
+
+    def test_macos_find_smb_mount_returns_none_when_not_mounted(self):
+        """_macos_find_smb_mount returns None when share is not in mount list."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(server="nas.local", share="simdata")
+
+        mount_output = "devfs on /dev (devfs, local, nobrowse)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=False):
+            result = ns._macos_find_smb_mount(p)
+
+        assert result is None
+
+    def test_macos_find_smb_mount_prefers_own_mount_point(self):
+        """_macos_find_smb_mount returns profile.mount_point when it is mounted."""
+        ns = NetworkStorageManager()
+        p = _smb_profile()
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.ismount", return_value=True):
+            result = ns._macos_find_smb_mount(p)
+
+        assert result == p.mount_point
+        # /sbin/mount not needed — own mount point check is first
+        mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 7. Masked URL logging hides password
+# ---------------------------------------------------------------------------
+
+class TestMaskedUrlLogging:
+    """_mask_smb_url must replace passwords in SMB URLs with ***."""
+
+    def test_password_replaced_in_url(self):
+        cmd = ["/sbin/mount_smbfs", "//admin:s3cr3t@nas.local/share", "/mnt/point"]
+        masked = _mask_smb_url(cmd)
+        assert "s3cr3t" not in " ".join(masked)
+        assert "***" in " ".join(masked)
+        assert "admin" in " ".join(masked)
+        assert "nas.local" in " ".join(masked)
+
+    def test_url_without_password_unchanged(self):
+        cmd = ["/sbin/mount_smbfs", "//admin@nas.local/share", "/mnt/point"]
+        masked = _mask_smb_url(cmd)
+        assert masked == cmd
+
+    def test_non_url_parts_unchanged(self):
+        cmd = ["/sbin/mount_smbfs", "//u:p@h/s", "/tmp/mp"]
+        masked = _mask_smb_url(cmd)
+        assert masked[0] == "/sbin/mount_smbfs"
+        assert masked[2] == "/tmp/mp"
+
+    def test_special_chars_in_password_masked(self):
+        cmd = ["//user:p%40ss!@host/share"]
+        masked = _mask_smb_url(cmd)
+        assert "p%40ss!" not in masked[0]
+        assert "***" in masked[0]
