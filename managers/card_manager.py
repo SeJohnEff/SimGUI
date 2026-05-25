@@ -1303,7 +1303,7 @@ class CardManager:
 
     @staticmethod
     def _pysim_write_fplmn(fplmn_str: str) -> List[str]:
-        """Commands to write FPLMN list via pySim-shell."""
+        """Commands to write FPLMN list via pySim-shell under ADF.USIM."""
         import json as _json
         plmns = [p.strip() for p in fplmn_str.split(';') if p.strip()]
         plmn_list = []
@@ -1312,9 +1312,20 @@ class CardManager:
                 plmn_list.append({"mcc": p[:3], "mnc": p[3:]})
         payload = _json.dumps(plmn_list)
         return [
-            'select MF/ADF.USIM/EF.FPLMN',
+            'select MF',
+            'select ADF.USIM',
+            'select EF.FPLMN',
             f"update_binary_decoded '{payload}'",
         ]
+
+    @staticmethod
+    def _normalize_fplmn(fplmn_str: str) -> frozenset:
+        """Normalise FPLMN string to a frozenset for order-independent comparison."""
+        if not fplmn_str:
+            return frozenset()
+        return frozenset(
+            p.strip() for p in fplmn_str.replace(',', ';').split(';') if p.strip()
+        )
 
     @staticmethod
     def _pysim_write_acc(acc: str) -> List[str]:
@@ -1328,43 +1339,21 @@ class CardManager:
     def _program_nonempty_card(self, card_data: Dict[str, str],
                                changed: Dict[str, str]
                                ) -> Tuple[bool, str]:
-        """Delta-write to a non-empty (SJA5/SJA2) card via pySim-shell.py."""
+        """Delta-write to a non-empty (SJA5/SJA2) card via pySim-shell.py.
+
+        Only IMSI and FPLMN are written.  Ki/OPc, ACC, and SPN are not
+        programmed in this flow \u2014 Ki/OPc require card replacement.
+        """
         commands: List[str] = []
         fields_written: List[str] = []
 
-        # Ki and OPc share the same EF \u2014 write together if either changed
-        ki_changed = 'Ki' in changed
-        opc_changed = 'OPc' in changed
-        if ki_changed or opc_changed:
-            ki_val = changed.get('Ki', card_data.get('Ki', ''))
-            opc_val = changed.get('OPc', card_data.get('OPc', ''))
-            if ki_val and opc_val:
-                commands.extend(self._pysim_write_ki_opc(ki_val, opc_val))
-                fields_written.append('Ki/OPc')
-            elif ki_val:
-                logger.warning("Ki changed but OPc not provided; skipping Ki/OPc write")
-            changed.pop('Ki', None)
-            changed.pop('OPc', None)
-
         if 'IMSI' in changed:
-            commands.extend(self._pysim_write_imsi(changed.pop('IMSI')))
+            commands.extend(self._pysim_write_imsi(changed['IMSI']))
             fields_written.append('IMSI')
 
         if 'FPLMN' in changed:
-            commands.extend(self._pysim_write_fplmn(changed.pop('FPLMN')))
+            commands.extend(self._pysim_write_fplmn(changed['FPLMN']))
             fields_written.append('FPLMN')
-
-        if 'ACC' in changed:
-            commands.extend(self._pysim_write_acc(changed.pop('ACC')))
-            fields_written.append('ACC')
-
-        # ICCID is factory-assigned on non-empty cards \u2014 never overwrite
-        changed.pop('ICCID', None)
-        changed.pop('ADM1', None)
-        changed.pop('SPN', None)
-
-        for key in changed:
-            logger.warning("_program_nonempty_card: field '%s' has no write handler, skipped", key)
 
         if not commands:
             return True, "No programmable fields changed"
@@ -1378,7 +1367,9 @@ class CardManager:
 
         if ok:
             summary = ', '.join(fields_written)
-            v_ok, v_msg, v_data = self.verify_after_program(card_data)
+            # Verify only the fields that were actually written
+            verify_data = {f: changed[f] for f in fields_written}
+            v_ok, v_msg, v_data = self.verify_after_program(verify_data)
             if v_ok:
                 if v_data:
                     for k, v in v_data.items():
@@ -1387,7 +1378,7 @@ class CardManager:
             logger.warning("Card programmed but verification failed: %s", v_msg)
             return False, (
                 f"Programming commands sent ({summary}) but "
-                f"read-back verification FAILED.\n{v_msg}"
+                f"not verified \u2014 read-back FAILED.\n{v_msg}"
             )
 
         combined = (stdout + '\n' + stderr).lower()
@@ -1464,6 +1455,15 @@ class CardManager:
                 elif expected and not actual:
                     last_mismatches.append(
                         f"{field}: wrote {expected}, not found in read-back")
+
+            # Verify FPLMN when written — compare as order-independent sets
+            if written_data.get('FPLMN'):
+                expected_set = self._normalize_fplmn(written_data['FPLMN'])
+                actual_set = self._normalize_fplmn(readback.get('FPLMN', ''))
+                if expected_set != actual_set:
+                    last_mismatches.append(
+                        f"FPLMN: wrote {written_data['FPLMN']!r}, "
+                        f"read back {readback.get('FPLMN', '(none)')!r}")
 
             if not last_mismatches:
                 logger.info("Post-program verification OK: %s", readback)

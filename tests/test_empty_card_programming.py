@@ -744,3 +744,256 @@ class TestSJA5ProgrammingPath:
 
         assert ok is True
         assert 'SPN' not in captured.get('changed', {})
+
+
+# ---------------------------------------------------------------------------
+# _program_nonempty_card — IMSI/FPLMN only, no Ki/OPc, verification gates artifact
+# ---------------------------------------------------------------------------
+
+class TestProgramNonemptyCard:
+    """_program_nonempty_card writes IMSI and FPLMN only; verification gates artifact save."""
+
+    def _cm(self, tmp_path, shell_result=(True, '', '')):
+        cm = _sja5_auth_manager(tmp_path)
+        return cm
+
+    def test_imsi_written_when_changed(self, tmp_path):
+        """Changed IMSI generates IMSI write commands via pySim-shell."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'IMSI': '240070000000099'}
+
+        shell_calls = []
+        def fake_shell(adm1, cmds, timeout=30):
+            shell_calls.append(cmds)
+            return True, '', ''
+
+        with patch.object(cm, '_run_pysim_shell', side_effect=fake_shell):
+            with patch.object(cm, 'verify_after_program',
+                              return_value=(True, 'OK', {'IMSI': '240070000000099'})):
+                ok, msg = cm._program_nonempty_card(orig, changed)
+
+        assert ok is True
+        assert shell_calls, "pySim-shell was not called"
+        assert 'EF.IMSI' in shell_calls[0] or 'IMSI' in shell_calls[0]
+        assert 'update_binary_decoded' in shell_calls[0]
+
+    def test_fplmn_written_via_adf_usim(self, tmp_path):
+        """Changed FPLMN generates commands navigating through ADF.USIM."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'FPLMN': '24001;24007'}
+
+        shell_calls = []
+        def fake_shell(adm1, cmds, timeout=30):
+            shell_calls.append(cmds)
+            return True, '', ''
+
+        with patch.object(cm, '_run_pysim_shell', side_effect=fake_shell):
+            with patch.object(cm, 'verify_after_program',
+                              return_value=(True, 'OK', {'FPLMN': '24001;24007'})):
+                ok, msg = cm._program_nonempty_card(orig, changed)
+
+        assert ok is True
+        cmds = shell_calls[0]
+        assert 'select MF' in cmds
+        assert 'select ADF.USIM' in cmds
+        assert 'select EF.FPLMN' in cmds
+        assert 'update_binary_decoded' in cmds
+
+    def test_ki_opc_not_written(self, tmp_path):
+        """Ki and OPc in changed are silently skipped — no write command generated."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'Ki': 'A' * 32, 'OPc': 'B' * 32, 'IMSI': '240070000000099'}
+
+        shell_calls = []
+        def fake_shell(adm1, cmds, timeout=30):
+            shell_calls.append(cmds)
+            return True, '', ''
+
+        with patch.object(cm, '_run_pysim_shell', side_effect=fake_shell):
+            with patch.object(cm, 'verify_after_program',
+                              return_value=(True, 'OK', {'IMSI': '240070000000099'})):
+                ok, msg = cm._program_nonempty_card(orig, changed)
+
+        assert ok is True
+        cmds = shell_calls[0]
+        assert 'USIM_AUTH_KEY' not in cmds, "Ki/OPc EF must not be selected"
+
+    def test_pysim_prog_never_called(self, tmp_path):
+        """_program_nonempty_card never calls _run_pysim_prog."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'IMSI': '240070000000099'}
+
+        prog_calls = []
+        with patch.object(cm, '_run_pysim_prog',
+                          side_effect=lambda *a, **kw: prog_calls.append(True) or (True, '', '')):
+            with patch.object(cm, '_run_pysim_shell', return_value=(True, '', '')):
+                with patch.object(cm, 'verify_after_program',
+                                  return_value=(True, 'OK', {})):
+                    cm._program_nonempty_card(orig, changed)
+
+        assert not prog_calls, "_run_pysim_prog must never be called for non-empty card"
+
+    def test_verification_passes_only_written_fields(self, tmp_path):
+        """verify_after_program is called with only the fields that were written."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'IMSI': '240070000000099'}
+
+        verify_calls = []
+        def fake_verify(data):
+            verify_calls.append(dict(data))
+            return True, 'OK', {'IMSI': '240070000000099'}
+
+        with patch.object(cm, '_run_pysim_shell', return_value=(True, '', '')):
+            with patch.object(cm, 'verify_after_program', side_effect=fake_verify):
+                cm._program_nonempty_card(orig, changed)
+
+        assert verify_calls, "verify_after_program must be called"
+        verify_arg = verify_calls[0]
+        assert 'IMSI' in verify_arg
+        assert 'Ki' not in verify_arg
+        assert 'OPc' not in verify_arg
+
+    def test_failed_verification_blocks_clean_success(self, tmp_path):
+        """Verification failure returns ok=False with 'not verified' — blocks artifact."""
+        from widgets.program_sim_panel import ProgramSIMPanel
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        changed = {'IMSI': '240070000000099'}
+
+        with patch.object(cm, '_run_pysim_shell', return_value=(True, '', '')):
+            with patch.object(cm, 'verify_after_program',
+                              return_value=(False, 'IMSI mismatch', {})):
+                ok, msg = cm._program_nonempty_card(orig, changed)
+
+        assert ok is False
+        assert 'not verified' in msg.lower()
+        assert ProgramSIMPanel._is_clean_success(ok, msg) is False
+
+    def test_no_change_when_imsi_and_fplmn_equal(self, tmp_path):
+        """No commands generated when IMSI and FPLMN equal target — no-op."""
+        cm = self._cm(tmp_path)
+        orig = dict(cm._original_card_data)
+        # Only Ki changed — not a supported field for this path
+        changed = {'Ki': 'A' * 32}
+
+        ok, msg = cm._program_nonempty_card(orig, changed)
+
+        assert ok is True
+        assert 'no programmable fields' in msg.lower()
+
+    def test_gialersim_path_unchanged(self, tmp_path):
+        """Gialersim cards still use _program_via_pysim_prog — not _program_nonempty_card."""
+        cm = _make_hw_manager(tmp_path)
+        cm.card_type = CardType.GIALERSIM
+        cm._original_card_data = {}
+        cm.authenticated = True
+        cm._authenticated_adm1_hex = '3838383838383838'
+
+        prog_called = []
+        with patch.object(cm, '_program_via_pysim_prog',
+                          side_effect=lambda *a: prog_called.append(True) or (True, 'OK')) as mock_prog:
+            cm.program_card(
+                {'IMSI': '240070000000001', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
+                original_data=None)
+
+        assert prog_called, "_program_via_pysim_prog must be called for gialersim"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_fplmn
+# ---------------------------------------------------------------------------
+
+class TestNormalizeFplmn:
+    """_normalize_fplmn returns order-independent frozenset."""
+
+    def test_same_order(self):
+        assert CardManager._normalize_fplmn('24001;24007') == frozenset({'24001', '24007'})
+
+    def test_different_order(self):
+        assert (CardManager._normalize_fplmn('24007;24001') ==
+                CardManager._normalize_fplmn('24001;24007'))
+
+    def test_empty_string(self):
+        assert CardManager._normalize_fplmn('') == frozenset()
+
+    def test_comma_separated(self):
+        assert CardManager._normalize_fplmn('24001,24007') == frozenset({'24001', '24007'})
+
+
+# ---------------------------------------------------------------------------
+# verify_after_program — FPLMN field verification
+# ---------------------------------------------------------------------------
+
+class TestVerifyAfterProgramFplmn:
+    """verify_after_program reports mismatch when FPLMN does not match written value."""
+
+    def _cm(self, tmp_path):
+        cm = _make_hw_manager(tmp_path)
+        cm.authenticated = True
+        cm._authenticated_adm1_hex = '3838383838383838'
+        return cm
+
+    def _make_pysim_read_output(self, imsi='240070000000001',
+                                 iccid='8949440000001775004',
+                                 fplmn_lines=None):
+        lines = [
+            f'ICCID: {iccid}',
+            f'IMSI: {imsi}',
+        ]
+        if fplmn_lines:
+            lines.append('FPLMN:')
+            lines.extend(fplmn_lines)
+        return '\n'.join(lines)
+
+    def test_fplmn_match_returns_ok(self, tmp_path):
+        """When read-back FPLMN matches target, verification passes."""
+        cm = self._cm(tmp_path)
+        stdout = self._make_pysim_read_output(
+            fplmn_lines=['\t24f010 # MCC: 240 MNC: 01',
+                         '\t24f070 # MCC: 240 MNC: 07'])
+
+        with patch.object(cm, '_run_cli', return_value=(True, stdout, '')):
+            ok, msg, data = cm.verify_after_program({'FPLMN': '24001;24007'})
+
+        assert ok is True
+
+    def test_fplmn_mismatch_returns_fail(self, tmp_path):
+        """When read-back FPLMN differs from target, verification fails."""
+        cm = self._cm(tmp_path)
+        stdout = self._make_pysim_read_output(
+            fplmn_lines=['\t24f010 # MCC: 240 MNC: 01'])
+
+        with patch.object(cm, '_run_cli', return_value=(True, stdout, '')):
+            ok, msg, data = cm.verify_after_program({'FPLMN': '24001;24007'})
+
+        assert ok is False
+        assert 'FPLMN' in msg
+
+    def test_fplmn_order_independent(self, tmp_path):
+        """FPLMN verification is order-independent."""
+        cm = self._cm(tmp_path)
+        stdout = self._make_pysim_read_output(
+            fplmn_lines=['\t24f070 # MCC: 240 MNC: 07',
+                         '\t24f010 # MCC: 240 MNC: 01'])
+
+        with patch.object(cm, '_run_cli', return_value=(True, stdout, '')):
+            ok, msg, data = cm.verify_after_program({'FPLMN': '24001;24007'})
+
+        assert ok is True
+
+    def test_imsi_mismatch_still_fails(self, tmp_path):
+        """IMSI mismatch returns failure even when FPLMN is not being verified."""
+        cm = self._cm(tmp_path)
+        stdout = self._make_pysim_read_output(imsi='240070000000001')
+
+        with patch.object(cm, '_run_cli', return_value=(True, stdout, '')):
+            ok, msg, data = cm.verify_after_program(
+                {'IMSI': '240070000000099'})  # target differs from read-back
+
+        assert ok is False
+        assert 'IMSI' in msg
