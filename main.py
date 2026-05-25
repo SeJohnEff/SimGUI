@@ -225,6 +225,7 @@ class SimGUIApp(QMainWindow):
         self.last_read_data: dict[str, str] = {}
         self._last_programmed_card: Optional[dict] = None
         self._startup_worker_thread: Optional[QThread] = None
+        self._startup_worker: Optional[QObject] = None
         self._rescan_timer: Optional[QTimer] = None
         self._active_mounts: list = []
 
@@ -568,6 +569,7 @@ class SimGUIApp(QMainWindow):
         worker.finished.connect(worker.deleteLater)
         self._startup_worker_thread.finished.connect(self._on_thread_finished)
 
+        self._startup_worker = worker  # keep strong ref so GC doesn't collect before thread fires
         self._startup_worker_thread.started.connect(worker.run)
         self._startup_worker_thread.start()
 
@@ -590,6 +592,7 @@ class SimGUIApp(QMainWindow):
 
     def _on_thread_finished(self) -> None:
         self._startup_worker_thread = None
+        self._startup_worker = None
 
     # ---- Menu callbacks -----------------------------------------------
 

@@ -51,6 +51,14 @@ class TestStructuralWiring:
         assert "BackgroundStartupWorker(" in MAIN_SRC
         assert "self._standards_mgr" in MAIN_SRC
 
+    def test_background_startup_keeps_strong_worker_ref(self):
+        """_background_startup must store worker in self._startup_worker (GC safety)."""
+        assert "self._startup_worker = worker" in MAIN_SRC
+
+    def test_on_thread_finished_clears_startup_worker_ref(self):
+        """_on_thread_finished must clear self._startup_worker to release the reference."""
+        assert "self._startup_worker = None" in MAIN_SRC
+
     def test_batch_panel_refresh_standards_on_index_update(self):
         """refresh_standards must be called when index is updated."""
         assert "_batch_panel.refresh_standards()" in MAIN_SRC
