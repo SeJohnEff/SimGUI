@@ -63,7 +63,7 @@ class StorageProfile:
         "ICCID", "IMSI", "Ki", "OPc",
     ])
     # Auto-reconnect: True means mount this share on app startup
-    auto_connect: bool = False
+    auto_connect: bool = True
 
     @property
     def mount_point(self) -> str:
@@ -483,6 +483,8 @@ class NetworkStorageManager:
                 return True, "Connection successful"
             return False, (r.stderr or r.stdout).strip()[:200]
         except FileNotFoundError:
+            if _MACOS:
+                return False, "smbclient not available on macOS — use 'Connect' to test the connection directly"
             return False, "smbclient not installed (apt install smbclient)"
         except subprocess.TimeoutExpired:
             return False, "Connection timed out"

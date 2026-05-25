@@ -79,8 +79,9 @@ class NetworkStorageDialogQt(QDialog):
 
         layout.addLayout(form)
 
-        # Auto-connect checkbox
+        # Auto-connect checkbox — checked by default to match StorageProfile default
         self.auto_connect = QCheckBox("Auto-connect on startup")
+        self.auto_connect.setChecked(True)
         layout.addWidget(self.auto_connect)
 
         # Buttons

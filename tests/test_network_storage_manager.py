@@ -206,3 +206,53 @@ class TestSyncOsMounts:
         monkeypatch.setattr(ns, "load_profiles", lambda: [])
         ns.sync_os_mounts()  # should not raise
         assert ns.get_active_mount_paths() == []
+
+
+class TestAutoConnectDefault:
+    """auto_connect must default to True for new profiles."""
+
+    def test_storage_profile_auto_connect_default_true(self):
+        p = StorageProfile(label="x")
+        assert p.auto_connect is True
+
+    def test_storage_profile_auto_connect_explicit_false(self):
+        p = StorageProfile(label="x", auto_connect=False)
+        assert p.auto_connect is False
+
+
+class TestSmbClientMissingMessage:
+    """_test_smb FileNotFoundError message must be platform-appropriate."""
+
+    def _make_manager(self):
+        return NetworkStorageManager()
+
+    def _smb_profile(self):
+        return StorageProfile(
+            label="t", protocol="smb", server="192.168.131.188",
+            share="SIM", username="simgui", password="pw",
+        )
+
+    def test_macos_missing_smbclient_no_apt_message(self, monkeypatch):
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+        ns = self._make_manager()
+        import subprocess
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("smbclient")),
+        )
+        ok, msg = ns._test_smb(self._smb_profile())
+        assert not ok
+        assert "apt" not in msg
+        assert "macOS" in msg
+
+    def test_linux_missing_smbclient_shows_apt_message(self, monkeypatch):
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
+        ns = self._make_manager()
+        import subprocess
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("smbclient")),
+        )
+        ok, msg = ns._test_smb(self._smb_profile())
+        assert not ok
+        assert "apt install smbclient" in msg
