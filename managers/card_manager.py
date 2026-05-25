@@ -1219,11 +1219,22 @@ class CardManager:
             spn = fields.get('SPN', '').strip()
             _spn_write_ok = True
             _spn_verified = ''
+            _spn_gialersim_skip = False
             if spn and self._authenticated_adm1_hex:
-                _spn_write_ok, _spn_msg, _spn_verified = self._write_spn_via_shell(
-                    spn, self._authenticated_adm1_hex)
-                if not _spn_write_ok:
-                    logger.warning("SPN not written: %s", _spn_msg)
+                if self.card_type == CardType.GIALERSIM:
+                    # pySim-shell verify_adm uses CHV 0x0A, which fails with
+                    # 6f00 on gialersim and consumes a retry attempt. Never
+                    # attempt the shell SPN write path for gialersim cards.
+                    _spn_write_ok = False
+                    _spn_gialersim_skip = True
+                    logger.info(
+                        "SPN write skipped for gialersim — "
+                        "pySim-shell CHV 0x0A would burn retries")
+                else:
+                    _spn_write_ok, _spn_msg, _spn_verified = self._write_spn_via_shell(
+                        spn, self._authenticated_adm1_hex)
+                    if not _spn_write_ok:
+                        logger.warning("SPN not written: %s", _spn_msg)
 
             v_ok, v_msg, v_data = self.verify_after_program(fields)
             if v_ok:
@@ -1248,6 +1259,9 @@ class CardManager:
                 if spn:
                     if _spn_write_ok and _spn_verified == spn:
                         parts.append("SPN: verified")
+                    elif _spn_gialersim_skip:
+                        parts.append(
+                            "SPN: not written — unsupported for gialersim, not verified")
                     elif not _spn_write_ok:
                         parts.append("SPN: write failed, not verified")
                     else:

@@ -425,36 +425,50 @@ class TestWriteSpnViaShell:
         cm._authenticated_adm1_hex = '3838383838383838'
         return cm
 
-    def test_gialersim_with_spn_and_adm1_attempts_shell_write(self, tmp_path, monkeypatch):
-        """gialersim card with SPN + ADM1 must attempt shell write, not skip."""
+    def test_gialersim_spn_does_not_call_shell_write(self, tmp_path, monkeypatch):
+        """gialersim + SPN must NOT call _write_spn_via_shell — CHV 0x0A burns retries."""
         cm = self._gialersim_cm(tmp_path)
-        shell_called = []
-
-        def fake_shell_safe(commands, timeout=30):
-            shell_called.append(commands)
-            return True, 'OK', ''
-
-        monkeypatch.setattr(cm, '_run_pysim_shell_safe', fake_shell_safe)
-        ok, msg, verified = cm._write_spn_via_shell('MyNetwork', '3838383838383838')
-
-        assert shell_called, "pySim-shell was not called for gialersim"
-        assert ok is True
-
-    def test_gialersim_shell_failure_reports_spn_not_written(self, tmp_path, monkeypatch):
-        """If shell write fails for gialersim, caller reports SPN not written/verified."""
-        cm = self._gialersim_cm(tmp_path)
+        shell_write_called = []
 
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed', ''))
+                            lambda *a, **kw: shell_write_called.append(True) or (True, 'SPN written', 'MyNetwork'))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
+
+        cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
+        assert not shell_write_called, "_write_spn_via_shell must not be called for gialersim"
+
+    def test_gialersim_spn_reports_not_written(self, tmp_path, monkeypatch):
+        """gialersim + SPN: result message must indicate SPN was not written."""
+        cm = self._gialersim_cm(tmp_path)
+
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, 'verify_after_program',
                             lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
 
         ok, msg = cm._program_via_pysim_prog(
             {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert ok is True
-        assert 'SPN: write failed' in msg
+        assert 'SPN: not written' in msg
+        assert 'not verified' in msg
+
+    def test_gialersim_spn_not_written_blocks_clean_success(self, tmp_path, monkeypatch):
+        """gialersim SPN not-written message contains 'not verified' — blocks artifact save."""
+        from widgets.program_sim_panel import ProgramSIMPanel
+        cm = self._gialersim_cm(tmp_path)
+
+        monkeypatch.setattr(cm, '_run_pysim_prog',
+                            lambda *a, **kw: (True, '', ''))
+        monkeypatch.setattr(cm, 'verify_after_program',
+                            lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
+
+        ok, msg = cm._program_via_pysim_prog(
+            {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
+        assert ok is True
+        assert ProgramSIMPanel._is_clean_success(ok, msg) is False
 
 
 class TestEncodeSpnRaw:
