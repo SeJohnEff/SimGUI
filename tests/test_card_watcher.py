@@ -57,6 +57,10 @@ class FakeIndex:
     def scanned_dirs(self):
         return frozenset()
 
+    @property
+    def stats(self):
+        return {"total_cards": len(self._card_data)}
+
     def rescan_if_stale(self, directory):
         self.rescan_calls.append(directory)
         return None
@@ -1045,4 +1049,62 @@ class TestRescanOnLookupMiss:
         assert len(detected) == 1, "Card must be detected after rescan"
         assert detected[0][1]["ADM1"] == "72762965", (
             f"Expected fresh ADM1 '72762965', got '{detected[0][1]['ADM1']}'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Targeted lookup diagnostic tests
+# ---------------------------------------------------------------------------
+
+class TestHandleNewCardLookupDiagnostics:
+    """_handle_new_card emits correct callbacks and logs lookup details."""
+
+    def _make_watcher(self, iccid, index):
+        cm = FakeCardManager()
+        cm.detect_ok = True
+        cm.iccid = iccid
+        return CardWatcher(cm, index)
+
+    def test_index_hit_emits_detected_not_unknown(self):
+        """Fake index containing ICCID fires on_card_detected, never on_card_unknown."""
+        iccid = "8949440000001775004"
+        entry = FakeIndexEntry("/share/batch.csv")
+        card = {"ICCID": iccid, "ADM1": "3838383838383838", "IMSI": "240015000000001"}
+        idx = FakeIndex(entries={iccid: entry}, card_data={iccid: card})
+
+        detected = []
+        unknown = []
+        w = self._make_watcher(iccid, idx)
+        w.on_card_detected = lambda ic, d, fp: detected.append((ic, d, fp))
+        w.on_card_unknown = lambda ic: unknown.append(ic)
+        w._check_once()
+
+        assert unknown == [], (
+            f"on_card_unknown must NOT fire when ICCID is in index; got {unknown}"
+        )
+        assert len(detected) == 1, "on_card_detected must fire exactly once"
+        assert detected[0][0] == iccid
+        assert detected[0][1] == card
+        assert detected[0][2] == "/share/batch.csv"
+
+    def test_index_miss_logs_lookup_details(self, caplog):
+        """Lookup miss must log iccid, 'miss', and emit log before on_card_unknown."""
+        import logging
+        iccid = "8949440000001775004"
+        idx = FakeIndex()  # empty — lookup returns None
+
+        unknown = []
+        w = self._make_watcher(iccid, idx)
+        w.on_card_unknown = lambda ic: unknown.append(ic)
+
+        with caplog.at_level(logging.INFO, logger="managers.card_watcher"):
+            w._check_once()
+
+        assert unknown == [iccid], "on_card_unknown must fire with the ICCID on miss"
+
+        log_text = "\n".join(caplog.messages)
+        assert "miss" in log_text, f"Expected 'miss' in diagnostic log; got:\n{log_text}"
+        assert iccid in log_text, f"Expected ICCID in diagnostic log; got:\n{log_text}"
+        assert "on_card_unknown" in log_text, (
+            f"Expected emit-log before on_card_unknown; got:\n{log_text}"
         )

@@ -446,15 +446,33 @@ class CardWatcher:
     def _handle_new_card(self, iccid: str):
         """Process a newly detected card."""
         if self._index:
+            logger.info(
+                "CardWatcher lookup: iccid=%r len=%d index_id=%d scanned_dirs=%s",
+                iccid, len(iccid), id(self._index), self._index.scanned_dirs,
+            )
+            try:
+                logger.info("CardWatcher lookup: index.stats=%s", self._index.stats)
+            except Exception as _stats_exc:
+                logger.info("CardWatcher lookup: index.stats raised %s", _stats_exc)
             # Refresh stale files before lookup — CSV may have been replaced
             # since the last scan (changed ADM1, new file, deleted file).
             # rescan_if_stale is a fast mtime check; it only re-parses changed files.
             for d in self._index.scanned_dirs:
                 self._index.rescan_if_stale(d)
             entry = self._index.lookup(iccid)
+            logger.info(
+                "CardWatcher lookup: lookup(%r) → entry=%s file_path=%s",
+                iccid,
+                "hit" if entry else "miss",
+                getattr(entry, "file_path", None),
+            )
             if entry:
                 # Found in index — load full card data
                 card_data = self._index.load_card(iccid)
+                logger.info(
+                    "CardWatcher lookup: load_card(%r) → found=%s",
+                    iccid, bool(card_data),
+                )
                 if card_data and self.on_card_detected:
                     try:
                         self.on_card_detected(
@@ -464,6 +482,13 @@ class CardWatcher:
                     return
 
         # Card not in index (or no index configured)
+        logger.info(
+            "CardWatcher lookup: emitting on_card_unknown(%r) "
+            "(has_index=%s index_id=%s)",
+            iccid,
+            bool(self._index),
+            id(self._index) if self._index else None,
+        )
         if self.on_card_unknown:
             try:
                 self.on_card_unknown(iccid)
