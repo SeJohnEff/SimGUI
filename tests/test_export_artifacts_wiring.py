@@ -2,6 +2,8 @@
 
 These tests use AST inspection and unit-level mocking — no display required.
 """
+# Artifact-gating tests for ProgramSIMPanel._is_clean_success are at the
+# bottom of this file.
 
 import ast
 import csv
@@ -164,3 +166,29 @@ class TestExportArtifactsHandler:
 
         mock_mb.information.assert_not_called()
         mock_mb.warning.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Artifact-save gating: _is_clean_success
+# ---------------------------------------------------------------------------
+
+class TestArtifactSaveGating:
+    """ProgramSIMPanel._is_clean_success gates on_card_programmed_callback."""
+
+    def test_full_success_message_is_clean(self):
+        """Complete success message → callback should fire."""
+        from widgets.program_sim_panel import ProgramSIMPanel
+        msg = "Card programmed — verified: ICCID, IMSI; written: Ki, OPc; SPN: verified"
+        assert ProgramSIMPanel._is_clean_success(True, msg) is True
+
+    def test_spn_write_failed_message_is_not_clean(self):
+        """'SPN: write failed, not verified' in message → callback must not fire."""
+        from widgets.program_sim_panel import ProgramSIMPanel
+        msg = ("Card programmed — verified: ICCID, IMSI; written: Ki, OPc; "
+               "SPN: write failed, not verified")
+        assert ProgramSIMPanel._is_clean_success(True, msg) is False
+
+    def test_failed_programming_is_not_clean(self):
+        """ok=False → callback must not fire regardless of message."""
+        from widgets.program_sim_panel import ProgramSIMPanel
+        assert ProgramSIMPanel._is_clean_success(False, "pySim-prog failed") is False

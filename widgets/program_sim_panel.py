@@ -543,10 +543,20 @@ class ProgramSIMPanel(QWidget):
                 self._card_watcher.resume()
 
         if ok:
-            if callable(getattr(self, 'on_card_programmed_callback', None)):
+            if self._is_clean_success(ok, msg) and callable(
+                    getattr(self, 'on_card_programmed_callback', None)):
                 saved_paths = self.on_card_programmed_callback(card_data)
                 if saved_paths:
                     msg += f"\nArtifact saved: {saved_paths[0]}"
             self._set_action_status(msg, "success")
         else:
             self._set_action_status(msg, "error")
+
+    @staticmethod
+    def _is_clean_success(ok: bool, msg: str) -> bool:
+        """True only when programming fully succeeded with no partial failures.
+
+        Guards artifact saving — any field that failed to write or could not
+        be verified must not trigger the auto-artifact path.
+        """
+        return ok and "write failed" not in msg and "not verified" not in msg
