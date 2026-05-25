@@ -572,14 +572,16 @@ class IccidIndex:
                           encoding="utf-8-sig") as fh:
                     reader = csv.DictReader(fh)
                     for row in reader:
-                        cards.append(dict(row))
+                        cards.append({k: v.strip() if isinstance(v, str) else v
+                                      for k, v in row.items()})
                 return cards
             elif lower.endswith(".txt"):
                 cards = []
                 with open(path, "r", encoding="utf-8-sig") as fh:
                     reader = csv.DictReader(fh, delimiter="\t")
                     for row in reader:
-                        cards.append(dict(row))
+                        cards.append({k: v.strip() if isinstance(v, str) else v
+                                      for k, v in row.items()})
                 return cards
         except Exception as exc:
             logger.warning("Failed to parse %s: %s", path, exc)
