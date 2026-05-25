@@ -148,10 +148,19 @@ class NetworkStorageManager:
 
         os.makedirs(mp, exist_ok=True)
 
+        # macOS: mount_smbfs will prompt the terminal if username is set
+        # but no password is provided.  Fail early instead.
+        if _MACOS and profile.protocol == "smb" and profile.username and not profile.password:
+            return False, (
+                "Password required: username is set but password is blank.\n"
+                "Enter the password in the Password field."
+            )
+
         try:
             cmd = self._build_mount_cmd(profile)
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30,
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode != 0:
                 err = (result.stderr or result.stdout).strip()
@@ -447,15 +456,7 @@ class NetworkStorageManager:
 
         if _MACOS:
             # macOS: mount_smbfs //[user[:password]@]server/share mountpoint
-            if profile.username:
-                user = quote(profile.username, safe="")
-                if profile.password:
-                    pwd = quote(profile.password, safe="")
-                    url = f"//{user}:{pwd}@{profile.server}/{profile.share.lstrip('/')}"
-                else:
-                    url = f"//{user}@{profile.server}/{profile.share.lstrip('/')}"
-            else:
-                url = f"//{profile.server}/{profile.share.lstrip('/')}"
+            url = self._smb_url(profile)
             cmd = [_SUDO, _MOUNT_SMB_FS]
             if profile.mount_options:
                 cmd.extend(["-o", profile.mount_options])
@@ -494,19 +495,57 @@ class NetworkStorageManager:
             return False, "Connection timed out"
 
     def _test_smb_macos(self, profile: StorageProfile) -> tuple[bool, str]:
-        """Test SMB connectivity on macOS via TCP port 445 probe.
+        """Test SMB connectivity and authentication on macOS via temporary mount.
 
-        Uses stdlib socket only — no smbclient, no Homebrew, no apt required.
-        mount_smbfs handles the full auth; this confirms the server is reachable
-        before the user attempts a mount.
+        Performs a real mount attempt to a temporary directory, then immediately
+        unmounts.  This verifies both reachability and credentials without
+        leaving any permanent state.  No smbclient or Homebrew required.
         """
-        import socket
+        if profile.username and not profile.password:
+            return False, (
+                "Password required: username is set but password is blank.\n"
+                "Enter the password in the Password field."
+            )
+        tmp_mp = tempfile.mkdtemp(prefix="simgui-test-")
         try:
-            with socket.create_connection((profile.server, 445), timeout=5):
+            url = self._smb_url(profile)
+            cmd = [_SUDO, _MOUNT_SMB_FS]
+            if profile.mount_options:
+                cmd.extend(["-o", profile.mount_options])
+            cmd.extend([url, tmp_mp])
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15,
+                stdin=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                subprocess.run(
+                    [_SUDO, _UMOUNT, tmp_mp],
+                    capture_output=True, timeout=10,
+                    stdin=subprocess.DEVNULL,
+                )
+                return True, "Connection and authentication successful"
+            err = (result.stderr or result.stdout).strip()[:200]
+            return False, f"Authentication failed: {err or 'mount_smbfs rejected credentials'}"
+        except subprocess.TimeoutExpired:
+            return False, "Connection timed out (15 s)"
+        except FileNotFoundError as exc:
+            return False, f"mount_smbfs not found: {exc}"
+        finally:
+            try:
+                os.rmdir(tmp_mp)
+            except OSError:
                 pass
-            return True, f"{profile.server} reachable on SMB port 445"
-        except OSError as exc:
-            return False, f"Cannot reach {profile.server} on SMB port 445: {exc}"
+
+    def _smb_url(self, profile: StorageProfile) -> str:
+        """Build the //[user[:password]@]server/share URL for mount_smbfs."""
+        share = profile.share.lstrip("/")
+        if profile.username:
+            user = quote(profile.username, safe="")
+            if profile.password:
+                pwd = quote(profile.password, safe="")
+                return f"//{user}:{pwd}@{profile.server}/{share}"
+            return f"//{user}@{profile.server}/{share}"
+        return f"//{profile.server}/{share}"
 
     def _test_nfs(self, profile: StorageProfile) -> tuple[bool, str]:
         """Test NFS connectivity with showmount."""

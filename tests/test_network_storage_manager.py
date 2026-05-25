@@ -221,7 +221,7 @@ class TestAutoConnectDefault:
 
 
 class TestMacOSSmbTest:
-    """On macOS, _test_smb must use socket probe — no smbclient, no subprocess."""
+    """On macOS, _test_smb must use temp-mount auth test — no smbclient."""
 
     def _ns(self):
         return NetworkStorageManager()
@@ -233,55 +233,66 @@ class TestMacOSSmbTest:
         )
 
     def test_macos_does_not_call_smbclient(self, monkeypatch):
-        """subprocess.run must never be called for the macOS SMB test path."""
+        """macOS SMB test must use mount_smbfs, not smbclient."""
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+        monkeypatch.setattr("managers.network_storage_manager._MOUNT_SMB_FS",
+                            "/sbin/mount_smbfs")
         import subprocess
-        calls = []
-        original_run = subprocess.run
+        captured = []
 
-        def spy(*a, **kw):
-            calls.append(a)
-            return original_run(*a, **kw)
+        def fake_run(cmd, **kwargs):
+            captured.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        monkeypatch.setattr(subprocess, "run", spy)
-        import socket
-        monkeypatch.setattr(
-            socket, "create_connection",
-            lambda *a, **kw: _FakeSocket(),
-        )
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr("tempfile.mkdtemp", lambda **kw: "/tmp/simgui-test-fake")
+        monkeypatch.setattr("os.rmdir", lambda p: None)
+
         self._ns()._test_smb(self._profile())
-        assert calls == [], "subprocess.run must not be called on macOS SMB test"
+
+        all_args = " ".join(str(a) for args in captured for a in args)
+        assert "smbclient" not in all_args
+        assert "mount_smbfs" in all_args
 
     def test_macos_no_install_or_dependency_message(self, monkeypatch):
         """Success and failure messages must not mention apt, brew, or smbclient."""
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
-        import socket
+        monkeypatch.setattr("managers.network_storage_manager._MOUNT_SMB_FS",
+                            "/sbin/mount_smbfs")
+        import subprocess
+        monkeypatch.setattr("tempfile.mkdtemp", lambda **kw: "/tmp/simgui-test-fake")
+        monkeypatch.setattr("os.rmdir", lambda p: None)
 
         # success case
-        monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: _FakeSocket())
+        monkeypatch.setattr(subprocess, "run",
+                            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
         ok, msg = self._ns()._test_smb(self._profile())
         assert ok
         for bad in ("apt", "brew", "smbclient", "install"):
             assert bad not in msg.lower(), f"Unexpected word '{bad}' in success message: {msg}"
 
         # failure case
-        monkeypatch.setattr(
-            socket, "create_connection",
-            lambda *a, **kw: (_ for _ in ()).throw(OSError("refused")),
-        )
+        monkeypatch.setattr(subprocess, "run",
+                            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="auth failed"))
         ok2, msg2 = self._ns()._test_smb(self._profile())
         assert not ok2
         for bad in ("apt", "brew", "smbclient", "install"):
             assert bad not in msg2.lower(), f"Unexpected word '{bad}' in failure message: {msg2}"
 
-    def test_macos_succeeds_when_port_reachable(self, monkeypatch):
-        """Returns (True, <msg>) when TCP port 445 is reachable."""
+    def test_macos_succeeds_when_mount_succeeds(self, monkeypatch):
+        """Returns (True, <msg>) when temp mount_smbfs succeeds."""
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
-        import socket
-        monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: _FakeSocket())
+        monkeypatch.setattr("managers.network_storage_manager._MOUNT_SMB_FS",
+                            "/sbin/mount_smbfs")
+        import subprocess
+        monkeypatch.setattr(subprocess, "run",
+                            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+        monkeypatch.setattr("tempfile.mkdtemp", lambda **kw: "/tmp/simgui-test-fake")
+        monkeypatch.setattr("os.rmdir", lambda p: None)
+
         ok, msg = self._ns()._test_smb(self._profile())
         assert ok
-        assert "192.168.131.188" in msg
+        assert "successful" in msg.lower() or "authentication" in msg.lower()
 
     def test_linux_missing_smbclient_shows_apt_message(self, monkeypatch):
         """Linux path unchanged: FileNotFoundError → apt install smbclient."""
