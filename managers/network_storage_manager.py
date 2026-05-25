@@ -225,6 +225,11 @@ class NetworkStorageManager:
         Called once at startup.  Returns a list of
         ``(label, success, message)`` for each attempted reconnection.
         Profiles that are already mounted are silently skipped.
+
+        After a successful mount (including stale OS mounts), the share is
+        probed for actual accessibility.  If unreachable, the profile is
+        removed from *_active_mounts* and reported as failed — green status
+        requires a verified live connection, not just a VFS mount entry.
         """
         results: list[tuple[str, bool, str]] = []
         profiles = self.load_profiles()
@@ -234,6 +239,13 @@ class NetworkStorageManager:
             # Always call mount() — it handles the 'already mounted'
             # case and ensures _active_mounts is populated.
             ok, msg = self.mount(p)
+            if ok and not self.verify_mount_accessible(p):
+                # VFS shows mounted but server is unreachable (stale mount).
+                self._active_mounts.pop(p.label, None)
+                ok = False
+                msg = "Share not accessible (network unreachable)"
+                logger.warning("Auto-connect: %s mounted but inaccessible, "
+                               "marking disconnected", p.label)
             results.append((p.label, ok, msg))
             if ok:
                 logger.info("Auto-reconnected: %s", p.label)
@@ -250,6 +262,39 @@ class NetworkStorageManager:
         except OSError:
             return False
 
+    def is_tracked_as_mounted(self, profile: StorageProfile) -> bool:
+        """Return True if this profile is tracked as mounted in memory.
+
+        Does NOT perform any filesystem or OS-level check — safe to call
+        on the UI thread where blocking stat() calls must be avoided.
+        """
+        return profile.label in self._active_mounts
+
+    def verify_mount_accessible(self, profile: StorageProfile,
+                                timeout: int = 5) -> bool:
+        """Return True if the mounted share is actually accessible.
+
+        Runs a short-lived subprocess to probe the mount point with a
+        bounded timeout.  A stale OS mount (server unreachable) causes
+        the filesystem call inside the subprocess to block; killing the
+        subprocess after *timeout* seconds is the only portable way to
+        escape a hung VFS stat.  Returns False on timeout or any error.
+        """
+        mp = profile.mount_point
+        try:
+            result = subprocess.run(
+                ["/bin/ls", mp], capture_output=True, timeout=timeout,
+                stdin=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            logger.warning("verify_mount_accessible: timeout probing %s", mp)
+            return False
+        except Exception as exc:
+            logger.warning("verify_mount_accessible: error probing %s: %s",
+                           mp, exc)
+            return False
+
     def test_connection(self, profile: StorageProfile) -> tuple[bool, str]:
         """Quick connectivity test without mounting."""
         if profile.protocol == "smb":
@@ -264,11 +309,19 @@ class NetworkStorageManager:
         previous session or was mounted externally.  Without this,
         ``get_active_mount_paths`` would return nothing and the UI
         share indicator would stay grey.
+
+        Stale OS mounts (VFS entry present but server unreachable) are
+        detected via ``verify_mount_accessible`` and silently skipped —
+        they must not contribute to the connected (green) status.
         """
         for p in self.load_profiles():
             if p.label in self._active_mounts:
                 continue  # already tracked
             if self.is_mounted(p):
+                if not self.verify_mount_accessible(p):
+                    logger.info("sync_os_mounts: %s is OS-mounted but "
+                                "inaccessible, skipping", p.label)
+                    continue
                 self._active_mounts[p.label] = p
                 logger.info("sync_os_mounts: adopted existing mount %s",
                             p.label)

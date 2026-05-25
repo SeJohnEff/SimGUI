@@ -40,7 +40,8 @@ def _make_ns_manager(profile, mounted=True):
     """Return a minimal ns_manager mock for the given profile."""
     ns = MagicMock()
     ns.load_profiles.return_value = [profile]
-    ns.is_mounted.return_value = mounted
+    # Dialog uses is_tracked_as_mounted (non-blocking, UI-thread safe).
+    ns.is_tracked_as_mounted.return_value = mounted
     return ns
 
 

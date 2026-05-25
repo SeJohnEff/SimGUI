@@ -122,9 +122,10 @@ class NetworkStorageDialogQt(QDialog):
         if not self.ns_manager:
             return
         profiles = self.ns_manager.load_profiles()
-        # Prefer a profile that is currently mounted
+        # Prefer a profile that is verified mounted (in-memory check only —
+        # avoids blocking stat() on stale mounts on the UI thread).
         for p in profiles:
-            if self.ns_manager.is_mounted(p):
+            if self.ns_manager.is_tracked_as_mounted(p):
                 self._populate(p)
                 return
         # Fall back to the first profile with auto_connect enabled
