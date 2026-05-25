@@ -146,6 +146,8 @@ These questions should have been asked and answered ONCE in an upfront session, 
 
 ### 4. Verify-After-Write (Always)
 
+- [ ] **Implement and test SPN write/read/verify safely for supported card types** — SPN programming is currently disabled globally (all card types) because the pySim-shell path was observed to call `verify_adm CHV 0x0A` on gialersim, consuming a retry attempt. Before re-enabling, verify the correct write sequence for each card type (gialersim vs SJA5), implement read-back verification, and gate behind hardware tests.
+
 - [ ] **Every write must be verified with a read** — This is a fundamental principle for hardware programming. SPN was "written" but read-back showed "Not available". FPLMN was "written" but auth failed. These should have been caught immediately. CLAUDE.md should encode: **After every pySim write operation, read back and compare. If mismatch, flag as error. No silent successes.**
 
 ### 5. Workflow States & Data Integrity

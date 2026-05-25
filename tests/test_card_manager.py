@@ -384,35 +384,34 @@ class TestWriteSpnViaShell:
         cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
         assert not shell_called, "Shell should not be called without ADM1"
 
-    def test_shell_failure_means_spn_not_verified(self, tmp_path, monkeypatch):
-        """If pySim-shell write fails, SPN does not appear in the verified list."""
+    def test_spn_not_called_for_sja5_either(self, tmp_path, monkeypatch):
+        """SPN write is disabled globally — _write_spn_via_shell never called, even for SJA5."""
         cm = self._sja5_cm(tmp_path)
+        shell_write_called = []
 
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
         monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: (False, 'SPN write via pySim-shell failed', ''))
+                            lambda *a, **kw: shell_write_called.append(True) or (True, 'SPN written', 'MyNetwork'))
         monkeypatch.setattr(cm, 'verify_after_program',
                             lambda *a, **kw: (True, 'OK', {'IMSI': '001010123456789'}))
 
-        ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
-        assert ok is True
-        assert 'SPN: write failed' in msg
+        cm._program_via_pysim_prog({'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
+        assert not shell_write_called, "_write_spn_via_shell must not be called (SPN disabled globally)"
 
-    def test_readback_spn_match_appears_in_verified(self, tmp_path, monkeypatch):
-        """When read-back confirms SPN, it appears in the verified output."""
+    def test_spn_reports_not_supported_for_sja5(self, tmp_path, monkeypatch):
+        """SPN requested for SJA5: message reports SPN not written/not supported."""
         cm = self._sja5_cm(tmp_path)
 
         monkeypatch.setattr(cm, '_run_pysim_prog',
                             lambda *a, **kw: (True, '', ''))
-        monkeypatch.setattr(cm, '_write_spn_via_shell',
-                            lambda *a, **kw: (True, 'SPN written', 'MyNetwork'))
         monkeypatch.setattr(cm, 'verify_after_program',
                             lambda *a, **kw: (True, 'OK', {}))
 
         ok, msg = cm._program_via_pysim_prog({'SPN': 'MyNetwork'})
         assert ok is True
-        assert 'SPN: verified' in msg
+        assert 'SPN: not written' in msg
+        assert 'not verified' in msg
 
     def _gialersim_cm(self, tmp_path):
         """Return a CardManager configured as a blank gialersim card."""
