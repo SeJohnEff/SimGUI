@@ -30,9 +30,23 @@ class NetworkStorageDialogQt(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Network Storage")
         self.resize(500, 350)
+        # WindowModal prevents macOS from moving the dialog to a secondary
+        # monitor when the user switches away and back to SimGUI.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.ns_manager = ns_manager
         self._build_ui()
         self._prefill_from_saved()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Center over parent window so the dialog always appears on the same
+        # screen as SimGUI, regardless of which monitor the app is on.
+        if self.parent():
+            pg = self.parent().frameGeometry()
+            self.move(
+                pg.center().x() - self.width() // 2,
+                pg.center().y() - self.height() // 2,
+            )
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
