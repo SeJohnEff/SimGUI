@@ -6,6 +6,8 @@ Network Storage Dialog (PyQt6) — Configure SMB/NFS shares.
 Simple dialog for configuring and mounting network storage shares.
 """
 
+import logging
+
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -20,6 +22,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from managers.network_storage_manager import StorageProfile, NetworkStorageManager
+
+logger = logging.getLogger(__name__)
 
 
 class _TestConnectionWorker(QThread):
@@ -52,8 +56,15 @@ class NetworkStorageDialogQt(QDialog):
         # exclude_label for uniqueness validation so re-saving the same
         # profile under the same label is allowed.
         self._editing_label: str = None
+        # Guard: True while _populate() is filling form fields programmatically.
+        # _on_form_edited() ignores changes made during prefill so it does not
+        # incorrectly clear the Saved selection the moment it is applied.
+        self._prefilling_profile: bool = False
         self._build_ui()
         self._prefill_from_saved()
+        # Connect form-edit detection AFTER prefill so the initial programmatic
+        # field population does not trigger the clearing logic.
+        self._connect_form_edit_signals()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -211,16 +222,64 @@ class NetworkStorageDialogQt(QDialog):
                 break
 
     def _populate(self, profile: "StorageProfile") -> None:
-        """Fill all form fields from *profile*."""
-        idx = self.protocol_combo.findText(profile.protocol.upper())
-        if idx >= 0:
-            self.protocol_combo.setCurrentIndex(idx)
-        self.server_input.setText(profile.server)
-        self.share_input.setText(profile.share)
-        self.username_input.setText(profile.username)
-        if profile.password:
-            self.password_input.setText(profile.password)
-        self.label_input.setText(profile.label)
+        """Fill all form fields from *profile*.
+
+        Sets _prefilling_profile so that _on_form_edited() ignores the
+        textChanged / currentIndexChanged signals emitted during fill.
+        """
+        self._prefilling_profile = True
+        try:
+            idx = self.protocol_combo.findText(profile.protocol.upper())
+            if idx >= 0:
+                self.protocol_combo.setCurrentIndex(idx)
+            self.server_input.setText(profile.server)
+            self.share_input.setText(profile.share)
+            self.username_input.setText(profile.username)
+            if profile.password:
+                self.password_input.setText(profile.password)
+            self.label_input.setText(profile.label)
+        finally:
+            self._prefilling_profile = False
+
+    def _connect_form_edit_signals(self) -> None:
+        """Wire every profile-defining field to _on_form_edited().
+
+        Must be called AFTER _prefill_from_saved() so the initial programmatic
+        fill does not trigger the clearing logic.
+        """
+        for widget in (
+            self.server_input,
+            self.share_input,
+            self.username_input,
+            self.password_input,
+            self.label_input,
+        ):
+            widget.textChanged.connect(self._on_form_edited)
+        self.protocol_combo.currentIndexChanged.connect(self._on_form_edited)
+
+    def _on_form_edited(self, *_args) -> None:
+        """Called when the user edits any profile-defining field.
+
+        The visible form is the source of truth for Test/Save operations.
+        Once the user changes a field, the Saved dropdown no longer describes
+        the form content, so the selection is cleared and _editing_label is
+        reset.  Delete and Disconnect are disabled because they would otherwise
+        silently operate on the previously-selected saved profile, which may
+        differ from what the form now shows.
+
+        Ignored during programmatic prefill (_prefilling_profile=True).
+        """
+        if self._prefilling_profile:
+            return
+        # Return the Saved combo to the "no selection" placeholder.
+        self.profiles_combo.blockSignals(True)
+        self.profiles_combo.setCurrentIndex(0)
+        self.profiles_combo.blockSignals(False)
+        # Discard stale saved-profile identity.
+        self._editing_label = None
+        # Profile-bound actions no longer have a target.
+        self.delete_btn.setEnabled(False)
+        self.disconnect_btn.setEnabled(False)
 
     def _on_test(self):
         """Validate fields then start a background connectivity test."""
@@ -231,6 +290,12 @@ class NetworkStorageDialogQt(QDialog):
         profile = self._build_profile()
         if not profile:
             return
+
+        logger.info(
+            "Test Connection: label=%r server=%r share=%r username=%r protocol=%r",
+            profile.label, profile.server, profile.share,
+            profile.username, profile.protocol,
+        )
 
         valid, err = self.ns_manager.validate_label_unique(
             profile.label, exclude_label=self._editing_label)
