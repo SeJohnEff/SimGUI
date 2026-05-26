@@ -16,7 +16,7 @@ a = Analysis(
     hiddenimports=[
         'smartcard',
         'smartcard.scard',
-        '_smartcard',
+        'smartcard.scard._scard',
     ],
     hookspath=[],
     hooksconfig={},
@@ -33,17 +33,14 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='SimGUI',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,  # Disable UPX to avoid bytecode issues
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,  # No console window on macOS
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -52,8 +49,19 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='SimGUI',
+)
+
+app = BUNDLE(
+    coll,
     name='SimGUI.app',
     icon=None,  # Set icon path if available: 'assets/icon.icns'
     bundle_identifier='com.fiskarheden.simgui',

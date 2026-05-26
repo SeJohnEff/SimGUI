@@ -38,12 +38,14 @@ if ! "$VENV_PYTHON" -c "import PyInstaller" 2>/dev/null; then
     "$VENV_PIP" install --quiet PyInstaller
 fi
 
-# Install project runtime dependencies into the build venv
-"$VENV_PIP" install --quiet -r requirements.txt
+# Install project runtime dependencies into the build venv.
+# pyscard's PyPI wheel has a broken arm64 slice (empty PyInit__scard) —
+# force source build so the C extension compiles correctly on Apple Silicon.
+"$VENV_PIP" install --quiet --no-binary pyscard -r requirements.txt
 
 # Run PyInstaller
 echo "Running PyInstaller with SimGUI.spec..."
-"$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean
+"$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y
 
 # Verify the output
 if [ -d "dist/SimGUI.app" ]; then
