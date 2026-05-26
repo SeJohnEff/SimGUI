@@ -54,23 +54,43 @@ echo "GITHASH: $(cat "$PROJECT_ROOT/GITHASH")"
 echo "Running PyInstaller with SimGUI.spec..."
 "$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y
 
-# Remove GITHASH from the source tree after bundling — it's a build artifact
-rm -f "$PROJECT_ROOT/GITHASH"
-
-# Verify the output
-if [ -d "dist/SimGUI.app" ]; then
-    echo ""
-    echo "✓ Build succeeded!"
-    echo ""
-    echo "Output: $PROJECT_ROOT/dist/SimGUI.app"
-    echo ""
-    echo "To run the app:"
-    echo "  open dist/SimGUI.app"
-    echo ""
-    echo "To create a distributable DMG:"
-    echo "  hdiutil create -volname \"SimGUI $VERSION\" -srcfolder dist/SimGUI.app -ov -format UDZO \"dist/SimGUI-v${VERSION}.dmg\""
-    exit 0
-else
+# Verify the .app bundle was created before cleaning up
+if [ ! -d "dist/SimGUI.app" ]; then
     echo "✗ Build failed: dist/SimGUI.app not found"
     exit 1
 fi
+
+# Verify GITHASH was actually bundled inside the .app.
+# Search inside dist/SimGUI.app/Contents to avoid assumptions about PyInstaller
+# layout (the _internal directory name varies between PyInstaller 5.x and 6.x).
+# Use a while-read loop instead of mapfile: macOS ships bash 3.2 which
+# predates the mapfile built-in (requires bash 4.x).
+GITHASH_FOUND=""
+while IFS= read -r f; do
+    if [ -z "$GITHASH_FOUND" ]; then
+        echo "✓ GITHASH bundled at:"
+    fi
+    GITHASH_FOUND="yes"
+    echo "    $f  →  $(cat "$f")"
+done < <(find dist/SimGUI.app/Contents -name "GITHASH" 2>/dev/null)
+
+if [ -z "$GITHASH_FOUND" ]; then
+    echo "✗ GITHASH not found inside dist/SimGUI.app/Contents — aborting"
+    echo "  This means the spec's conditional datas entry did not include GITHASH."
+    echo "  Ensure GITHASH was present in the project root when PyInstaller ran."
+    exit 1
+fi
+
+# Remove GITHASH from the source tree — it's a build artifact
+rm -f "$PROJECT_ROOT/GITHASH"
+
+echo ""
+echo "✓ Build succeeded!"
+echo ""
+echo "Output: $PROJECT_ROOT/dist/SimGUI.app"
+echo ""
+echo "To run the app:"
+echo "  open dist/SimGUI.app"
+echo ""
+echo "To create a distributable DMG:"
+echo "  hdiutil create -volname \"SimGUI $VERSION\" -srcfolder dist/SimGUI.app -ov -format UDZO \"dist/SimGUI-v${VERSION}.dmg\""

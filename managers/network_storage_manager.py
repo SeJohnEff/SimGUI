@@ -282,6 +282,11 @@ class NetworkStorageManager:
         """Unmount a previously mounted share."""
         mp = profile.mount_point
         if not self.is_mounted(profile):
+            # Stale tracking: OS mount is gone but internal state still lists
+            # this profile as active.  Clear both tracking dicts so that
+            # delete_profile() and is_tracked_as_mounted() see the correct state.
+            self._active_mounts.pop(profile.label, None)
+            self._actual_mount_paths.pop(profile.label, None)
             return True, "Not mounted"
 
         try:
@@ -301,6 +306,7 @@ class NetworkStorageManager:
             return False, "Unmount timed out"
 
         self._active_mounts.pop(profile.label, None)
+        self._actual_mount_paths.pop(profile.label, None)
         # Clean up empty dir
         try:
             os.rmdir(mp)

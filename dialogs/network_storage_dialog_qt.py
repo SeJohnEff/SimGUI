@@ -123,6 +123,11 @@ class NetworkStorageDialogQt(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
 
+        self.disconnect_btn = QPushButton("Disconnect")
+        self.disconnect_btn.setEnabled(False)
+        self.disconnect_btn.clicked.connect(self._on_disconnect)
+        button_layout.addWidget(self.disconnect_btn)
+
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setEnabled(False)
         self.delete_btn.clicked.connect(self._on_delete)
@@ -162,10 +167,13 @@ class NetworkStorageDialogQt(QDialog):
         if idx <= 0 or idx > len(self._saved_profiles):
             self._editing_label = None
             self.delete_btn.setEnabled(False)
+            self.disconnect_btn.setEnabled(False)
             return
         profile = self._saved_profiles[idx - 1]
         self._editing_label = profile.label
         self.delete_btn.setEnabled(True)
+        active = bool(self.ns_manager and self.ns_manager.is_tracked_as_mounted(profile))
+        self.disconnect_btn.setEnabled(active)
         self._populate(profile)
 
     def _prefill_from_saved(self):
@@ -179,6 +187,7 @@ class NetworkStorageDialogQt(QDialog):
             if self.ns_manager.is_tracked_as_mounted(p):
                 self._editing_label = p.label
                 self.delete_btn.setEnabled(True)
+                self.disconnect_btn.setEnabled(True)
                 self._populate(p)
                 self._select_profile_in_combo(p)
                 return
@@ -187,6 +196,7 @@ class NetworkStorageDialogQt(QDialog):
             if p.last_used:
                 self._editing_label = p.label
                 self.delete_btn.setEnabled(True)
+                self.disconnect_btn.setEnabled(False)
                 self._populate(p)
                 self._select_profile_in_combo(p)
                 return
@@ -285,6 +295,31 @@ class NetworkStorageDialogQt(QDialog):
         else:
             QMessageBox.warning(self, "Mount Failed", msg)
 
+    def _on_disconnect(self):
+        """Disconnect the currently selected profile.
+
+        Looks the profile up from the saved list (not the form) so that
+        unsaved form edits do not affect which share gets unmounted.
+        On success — including the stale-tracking case where the OS mount
+        is already gone — the disconnect button is disabled.  The dialog
+        stays open so the user can reconnect, reconfigure, or delete.
+        """
+        if not self.ns_manager or not self._editing_label:
+            return
+        profile = next(
+            (p for p in self._saved_profiles if p.label == self._editing_label),
+            None,
+        )
+        if profile is None:
+            QMessageBox.warning(self, "Disconnect", "No saved profile selected.")
+            return
+        ok, msg = self.ns_manager.unmount(profile)
+        if ok:
+            self.disconnect_btn.setEnabled(False)
+            QMessageBox.information(self, "Disconnected", msg)
+        else:
+            QMessageBox.warning(self, "Disconnect Failed", msg)
+
     def _on_delete(self):
         """Delete the currently selected saved profile."""
         if not self.ns_manager or not self._editing_label:
@@ -293,6 +328,7 @@ class NetworkStorageDialogQt(QDialog):
         if ok:
             self._editing_label = None
             self.delete_btn.setEnabled(False)
+            self.disconnect_btn.setEnabled(False)
             self._load_saved_profiles_combo()
             QMessageBox.information(self, "Deleted", msg)
         else:

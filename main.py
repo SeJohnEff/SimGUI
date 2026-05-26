@@ -249,10 +249,10 @@ class SimGUIApp(QMainWindow):
         super().__init__()
 
         # ---- Window setup ------------------------------------------------
-        git_hash = self._get_git_hash()
+        self._git_hash = self._get_git_hash()
         title = f"SimGUI {__version__}"
-        if git_hash:
-            title += f" ({git_hash})"
+        if self._git_hash:
+            title += f" ({self._git_hash})"
         title += " — SIM Card Programmer"
         self.setWindowTitle(title)
         self.resize(1024, 700)
@@ -326,11 +326,11 @@ class SimGUIApp(QMainWindow):
         """Return short git commit hash, or empty string if unavailable."""
         import sys as _sys
         import subprocess as _sp
-        app_dir = os.path.dirname(os.path.abspath(__file__))
         # In a packaged app sys.frozen is True. Never call git there:
         # the git stub on macOS triggers an Xcode CLT install dialog on
         # machines that don't have developer tools installed.
         if not getattr(_sys, "frozen", False):
+            app_dir = os.path.dirname(os.path.abspath(__file__))
             try:
                 r = _sp.run(
                     ["git", "rev-parse", "--short", "HEAD"],
@@ -341,8 +341,15 @@ class SimGUIApp(QMainWindow):
                     return r.stdout.strip()
             except Exception:
                 pass
-        # Packaged app: read hash written by build-macos-app.sh at build time.
-        githash_file = os.path.join(app_dir, "GITHASH")
+            return ""
+        # Frozen app: sys._MEIPASS is the authoritative PyInstaller bundle root.
+        # __file__ is unreliable in a frozen macOS .app — it can point into the
+        # bootloader or a version-dependent subdirectory depending on PyInstaller
+        # version.  Data files added via datas=[('GITHASH', '.')] land at
+        # sys._MEIPASS/GITHASH, not at dirname(__file__)/GITHASH.
+        bundle_dir = getattr(_sys, "_MEIPASS",
+                             os.path.dirname(os.path.abspath(__file__)))
+        githash_file = os.path.join(bundle_dir, "GITHASH")
         try:
             with open(githash_file, "r") as fh:
                 return fh.read().strip()
@@ -773,10 +780,13 @@ class SimGUIApp(QMainWindow):
                 self, "Export Error", f"Could not write file:\n{exc}")
 
     def _on_about(self):
+        version_str = f"Version {__version__}"
+        if self._git_hash:
+            version_str += f" ({self._git_hash})"
         QMessageBox.information(
             self, "About SimGUI",
             f"SimGUI — SIM Card Programming GUI\n"
-            f"Version {__version__}\n\n"
+            f"{version_str}\n\n"
             f"A lightweight GUI wrapper for pySim.\n\n"
             f"https://github.com/SeJohnEff/SimGUI")
 
@@ -803,6 +813,11 @@ class SimGUIApp(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    # Fusion style makes the Qt stylesheet fully authoritative on all platforms.
+    # Without it, the native macOS style plugin can override stylesheet
+    # background-color on Dark Mode Macs, causing QLineEdit fields to appear
+    # black instead of the intended light-mode colours.
+    app.setStyle("Fusion")
     QtTheme.apply(app)
     window = SimGUIApp()
     window.show()
