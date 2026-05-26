@@ -18,9 +18,24 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QMessageBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from managers.network_storage_manager import StorageProfile, NetworkStorageManager
+
+
+class _TestConnectionWorker(QThread):
+    """Run test_connection in a background thread so the UI stays responsive."""
+
+    result_ready = pyqtSignal(bool, str)
+
+    def __init__(self, ns_manager, profile):
+        super().__init__()
+        self._ns_manager = ns_manager
+        self._profile = profile
+
+    def run(self):
+        ok, msg = self._ns_manager.test_connection(self._profile)
+        self.result_ready.emit(ok, msg)
 
 
 class NetworkStorageDialogQt(QDialog):
@@ -205,7 +220,7 @@ class NetworkStorageDialogQt(QDialog):
         self.auto_connect.setChecked(profile.auto_connect)
 
     def _on_test(self):
-        """Test the connection without saving."""
+        """Validate fields then start a background connectivity test."""
         if not self.ns_manager:
             QMessageBox.warning(self, "Error", "Network Storage Manager not available")
             return
@@ -220,7 +235,24 @@ class NetworkStorageDialogQt(QDialog):
             QMessageBox.warning(self, "Label Error", err)
             return
 
-        ok, msg = self.ns_manager.test_connection(profile)
+        self.test_btn.setEnabled(False)
+        self.test_btn.setText("Testing…")
+        self.connect_btn.setEnabled(False)
+
+        self._test_worker = _TestConnectionWorker(self.ns_manager, profile)
+        self._test_worker.result_ready.connect(self._on_test_result)
+        self._test_worker.finished.connect(self._on_test_worker_done)
+        self._test_worker.start()
+
+    def _on_test_worker_done(self) -> None:
+        """Release the worker reference once the thread has exited."""
+        self._test_worker = None
+
+    def _on_test_result(self, ok: bool, msg: str) -> None:
+        """Slot: called by worker when test_connection completes."""
+        self.test_btn.setEnabled(True)
+        self.test_btn.setText("Test Connection")
+        self.connect_btn.setEnabled(True)
         if ok:
             QMessageBox.information(self, "Success", f"Connection successful:\n{msg}")
         else:
