@@ -92,6 +92,12 @@ class BackgroundStartupWorker(QObject):
                     "success", 5000)
                 self.status_requested.emit(
                     f"Network share connected: {names}")
+            failed = [(lbl, msg) for lbl, ok, msg in results if not ok]
+            if failed:
+                names = ", ".join(lbl for lbl, _ in failed)
+                self.toast_requested.emit(
+                    f"Network share reconnect failed: {names}",
+                    "error", 8000)
 
         # Adopt shares mounted externally or left from a prior session
         try:

@@ -340,3 +340,95 @@ class TestDialogPrefillNoBlockingCall:
 
         assert dlg.server_input.text() == ""
         ns.is_mounted.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# BackgroundStartupWorker — error toast on reconnect failure
+# ---------------------------------------------------------------------------
+
+class _FakeNsManager:
+    """Minimal ns_manager stub for BackgroundStartupWorker tests."""
+
+    def __init__(self, reconnect_results):
+        self._results = reconnect_results
+        self._mounts = []
+
+    def reconnect_saved(self):
+        return self._results
+
+    def sync_os_mounts(self):
+        pass
+
+    def get_active_mount_paths(self):
+        return self._mounts
+
+
+class _FakeIccidIndex:
+    def scan_directory(self, path):
+        r = MagicMock()
+        r.total_cards = 0
+        r.files_scanned = 0
+        r.files_skipped = 0
+        r.errors = []
+        return r
+
+
+class TestStartupWorkerReconnectToast:
+    """BackgroundStartupWorker must surface reconnect failures via toast."""
+
+    def _make_worker(self, reconnect_results):
+        """Import and instantiate BackgroundStartupWorker with fakes."""
+        import main as _main
+        ns = _FakeNsManager(reconnect_results)
+        idx = _FakeIccidIndex()
+        worker = _main.BackgroundStartupWorker(ns, idx, standards_mgr=None)
+        return worker
+
+    def test_error_toast_emitted_on_reconnect_failure(self):
+        """A failed reconnect must emit an error toast."""
+        worker = self._make_worker([("NAS SIM", False, "Mount failed: File exists")])
+
+        toasts = []
+        worker.toast_requested.connect(lambda msg, typ, dur: toasts.append((msg, typ, dur)))
+        worker.run()
+
+        error_toasts = [(m, t, d) for m, t, d in toasts if t == "error"]
+        assert error_toasts, "Expected an error toast but none was emitted"
+        assert "NAS SIM" in error_toasts[0][0]
+
+    def test_error_toast_not_emitted_when_all_succeed(self):
+        """Successful reconnects must not trigger an error toast."""
+        worker = self._make_worker([("NAS SIM", True, "Mounted")])
+
+        toasts = []
+        worker.toast_requested.connect(lambda msg, typ, dur: toasts.append((msg, typ, dur)))
+        worker.run()
+
+        error_toasts = [t for t in toasts if t[1] == "error"]
+        assert error_toasts == []
+
+    def test_success_toast_still_emitted_on_partial_success(self):
+        """If some shares succeed and some fail, success toast still fires."""
+        worker = self._make_worker([
+            ("NAS SIM", True, "Mounted"),
+            ("NAS BACKUP", False, "Mount failed: File exists"),
+        ])
+
+        toasts = []
+        worker.toast_requested.connect(lambda msg, typ, dur: toasts.append((msg, typ, dur)))
+        worker.run()
+
+        success_toasts = [t for t in toasts if t[1] == "success"]
+        error_toasts = [t for t in toasts if t[1] == "error"]
+        assert success_toasts, "Expected success toast for 'NAS SIM'"
+        assert error_toasts, "Expected error toast for 'NAS BACKUP'"
+
+    def test_no_toast_when_no_reconnects_attempted(self):
+        """Empty results (no auto_connect profiles) → no toasts at all."""
+        worker = self._make_worker([])
+
+        toasts = []
+        worker.toast_requested.connect(lambda msg, typ, dur: toasts.append((msg, typ, dur)))
+        worker.run()
+
+        assert toasts == []

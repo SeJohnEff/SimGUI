@@ -175,6 +175,21 @@ class NetworkStorageManager:
                 err = (result.stderr or result.stdout).strip()
                 if self._is_sudo_permission_error(err):
                     return False, self._sudo_fix_message()
+                if "File exists" in err or "already mounted" in err.lower():
+                    # The OS reports the mount point is already occupied —
+                    # either a stale VFS entry that os.path.ismount() missed,
+                    # or a Finder/user mount at the same path.
+                    # Probe accessibility before claiming success.
+                    self._active_mounts[profile.label] = profile
+                    if self.verify_mount_accessible(profile):
+                        logger.info("mount: adopted existing mount for %s "
+                                    "(accessible)", profile.label)
+                        return True, f"Mounted (adopted existing) at {mp}"
+                    self._active_mounts.pop(profile.label, None)
+                    return False, (
+                        f"Mount failed (stale or conflicting mount at {mp} — "
+                        f"unmount manually and retry): {err}"
+                    )
                 return False, f"Mount failed: {err}"
         except FileNotFoundError as exc:
             return False, f"Mount command not found: {exc}"

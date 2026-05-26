@@ -307,6 +307,116 @@ class TestMacOSSmbTest:
         assert "apt install smbclient" in msg
 
 
+class TestMountFileExists:
+    """mount() must probe accessibility when OS reports 'File exists'."""
+
+    def _profile(self):
+        return StorageProfile(label="NAS SIM", server="nas.local", share="SIM")
+
+    def _make_run(self, stderr):
+        """Return a subprocess.run replacement that fails with given stderr."""
+        import subprocess
+
+        class _Result:
+            returncode = 1
+            stdout = ""
+
+        r = _Result()
+        r.stderr = stderr
+
+        def _run(*args, **kwargs):
+            return r
+
+        return _run
+
+    def test_file_exists_accessible_returns_success(self, monkeypatch):
+        """'File exists' + accessible share → returns True, profile tracked."""
+        import subprocess
+
+        ns = NetworkStorageManager()
+        p = self._profile()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run",
+                            self._make_run("mount_smbfs: mount error: //nas.local/SIM: File exists"))
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: True)
+
+        ok, msg = ns.mount(p)
+
+        assert ok
+        assert p.label in ns._active_mounts
+        assert "adopted" in msg.lower() or "existing" in msg.lower()
+
+    def test_file_exists_inaccessible_returns_failure(self, monkeypatch):
+        """'File exists' + inaccessible share → returns False, profile not tracked."""
+        import subprocess
+
+        ns = NetworkStorageManager()
+        p = self._profile()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run",
+                            self._make_run("mount_smbfs: mount error: //nas.local/SIM: File exists"))
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: False)
+
+        ok, msg = ns.mount(p)
+
+        assert not ok
+        assert p.label not in ns._active_mounts
+        assert "stale" in msg.lower() or "conflicting" in msg.lower()
+
+    def test_file_exists_inaccessible_message_contains_original_error(self, monkeypatch):
+        """Failure message must include the original OS error for diagnostics."""
+        import subprocess
+
+        ns = NetworkStorageManager()
+        p = self._profile()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run",
+                            self._make_run("mount_smbfs: mount error: //nas.local/SIM: File exists"))
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: False)
+
+        _, msg = ns.mount(p)
+
+        assert "File exists" in msg
+
+    def test_file_exists_inaccessible_does_not_call_umount(self, monkeypatch):
+        """No automatic unmount is attempted — side effects on user mounts must be avoided."""
+        import subprocess
+
+        calls = []
+        original_run = subprocess.run
+
+        def _tracking_run(cmd, *args, **kwargs):
+            calls.append(cmd)
+            r = type("R", (), {"returncode": 1, "stdout": "", "stderr": "File exists"})()
+            return r
+
+        ns = NetworkStorageManager()
+        p = self._profile()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run", _tracking_run)
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: False)
+
+        ns.mount(p)
+
+        umount_calls = [c for c in calls if any("umount" in str(part) for part in c)]
+        assert umount_calls == [], f"Unexpected umount call(s): {umount_calls}"
+
+    def test_already_mounted_string_also_adopts(self, monkeypatch):
+        """'already mounted' error string is also handled (not just 'File exists')."""
+        import subprocess
+
+        ns = NetworkStorageManager()
+        p = self._profile()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run",
+                            self._make_run("mount: //nas.local/SIM already mounted on /tmp/simgui-mounts/NAS_SIM"))
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: True)
+
+        ok, _ = ns.mount(p)
+
+        assert ok
+        assert p.label in ns._active_mounts
+
 class _FakeSocket:
     """Minimal context-manager socket stub."""
     def __enter__(self):
