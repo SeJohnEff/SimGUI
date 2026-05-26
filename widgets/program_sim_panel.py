@@ -193,6 +193,29 @@ class ProgramSIMPanel(QWidget):
 
         top_layout.addWidget(actions_group)
 
+        # Safety strip — card type, source, already-programmed warning.
+        # Subscribes to card_info_changed; no network or hardware calls.
+        safety_strip = QGroupBox("Card")
+        strip_layout = QGridLayout(safety_strip)
+        strip_layout.setSpacing(4)
+        strip_layout.setContentsMargins(6, 4, 6, 4)
+
+        strip_layout.addWidget(QLabel("Type:"), 0, 0)
+        self._card_type_lbl = QLabel("—")
+        strip_layout.addWidget(self._card_type_lbl, 0, 1)
+
+        strip_layout.addWidget(QLabel("Source:"), 0, 2)
+        self._source_lbl = QLabel("—")
+        strip_layout.addWidget(self._source_lbl, 0, 3)
+
+        self._already_programmed_banner = QLabel("⚠ Already programmed (artifact exists)")
+        self._already_programmed_banner.setStyleSheet(
+            f"color: {QtTheme.get_color('warning')}; font-weight: bold;")
+        self._already_programmed_banner.hide()
+        strip_layout.addWidget(self._already_programmed_banner, 1, 0, 1, 4)
+
+        top_layout.addWidget(safety_strip)
+
         splitter.addWidget(top_widget)
 
         # Bottom pane: CSV table
@@ -254,6 +277,16 @@ class ProgramSIMPanel(QWidget):
             self._step = 1
             self._update_program_btn_state()
 
+    def _update_safety_strip(self, card_info: CardInfo) -> None:
+        """Refresh safety-strip labels from CardInfo (always called, even on clear)."""
+        self._card_type_lbl.setText(card_info.card_type or "—")
+        src = os.path.basename(card_info.source_file) if card_info.source_file else "—"
+        self._source_lbl.setText(src)
+        if card_info.already_programmed:
+            self._already_programmed_banner.show()
+        else:
+            self._already_programmed_banner.hide()
+
     def _on_card_info_changed(self, card_info: CardInfo):
         """Populate public read fields from shared CardInfo; never touch protected fields.
 
@@ -265,6 +298,7 @@ class ProgramSIMPanel(QWidget):
         CardInfo sentinel values ("-") are treated as absent.
         """
         self._update_program_btn_state()
+        self._update_safety_strip(card_info)
 
         if not card_info.iccid:
             return

@@ -303,8 +303,10 @@ class SimGUIApp(QMainWindow):
         # Tab widget
         self._tabs = QTabWidget()
 
-        # Add Card Status as first tab
+        # Card Status tab kept but hidden — safety fields now visible in Program SIM.
+        # CardStatusPanel and its signal subscriptions remain intact.
         self._tabs.addTab(self._card_panel, "Card Status")
+        self._tabs.setTabVisible(self._tabs.indexOf(self._card_panel), False)
 
         self._read_panel = ReadSIMPanel(
             self._tabs,
@@ -475,6 +477,9 @@ class SimGUIApp(QMainWindow):
                 fplmn=card_data.get("FPLMN") or raw.get("FPLMN", "-"),
                 source_file=file_path,
                 auth_status=False,
+                card_type=self._card_manager.card_type.name,
+                already_programmed=self._auto_artifact.was_already_programmed(
+                    iccid or ""),
             )
             self.state_manager.status_text = f"Card detected: {iccid}"
             self._program_panel.on_card_detected(iccid, card_data, file_path)
@@ -494,6 +499,7 @@ class SimGUIApp(QMainWindow):
                 spn=raw.get("SPN", "-"),
                 fplmn=raw.get("FPLMN", "-"),
                 auth_status=False,
+                card_type=self._card_manager.card_type.name,
             )
             self._program_panel.on_card_detected(iccid, None, None)
 
