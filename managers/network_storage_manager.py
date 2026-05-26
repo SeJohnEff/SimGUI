@@ -108,6 +108,9 @@ class NetworkStorageManager:
     def __init__(self, settings_manager=None):
         self._settings = settings_manager
         self._active_mounts: dict[str, StorageProfile] = {}
+        # Maps label → actual OS mount path when it differs from profile.mount_point
+        # (e.g. /Volumes/SIM for a Finder mount vs /tmp/simgui-mounts/SIM).
+        self._actual_mount_paths: dict[str, str] = {}
         self._cred_dir = os.path.join(
             os.environ.get("XDG_CONFIG_HOME",
                            os.path.expanduser("~/.config")),
@@ -178,16 +181,20 @@ class NetworkStorageManager:
                 if "File exists" in err or "already mounted" in err.lower():
                     # The OS reports the mount point is already occupied —
                     # either a stale VFS entry that os.path.ismount() missed,
-                    # or a Finder/user mount at the same path.
-                    # Probe accessibility before claiming success.
-                    self._active_mounts[profile.label] = profile
-                    if self.verify_mount_accessible(profile):
-                        logger.info("mount: adopted existing mount for %s "
-                                    "(accessible)", profile.label)
-                        return True, f"Mounted (adopted existing) at {mp}"
+                    # or a Finder/OS mount at a different path (e.g. /Volumes/SIM).
+                    # Find the actual mount path and probe accessibility there.
+                    actual = self._macos_find_smb_mount(profile) if _MACOS else None
+                    check_path = actual if actual else mp
+                    if self._check_path_accessible(check_path):
+                        if actual and actual != mp:
+                            self._actual_mount_paths[profile.label] = actual
+                        self._active_mounts[profile.label] = profile
+                        logger.info("mount: adopted existing mount for %s at %s",
+                                    profile.label, check_path)
+                        return True, f"Mounted (adopted existing) at {check_path}"
                     self._active_mounts.pop(profile.label, None)
                     return False, (
-                        f"Mount failed (stale or conflicting mount at {mp} — "
+                        f"Mount failed (stale or conflicting mount — "
                         f"unmount manually and retry): {err}"
                     )
                 return False, f"Mount failed: {err}"
@@ -340,12 +347,32 @@ class NetworkStorageManager:
                 self._active_mounts[p.label] = p
                 logger.info("sync_os_mounts: adopted existing mount %s",
                             p.label)
+            elif _MACOS and p.protocol == "smb":
+                # Check for Finder/OS mounts at non-SimGUI paths (e.g. /Volumes/SIM).
+                # _macos_find_smb_mount() scans the system mount table so it finds
+                # shares that os.path.ismount(profile.mount_point) misses.
+                actual = self._macos_find_smb_mount(p)
+                if actual and self._check_path_accessible(actual):
+                    self._actual_mount_paths[p.label] = actual
+                    self._active_mounts[p.label] = p
+                    logger.info("sync_os_mounts: adopted Finder/OS mount %s "
+                                "at %s", p.label, actual)
 
     def get_active_mount_paths(self) -> list[tuple[str, str]]:
-        """Return [(label, mount_point), ...] for all active mounts."""
-        return [(label, p.mount_point)
-                for label, p in self._active_mounts.items()
-                if self.is_mounted(p)]
+        """Return [(label, mount_point), ...] for all active mounts.
+
+        Uses the actual OS path (e.g. /Volumes/SIM) when the share was
+        adopted from a Finder/OS mount rather than SimGUI's own mount point.
+        """
+        result = []
+        for label, p in self._active_mounts.items():
+            path = self._actual_mount_paths.get(label, p.mount_point)
+            try:
+                if os.path.ismount(path):
+                    result.append((label, path))
+            except OSError:
+                pass
+        return result
 
     # ---- Artifact duplicate detection ----------------------------------
 
@@ -456,6 +483,27 @@ class NetworkStorageManager:
             return False
 
     # ---- Internal helpers ----------------------------------------------
+
+    def _check_path_accessible(self, path: str, timeout: int = 5) -> bool:
+        """Return True if *path* is accessible via a bounded subprocess probe.
+
+        Path-based variant of ``verify_mount_accessible`` — accepts any path,
+        not just a profile's own mount point.  Used when the actual OS mount
+        path differs from ``profile.mount_point`` (e.g. /Volumes/SIM).
+        """
+        try:
+            result = subprocess.run(
+                ["/bin/ls", path], capture_output=True, timeout=timeout,
+                stdin=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            logger.warning("_check_path_accessible: timeout probing %s", path)
+            return False
+        except Exception as exc:
+            logger.warning("_check_path_accessible: error probing %s: %s",
+                           path, exc)
+            return False
 
     def _build_mount_cmd(self, profile: StorageProfile) -> list[str]:
         """Build the OS-level mount command for the given profile.

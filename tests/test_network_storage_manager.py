@@ -338,7 +338,8 @@ class TestMountFileExists:
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
         monkeypatch.setattr(subprocess, "run",
                             self._make_run("mount_smbfs: mount error: //nas.local/SIM: File exists"))
-        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: True)
+        # _check_path_accessible is the path-based probe now used in this branch
+        monkeypatch.setattr(ns, "_check_path_accessible", lambda path, timeout=5: True)
 
         ok, msg = ns.mount(p)
 
@@ -410,7 +411,7 @@ class TestMountFileExists:
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
         monkeypatch.setattr(subprocess, "run",
                             self._make_run("mount: //nas.local/SIM already mounted on /tmp/simgui-mounts/NAS_SIM"))
-        monkeypatch.setattr(ns, "verify_mount_accessible", lambda prof: True)
+        monkeypatch.setattr(ns, "_check_path_accessible", lambda path, timeout=5: True)
 
         ok, _ = ns.mount(p)
 

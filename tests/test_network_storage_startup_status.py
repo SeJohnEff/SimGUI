@@ -432,3 +432,202 @@ class TestStartupWorkerReconnectToast:
         worker.run()
 
         assert toasts == []
+
+
+# ---------------------------------------------------------------------------
+# sync_os_mounts — Finder/OS mount adoption (macOS)
+# ---------------------------------------------------------------------------
+
+class TestSyncOsMountsFinderMount:
+    """sync_os_mounts() must adopt verified Finder mounts at non-SimGUI paths."""
+
+    def _make_ns(self, profile):
+        ns = NetworkStorageManager()
+        ns.load_profiles = MagicMock(return_value=[profile])
+        return ns
+
+    def _smb_profile(self):
+        return _make_profile(label="NAS SIM", protocol="smb",
+                             server="nas.local", share="SIM")
+
+    def test_finder_mount_accessible_is_adopted(self, monkeypatch):
+        """Finder mount at /Volumes/SIM (accessible) is adopted into active mounts."""
+        p = self._smb_profile()
+        ns = self._make_ns(p)
+        # SimGUI's own path is not mounted
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        # But _macos_find_smb_mount finds /Volumes/SIM
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_check_path_accessible",
+                            lambda path, timeout=5: True)
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ns.sync_os_mounts()
+
+        assert p.label in ns._active_mounts
+        assert ns._actual_mount_paths[p.label] == "/Volumes/SIM"
+
+    def test_finder_mount_inaccessible_is_not_adopted(self, monkeypatch):
+        """Finder mount found but inaccessible → not adopted, not green."""
+        p = self._smb_profile()
+        ns = self._make_ns(p)
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_check_path_accessible",
+                            lambda path, timeout=5: False)
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ns.sync_os_mounts()
+
+        assert p.label not in ns._active_mounts
+        assert p.label not in ns._actual_mount_paths
+
+    def test_no_finder_mount_found_is_not_adopted(self, monkeypatch):
+        """If _macos_find_smb_mount returns None, nothing is adopted."""
+        p = self._smb_profile()
+        ns = self._make_ns(p)
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(ns, "_macos_find_smb_mount", lambda prof: None)
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ns.sync_os_mounts()
+
+        assert p.label not in ns._active_mounts
+
+    def test_finder_mount_skipped_on_linux(self, monkeypatch):
+        """_macos_find_smb_mount is not called on Linux."""
+        p = self._smb_profile()
+        ns = self._make_ns(p)
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        find_called = []
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: find_called.append(1) or "/Volumes/SIM")
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", False)
+
+        ns.sync_os_mounts()
+
+        assert find_called == [], "Should not call _macos_find_smb_mount on Linux"
+        assert p.label not in ns._active_mounts
+
+    def test_already_tracked_not_rescanned(self, monkeypatch):
+        """Profile already in _active_mounts is skipped entirely."""
+        p = self._smb_profile()
+        ns = self._make_ns(p)
+        ns._active_mounts[p.label] = p  # already tracked
+        find_called = []
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: find_called.append(1) or "/Volumes/SIM")
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ns.sync_os_mounts()
+
+        assert find_called == []
+
+
+class TestGetActiveMountPathsActual:
+    """get_active_mount_paths() must return actual OS path, not always profile.mount_point."""
+
+    def _smb_profile(self):
+        return _make_profile(label="NAS SIM", protocol="smb",
+                             server="nas.local", share="SIM")
+
+    def test_returns_actual_path_when_set(self, monkeypatch):
+        """/Volumes/SIM is returned instead of /tmp/simgui-mounts/NAS_SIM."""
+        p = self._smb_profile()
+        ns = NetworkStorageManager()
+        ns._active_mounts[p.label] = p
+        ns._actual_mount_paths[p.label] = "/Volumes/SIM"
+        monkeypatch.setattr(os.path, "ismount",
+                            lambda path: path == "/Volumes/SIM")
+
+        paths = ns.get_active_mount_paths()
+
+        assert paths == [("NAS SIM", "/Volumes/SIM")]
+
+    def test_falls_back_to_profile_mount_point_when_no_actual(self, monkeypatch):
+        """No _actual_mount_paths entry → profile.mount_point is used."""
+        p = self._smb_profile()
+        ns = NetworkStorageManager()
+        ns._active_mounts[p.label] = p
+        expected_mp = p.mount_point
+        monkeypatch.setattr(os.path, "ismount",
+                            lambda path: path == expected_mp)
+
+        paths = ns.get_active_mount_paths()
+
+        assert paths == [("NAS SIM", expected_mp)]
+
+    def test_inaccessible_actual_path_excluded(self, monkeypatch):
+        """/Volumes/SIM unmounted since adoption → not returned."""
+        p = self._smb_profile()
+        ns = NetworkStorageManager()
+        ns._active_mounts[p.label] = p
+        ns._actual_mount_paths[p.label] = "/Volumes/SIM"
+        monkeypatch.setattr(os.path, "ismount", lambda path: False)
+
+        paths = ns.get_active_mount_paths()
+
+        assert paths == []
+
+
+class TestMountFileExistsActualPath:
+    """mount() 'File exists' must resolve and verify the actual OS mount path."""
+
+    def _profile(self):
+        return _make_profile(label="NAS SIM", protocol="smb",
+                             server="nas.local", share="SIM")
+
+    def _fail_run(self, stderr="mount_smbfs: mount error: //nas.local/SIM: File exists"):
+        import subprocess
+
+        class _R:
+            returncode = 1
+            stdout = ""
+
+        r = _R()
+        r.stderr = stderr
+
+        return lambda *a, **kw: r
+
+    def test_file_exists_uses_finder_path_when_accessible(self, monkeypatch):
+        """'File exists' + Finder mount at /Volumes/SIM accessible → True, records actual path."""
+        import subprocess
+
+        p = self._profile()
+        ns = NetworkStorageManager()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run", self._fail_run())
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_check_path_accessible",
+                            lambda path, timeout=5: True)
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ok, msg = ns.mount(p)
+
+        assert ok
+        assert p.label in ns._active_mounts
+        assert ns._actual_mount_paths.get(p.label) == "/Volumes/SIM"
+        assert "/Volumes/SIM" in msg
+
+    def test_file_exists_finder_path_inaccessible_returns_failure(self, monkeypatch):
+        """'File exists' + /Volumes/SIM found but inaccessible → False, not tracked."""
+        import subprocess
+
+        p = self._profile()
+        ns = NetworkStorageManager()
+        monkeypatch.setattr(os.path, "ismount", lambda mp: False)
+        monkeypatch.setattr(subprocess, "run", self._fail_run())
+        monkeypatch.setattr(ns, "_macos_find_smb_mount",
+                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_check_path_accessible",
+                            lambda path, timeout=5: False)
+        monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
+
+        ok, msg = ns.mount(p)
+
+        assert not ok
+        assert p.label not in ns._active_mounts
+        assert p.label not in ns._actual_mount_paths
