@@ -825,8 +825,6 @@ class NetworkStorageDialog(tk.Toplevel):
                 and self._ns.is_mounted(self._profiles[self._current_idx])):
             p = self._profiles[self._current_idx]
             ok, msg = self._ns.unmount(p)
-            # Mark as not auto-connect on explicit disconnect
-            p.auto_connect = False
             self._ns.save_profiles(self._profiles)
             self._status_label.configure(text=msg[:80])
             self._refresh_profile_list()
@@ -876,8 +874,7 @@ class NetworkStorageDialog(tk.Toplevel):
 
         if ok:
             self._status_label.configure(text=msg[:80])
-            # Mark for auto-reconnect on next app launch
-            profile.auto_connect = True
+            self._ns.mark_last_used(profile.label)
             self._ns.save_profiles(self._profiles)
         else:
             # Show a short summary in the status bar, full detail in popup

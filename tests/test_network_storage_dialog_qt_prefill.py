@@ -30,7 +30,6 @@ def _make_profile(**kwargs):
         share="SIM",
         username="simgui",
         password="s3cr3t",
-        auto_connect=True,
     )
     defaults.update(kwargs)
     return StorageProfile(**defaults)
@@ -73,16 +72,6 @@ class TestPrefillFromConnectedProfile:
         dlg = NetworkStorageDialogQt(ns_manager=_make_ns_manager(p))
         assert dlg.protocol_combo.currentText().lower() == "smb"
 
-    def test_auto_connect_checked(self):
-        p = _make_profile(auto_connect=True)
-        dlg = NetworkStorageDialogQt(ns_manager=_make_ns_manager(p))
-        assert dlg.auto_connect.isChecked()
-
-    def test_auto_connect_unchecked_when_profile_is_false(self):
-        p = _make_profile(auto_connect=False)
-        dlg = NetworkStorageDialogQt(ns_manager=_make_ns_manager(p))
-        assert not dlg.auto_connect.isChecked()
-
 
 class TestPasswordFieldIndicatesSavedPassword:
     """Password field must not be blank when a saved password exists."""
@@ -104,17 +93,17 @@ class TestPasswordFieldIndicatesSavedPassword:
         assert dlg.password_input.echoMode() == QLineEdit.EchoMode.Password
 
 
-class TestPrefillFallbackToAutoConnect:
-    """If no profile is mounted, fall back to first auto-connect profile."""
+class TestPrefillFallbackToLastUsed:
+    """If no profile is mounted, fall back to the last_used profile."""
 
     def test_falls_back_when_not_mounted(self):
-        p = _make_profile(auto_connect=True)
+        p = _make_profile(last_used=True)
         ns = _make_ns_manager(p, mounted=False)
         dlg = NetworkStorageDialogQt(ns_manager=ns)
         assert dlg.server_input.text() == "192.168.131.188"
 
-    def test_empty_when_no_auto_connect_and_not_mounted(self):
-        p = _make_profile(auto_connect=False)
+    def test_empty_when_no_last_used_and_not_mounted(self):
+        p = _make_profile(last_used=False)
         ns = _make_ns_manager(p, mounted=False)
         dlg = NetworkStorageDialogQt(ns_manager=ns)
         assert dlg.server_input.text() == ""

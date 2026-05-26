@@ -29,7 +29,7 @@ def _make_profile(**kwargs):
         share="simdata",
         username="simgui",
         password="secret",
-        auto_connect=True,
+        last_used=True,
     )
     defaults.update(kwargs)
     return StorageProfile(**defaults)
@@ -102,10 +102,10 @@ class TestReconnectSavedReachability:
         assert not ok
         mgr.verify_mount_accessible.assert_not_called()
 
-    def test_auto_connect_false_not_attempted(self):
-        """Profiles with auto_connect=False are never mounted."""
+    def test_not_last_used_not_attempted(self):
+        """Profiles without last_used=True are never mounted."""
         mgr = NetworkStorageManager()
-        p = _make_profile(auto_connect=False)
+        p = _make_profile(last_used=False)
         mgr.load_profiles = MagicMock(return_value=[p])
         mgr.mount = MagicMock()
 
@@ -317,11 +317,11 @@ class TestDialogPrefillNoBlockingCall:
         assert dlg.server_input.text() == "nas.example.com"
         assert dlg.share_input.text() == "simdata"
 
-    def test_untracked_share_falls_back_to_auto_connect(self):
-        """If no tracked mount, fall back to first auto_connect profile."""
+    def test_untracked_share_falls_back_to_last_used(self):
+        """If no tracked mount, fall back to the last_used profile."""
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
 
-        p = _make_profile(server="fallback.host", auto_connect=True)
+        p = _make_profile(server="fallback.host", last_used=True)
         ns = self._make_ns(p, tracked=False)
 
         dlg = NetworkStorageDialogQt(ns_manager=ns)
@@ -329,11 +329,11 @@ class TestDialogPrefillNoBlockingCall:
         assert dlg.server_input.text() == "fallback.host"
         ns.is_mounted.assert_not_called()
 
-    def test_untracked_no_auto_connect_leaves_fields_empty(self):
-        """No tracked mount, auto_connect=False → form fields empty."""
+    def test_untracked_no_last_used_leaves_fields_empty(self):
+        """No tracked mount, last_used=False → form fields empty."""
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
 
-        p = _make_profile(auto_connect=False)
+        p = _make_profile(last_used=False)
         ns = self._make_ns(p, tracked=False)
 
         dlg = NetworkStorageDialogQt(ns_manager=ns)
@@ -424,7 +424,7 @@ class TestStartupWorkerReconnectToast:
         assert error_toasts, "Expected error toast for 'NAS BACKUP'"
 
     def test_no_toast_when_no_reconnects_attempted(self):
-        """Empty results (no auto_connect profiles) → no toasts at all."""
+        """Empty results (no last_used profile) → no toasts at all."""
         worker = self._make_worker([])
 
         toasts = []

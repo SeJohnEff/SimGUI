@@ -71,8 +71,11 @@ class StorageProfile:
     export_fields: list = field(default_factory=lambda: [
         "ICCID", "IMSI", "Ki", "OPc",
     ])
-    # Auto-reconnect: True means mount this share on app startup
-    auto_connect: bool = True
+    # Last-used: True on the profile the user most recently connected.
+    # Exactly one profile must have this set at any time; reconnect_saved()
+    # attempts only this profile on startup.  mark_last_used() maintains
+    # the invariant by clearing all other profiles when it sets this flag.
+    last_used: bool = False
 
     @property
     def mount_point(self) -> str:
@@ -165,6 +168,31 @@ class NetworkStorageManager:
                 return False, "Label has to be unique. Label/name already used."
         return True, ""
 
+    def get_last_used_label(self) -> Optional[str]:
+        """Return the label of the profile with last_used=True, or None.
+
+        Scans saved profiles; the flag lives on the profile itself so no
+        separate settings key is required.  Returns None when no profile
+        has last_used=True (fresh install, legacy settings, or all profiles
+        deleted).
+        """
+        for p in self.load_profiles():
+            if p.last_used:
+                return p.label
+        return None
+
+    def mark_last_used(self, label: str) -> None:
+        """Set last_used=True on *label*; clear it on every other profile.
+
+        Persists immediately so the choice survives an app restart.  Call
+        after a successful Save & Connect so that startup auto-connect
+        prefers this profile on next launch.
+        """
+        profiles = self.load_profiles()
+        for p in profiles:
+            p.last_used = (p.label == label)
+        self.save_profiles(profiles)
+
     def delete_profile(self, label: str) -> tuple[bool, str]:
         """Remove a saved profile by label.
 
@@ -172,6 +200,9 @@ class NetworkStorageManager:
         in-flight mount state would be left orphaned.
 
         On success: removes the settings entry and deletes the credential file.
+        If the deleted profile had last_used=True, that flag disappears with
+        it — no other profile gains it, and reconnect_saved() will find no
+        last_used profile and perform no auto-connect on next startup.
         """
         if label in self._active_mounts:
             return False, "Cannot delete a connected share. Disconnect first."
@@ -283,11 +314,17 @@ class NetworkStorageManager:
             self.unmount(self._active_mounts[label])
 
     def reconnect_saved(self) -> list[tuple[str, bool, str]]:
-        """Mount every profile that has *auto_connect* enabled.
+        """Mount the single profile with ``last_used=True``, if any.
 
         Called once at startup.  Returns a list of
-        ``(label, success, message)`` for each attempted reconnection.
-        Profiles that are already mounted are silently skipped.
+        ``(label, success, message)`` with at most one entry.
+
+        Policy:
+        - If exactly one profile has ``last_used=True``, attempt to connect it.
+        - If none has ``last_used=True``, return [] (no auto-connect).
+        - If more than one has ``last_used=True`` (settings corruption),
+          keep the first in saved order, clear the rest, persist, then
+          attempt the first one.
 
         After a successful mount (including stale OS mounts), the share is
         probed for actual accessibility.  If unreachable, the profile is
@@ -296,25 +333,33 @@ class NetworkStorageManager:
         """
         results: list[tuple[str, bool, str]] = []
         profiles = self.load_profiles()
-        for p in profiles:
-            if not p.auto_connect:
-                continue
-            # Always call mount() — it handles the 'already mounted'
-            # case and ensures _active_mounts is populated.
-            ok, msg = self.mount(p)
-            if ok and not self.verify_mount_accessible(p):
-                # VFS shows mounted but server is unreachable (stale mount).
-                self._active_mounts.pop(p.label, None)
-                ok = False
-                msg = "Share not accessible (network unreachable)"
-                logger.warning("Auto-connect: %s mounted but inaccessible, "
-                               "marking disconnected", p.label)
-            results.append((p.label, ok, msg))
-            if ok:
-                logger.info("Auto-reconnected: %s", p.label)
-            else:
-                logger.warning("Auto-reconnect failed for %s: %s",
-                               p.label, msg)
+        if not profiles:
+            return results
+
+        last_used = [p for p in profiles if p.last_used]
+        if len(last_used) > 1:
+            # Normalize: more than one last_used=True is invalid.
+            for p in last_used[1:]:
+                p.last_used = False
+            self.save_profiles(profiles)
+            last_used = last_used[:1]
+
+        if not last_used:
+            return results
+
+        p = last_used[0]
+        ok, msg = self.mount(p)
+        if ok and not self.verify_mount_accessible(p):
+            self._active_mounts.pop(p.label, None)
+            ok = False
+            msg = "Share not accessible (network unreachable)"
+            logger.warning("Auto-connect: %s mounted but inaccessible, "
+                           "marking disconnected", p.label)
+        results.append((p.label, ok, msg))
+        if ok:
+            logger.info("Auto-reconnected: %s", p.label)
+        else:
+            logger.warning("Auto-reconnect failed for %s: %s", p.label, msg)
         return results
 
     def is_mounted(self, profile: StorageProfile) -> bool:

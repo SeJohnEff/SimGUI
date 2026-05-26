@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QCheckBox,
     QComboBox,
     QMessageBox,
 )
@@ -121,11 +120,6 @@ class NetworkStorageDialogQt(QDialog):
 
         layout.addLayout(form)
 
-        # Auto-connect checkbox — checked by default to match StorageProfile default
-        self.auto_connect = QCheckBox("Auto-connect on startup")
-        self.auto_connect.setChecked(True)
-        layout.addWidget(self.auto_connect)
-
         # Buttons
         button_layout = QHBoxLayout()
 
@@ -175,7 +169,7 @@ class NetworkStorageDialogQt(QDialog):
         self._populate(profile)
 
     def _prefill_from_saved(self):
-        """Populate form fields from the first mounted (or auto-connect) profile."""
+        """Populate form fields from the mounted or last-used profile."""
         if not self.ns_manager:
             return
         profiles = self.ns_manager.load_profiles()
@@ -188,9 +182,9 @@ class NetworkStorageDialogQt(QDialog):
                 self._populate(p)
                 self._select_profile_in_combo(p)
                 return
-        # Fall back to the first profile with auto_connect enabled
+        # Fall back to the last-used profile
         for p in profiles:
-            if p.auto_connect:
+            if p.last_used:
                 self._editing_label = p.label
                 self.delete_btn.setEnabled(True)
                 self._populate(p)
@@ -217,7 +211,6 @@ class NetworkStorageDialogQt(QDialog):
         if profile.password:
             self.password_input.setText(profile.password)
         self.label_input.setText(profile.label)
-        self.auto_connect.setChecked(profile.auto_connect)
 
     def _on_test(self):
         """Validate fields then start a background connectivity test."""
@@ -285,6 +278,8 @@ class NetworkStorageDialogQt(QDialog):
             else:
                 profiles.append(profile)
             self.ns_manager.save_profiles(profiles)
+            # Record as last-used so startup auto-connect prefers this profile
+            self.ns_manager.mark_last_used(profile.label)
             QMessageBox.information(self, "Success", f"Share mounted and saved:\n{msg}")
             self.accept()
         else:
@@ -325,6 +320,5 @@ class NetworkStorageDialogQt(QDialog):
             share=share,
             username=self.username_input.text().strip(),
             password=self.password_input.text() if protocol == "smb" else "",
-            auto_connect=self.auto_connect.isChecked(),
         )
         return profile

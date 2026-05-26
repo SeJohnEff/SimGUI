@@ -208,18 +208,6 @@ class TestSyncOsMounts:
         assert ns.get_active_mount_paths() == []
 
 
-class TestAutoConnectDefault:
-    """auto_connect must default to True for new profiles."""
-
-    def test_storage_profile_auto_connect_default_true(self):
-        p = StorageProfile(label="x")
-        assert p.auto_connect is True
-
-    def test_storage_profile_auto_connect_explicit_false(self):
-        p = StorageProfile(label="x", auto_connect=False)
-        assert p.auto_connect is False
-
-
 class TestMacOSSmbTest:
     """On macOS, _test_smb must use temp-mount auth test — no smbclient."""
 

@@ -663,10 +663,11 @@ class TestReconnectSaved:
         before calling mount(), skipping the _active_mounts update.
         """
         p = _make_smb_profile()
-        p.auto_connect = True
+        p.last_used = True
         ns = NetworkStorageManager()
         with patch.object(ns, "load_profiles", return_value=[p]), \
-             patch.object(ns, "is_mounted", return_value=True):
+             patch.object(ns, "is_mounted", return_value=True), \
+             patch.object(ns, "verify_mount_accessible", return_value=True):
             results = ns.reconnect_saved()
         assert len(results) == 1
         label, ok, msg = results[0]
@@ -676,7 +677,7 @@ class TestReconnectSaved:
     def test_reconnect_not_mounted_triggers_mount(self):
         """Shares not currently mounted should be mounted."""
         p = _make_smb_profile()
-        p.auto_connect = True
+        p.last_used = True
         ns = NetworkStorageManager()
         # is_mounted: first False (not yet mounted), succeeds on mount
         with patch.object(ns, "load_profiles", return_value=[p]), \
@@ -691,10 +692,10 @@ class TestReconnectSaved:
         assert ok is True
         assert p.label in ns._active_mounts
 
-    def test_reconnect_skips_non_auto_connect(self):
-        """Profiles without auto_connect=True are skipped."""
+    def test_reconnect_skips_not_last_used(self):
+        """Profiles without last_used=True are skipped."""
         p = _make_smb_profile()
-        p.auto_connect = False
+        p.last_used = False
         ns = NetworkStorageManager()
         with patch.object(ns, "load_profiles", return_value=[p]):
             results = ns.reconnect_saved()

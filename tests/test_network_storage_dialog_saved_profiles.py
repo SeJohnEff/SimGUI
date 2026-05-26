@@ -23,7 +23,6 @@ def _make_profile(**kwargs):
         share="simdata",
         username="simgui",
         password="secret",
-        auto_connect=True,
     )
     defaults.update(kwargs)
     return StorageProfile(**defaults)
@@ -110,12 +109,6 @@ class TestProfileSelectionPopulatesFields:
         dlg = NetworkStorageDialogQt(ns_manager=_make_ns([p]))
         dlg.profiles_combo.setCurrentIndex(1)
         assert dlg.label_input.text() == "My NAS"
-
-    def test_select_profile_sets_auto_connect(self):
-        p = _make_profile(auto_connect=False)
-        dlg = NetworkStorageDialogQt(ns_manager=_make_ns([p]))
-        dlg.profiles_combo.setCurrentIndex(1)
-        assert not dlg.auto_connect.isChecked()
 
     def test_select_profile_sets_protocol(self):
         p = _make_profile(protocol="nfs")

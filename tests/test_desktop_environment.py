@@ -630,7 +630,7 @@ class TestReconnectResilience:
                 "network_profiles": [
                     {"label": "NAS", "protocol": "smb",
                      "server": "192.168.1.1", "share": "data",
-                     "auto_connect": True}
+                     "last_used": True}
                 ]
             }, fh)
             path = fh.name
@@ -676,7 +676,7 @@ class TestReconnectResilience:
                 "network_profiles": [
                     {"label": "NAS", "protocol": "smb",
                      "server": "192.168.1.1", "share": "data",
-                     "auto_connect": True}
+                     "last_used": True}
                 ]
             }, fh)
             path = fh.name

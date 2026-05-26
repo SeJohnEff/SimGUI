@@ -185,7 +185,7 @@ class TestDeleteProfile:
             {"label": "NAS SIM", "protocol": "smb", "server": "nas.local",
              "share": "SIM", "username": "", "domain": "",
              "mount_options": "", "export_subdir": "artifacts",
-             "export_fields": ["ICCID"], "auto_connect": True}
+             "export_fields": ["ICCID"]}
         ]}
 
         class _FakeSettings:
@@ -369,10 +369,10 @@ class TestEditingLabelTracking:
 
         assert dlg._editing_label == "NAS SIM"
 
-    def test_editing_label_set_by_prefill_auto_connect(self):
-        """_prefill_from_saved sets _editing_label via auto_connect fallback."""
+    def test_editing_label_set_by_prefill_last_used(self):
+        """_prefill_from_saved sets _editing_label via last_used fallback."""
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
-        p = _make_profile("NAS SIM", auto_connect=True)
+        p = _make_profile("NAS SIM", last_used=True)
         ns = _make_ns_mock()
         ns.load_profiles.return_value = [p]
         ns.is_tracked_as_mounted.return_value = False
