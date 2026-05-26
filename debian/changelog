@@ -1,3 +1,25 @@
+simgui (0.5.57) unstable; urgency=medium
+
+  * feat: macOS SMB NAS auto-program — saved network profiles, startup
+    reconnect from last-used profile, Finder-mount adoption, reachability
+    guard before green status
+  * feat: saved-profile dropdown and rename button in Network Storage dialog
+  * feat: enforce unique network profile labels
+  * fix: NOT_POWERED card state — canonical status text; CardWatcher liveness
+    retry via _last_read_failed for same-ATR re-seat
+  * fix: mirror global card status in Program SIM; no local divergent wording
+  * fix: restore no-reader / amber share indicator status mapping
+  * fix: run network storage test off UI thread
+  * fix: abort programming on ADM authentication failure
+  * fix: SJA5 delta-write restricted to IMSI/FPLMN with read-back verify
+  * fix: auto-artifact dirs excluded from scan
+  * fix: macOS unmount without sudo; SMB test via temp mount
+  * fix: ICCID index returns fresh data after CSV replacement
+  * fix: strong refs for background workers (GC race)
+  * refactor: remove dead Card Status panel; default tab → Program SIM
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 27 May 2026 00:00:00 +0000
+
 simgui (0.5.56) unstable; urgency=medium
 
   * chore: remove simulator mode, simulator package, and all associated files
