@@ -90,6 +90,9 @@ class CardWatcher:
         # without a reader, force pyscard re-initialization to handle
         # stale PC/SC context or pcscd becoming available.
         self._no_reader_poll_count: int = 0
+        # Set True when _read_and_notify() fires on_error so the next poll
+        # retries the read even if the ATR is unchanged (same-ATR re-seat).
+        self._last_read_failed: bool = False
 
         # Callbacks (set by UI layer)
         self.on_card_detected: Optional[
@@ -137,6 +140,7 @@ class CardWatcher:
         self._last_atr = None
         self._card_present = False
         self._no_card_streak = 0
+        self._last_read_failed = False
         logger.info("CardWatcher stopped")
 
     def pause(self):
@@ -249,7 +253,7 @@ class CardWatcher:
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             atr = msg
-            if not self._card_present or atr != self._last_atr:
+            if not self._card_present or atr != self._last_atr or self._last_read_failed:
                 self._card_present = True
                 self._last_atr = atr
                 logger.info("CardWatcher: card present (ATR=%s), reading...", atr)
@@ -280,6 +284,7 @@ class CardWatcher:
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
+                self._last_read_failed = False
                 if not hasattr(self, "_atr_iccid_cache"):
                     self._atr_iccid_cache = {}
                 self._atr_iccid_cache.clear()
@@ -318,6 +323,7 @@ class CardWatcher:
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
+                self._last_read_failed = False
                 if not hasattr(self, "_atr_iccid_cache"):
                     self._atr_iccid_cache = {}
                 self._atr_iccid_cache.clear()
@@ -351,6 +357,7 @@ class CardWatcher:
         if ok:
             iccid = self._cm.read_iccid()
             if iccid:
+                self._last_read_failed = False
                 self._last_iccid = iccid
                 self._handle_new_card(iccid)
                 return
@@ -359,6 +366,7 @@ class CardWatcher:
         # in case this is a just-programmed card being re-inserted.
         cached_iccid = self._atr_iccid_cache.get(self._last_atr)
         if cached_iccid:
+            self._last_read_failed = False
             logger.info("CardWatcher: using cached ICCID %s for ATR %s",
                         cached_iccid, self._last_atr)
             self._last_iccid = cached_iccid
@@ -372,6 +380,7 @@ class CardWatcher:
             # pySim-read could not communicate with it (e.g. T0 protocol mismatch,
             # CardConnectionException).  This is a READ_ERROR, not BLANK.
             # Calling on_card_unknown here would incorrectly set BLANK state.
+            self._last_read_failed = True
             logger.warning("CardWatcher: card present but pySim-read failed: %s", msg)
             if self.on_error:
                 try:
@@ -382,6 +391,7 @@ class CardWatcher:
 
         # ok=True but no ICCID → card was contacted successfully and is
         # genuinely blank/unprogrammed (gialersim).  Signal BLANK state.
+        self._last_read_failed = False
         self._last_iccid = None
         if self.on_card_unknown:
             try:

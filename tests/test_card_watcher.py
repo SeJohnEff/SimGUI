@@ -1108,3 +1108,73 @@ class TestHandleNewCardLookupDiagnostics:
         assert "on_card_unknown" in log_text, (
             f"Expected emit-log before on_card_unknown; got:\n{log_text}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for _last_read_failed retry flag
+# ---------------------------------------------------------------------------
+
+class TestLastReadFailed:
+    """_last_read_failed ensures same-ATR cards are retried after a read failure
+    and that the flag is correctly cleared on success or card removal."""
+
+    _ATR = "3B 9F 96 80 1F"
+
+    def _make_watcher(self, detect_ok=True, iccid=None):
+        cm = FakeCardManager()
+        cm.detect_ok = detect_ok
+        cm.iccid = iccid
+        return CardWatcher(cm), cm
+
+    def test_same_atr_last_read_failed_true_triggers_retry(self):
+        """Same ATR + _last_read_failed=True → _read_and_notify is called."""
+        w, cm = self._make_watcher(detect_ok=True, iccid=None)
+        w._card_present = True
+        w._last_atr = self._ATR
+        w._last_read_failed = True
+        w._handle_probe_result(True, self._ATR)
+        # _read_and_notify calls detect_card, incrementing detect_call_count
+        assert cm.detect_call_count > 0
+
+    def test_same_atr_last_read_failed_false_no_retry(self):
+        """Same ATR + _last_read_failed=False → _read_and_notify is not called."""
+        w, cm = self._make_watcher(detect_ok=True, iccid=None)
+        w._card_present = True
+        w._last_atr = self._ATR
+        w._last_read_failed = False
+        w._handle_probe_result(True, self._ATR)
+        # Same card, no prior failure — detect_card must not be called
+        assert cm.detect_call_count == 0
+
+    def test_last_read_failed_set_when_pysim_read_fails(self):
+        """When pySim-read returns ok=False, _last_read_failed is set to True."""
+        w, cm = self._make_watcher(detect_ok=False)
+        w._last_read_failed = False
+        w._last_atr = self._ATR
+        w._read_and_notify()
+        assert w._last_read_failed is True
+
+    def test_last_read_failed_clears_on_successful_read(self):
+        """After a successful pySim-read (ICCID returned), _last_read_failed is False."""
+        w, cm = self._make_watcher(detect_ok=True, iccid="8949440000001672706")
+        w._last_read_failed = True
+        w._last_atr = self._ATR
+        w._read_and_notify()
+        assert w._last_read_failed is False
+
+    def test_last_read_failed_clears_on_blank_card_read(self):
+        """ok=True but no ICCID (blank card) also clears _last_read_failed."""
+        w, cm = self._make_watcher(detect_ok=True, iccid=None)
+        w._last_read_failed = True
+        w._last_atr = self._ATR
+        w._read_and_notify()
+        assert w._last_read_failed is False
+
+    def test_last_read_failed_clears_on_card_removal(self):
+        """Card removal via probe clears _last_read_failed."""
+        w, cm = self._make_watcher()
+        w._card_present = True
+        w._last_iccid = "8949440000001672706"  # non-None → skip blank-card debounce
+        w._last_read_failed = True
+        w._handle_probe_result(False, "No card in reader")
+        assert w._last_read_failed is False

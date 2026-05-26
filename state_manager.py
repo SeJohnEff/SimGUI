@@ -56,6 +56,7 @@ class CardState(Enum):
     AUTHENTICATED = auto() # ADM1 verified
     ERROR = auto()         # Reader / communication error
     BLANK = auto()         # Card present but no ICCID (factory-blank)
+    NOT_POWERED = auto()   # Card physically present but not powered; re-seat required
 
 
 # ---------------------------------------------------------------------------

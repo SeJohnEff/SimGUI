@@ -246,6 +246,10 @@ class ProgramSIMPanel(QWidget):
             # removal — preserve the card-present display.
             if not (self._detected_non_empty or self._step >= 1):
                 self.on_card_removed()
+        elif card_state == CardState.NOT_POWERED:
+            # Card physically present but not readable — keep panel idle.
+            # Status text comes from StateManager.status_changed; no local wording.
+            self._update_program_btn_state()
         elif card_state in (CardState.DETECTED, CardState.AUTHENTICATED):
             self._detected_non_empty = True
             self._step = 1

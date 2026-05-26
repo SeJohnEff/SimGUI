@@ -190,6 +190,15 @@ class _CardWatcherRelay(QObject):
 # Main Application Window
 # ---------------------------------------------------------------------------
 
+_NOT_POWERED_TEXT = "Card not powered - re-seat the SIM in the reader"
+
+# Substrings in pySim-mapped error messages that indicate a not-powered condition.
+_NOT_POWERED_PATTERNS = (
+    "card not powered",
+    "re-seat the sim",
+)
+
+
 def _map_watcher_error(
     state_manager: "StateManager",
     msg: str,
@@ -198,10 +207,14 @@ def _map_watcher_error(
 ) -> None:
     """Map a CardWatcher error to StateManager card_state + status_text.
 
-    Sets card_state = ERROR and status_text = msg when the reader is
-    genuinely absent ('No smart-card reader' in msg) or when the current
-    state is not a card-present state and the card is not physically present
-    (covers other transient-becomes-permanent errors).
+    NOT_POWERED: card is physically present but not electrically powered/readable.
+    Detected by 'card not powered' or 're-seat' substrings in the error message.
+    Sets card_state = NOT_POWERED and canonical status_text.
+
+    ERROR: reader absent or PCSC communication failure with no card present.
+    Sets card_state = ERROR and status_text = msg when the reader is genuinely
+    absent ('No smart-card reader' in msg) or when no card has been physically
+    confirmed present.
 
     Guard: if a card is physically in the reader (DETECTED/BLANK/AUTHENTICATED,
     or _card_present=True), transient PCSC errors do NOT demote the state to
@@ -209,10 +222,19 @@ def _map_watcher_error(
 
     Always calls report_error to log the message regardless of state change.
     """
+    msg_lower = msg.lower()
+    is_not_powered = any(p in msg_lower for p in _NOT_POWERED_PATTERNS)
+    if is_not_powered:
+        state_manager.card_state = CardState.NOT_POWERED
+        state_manager.status_text = _NOT_POWERED_TEXT
+        state_manager.report_error(msg)
+        return
+
     is_no_reader = "No smart-card reader" in msg
     if is_no_reader or (
         current_state
-        not in (CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED)
+        not in (CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED,
+                CardState.NOT_POWERED)
         and not card_physically_present
     ):
         state_manager.card_state = CardState.ERROR

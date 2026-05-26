@@ -89,7 +89,18 @@ class CardState(Enum):
     AUTHENTICATED # Card inserted, ADM1 verified
     ERROR         # Reader or PCSC communication error (may be transient)
     BLANK         # Card inserted but no ICCID (factory-blank / gialersim)
+    NOT_POWERED   # Card physically inserted but not electrically powered; re-seat required
 ```
+
+**NOT_POWERED canonical status text:** `"Card not powered - re-seat the SIM in the reader"`
+
+Detected when pySim-read returns an error containing `"card not powered"` or `"re-seat the sim"`
+(case-insensitive). The card is physically in the reader (PCSC returned an ATR) but pySim-read
+cannot communicate with it electrically. The user must remove and re-seat the SIM.
+
+On the next poll, `CardWatcher._last_read_failed=True` causes `_read_and_notify` to be retried
+even when the ATR is unchanged (same-ATR re-seat). If the retry succeeds, the state transitions
+to `BLANK` or `DETECTED`.
 
 ### Mapping to logical states
 
@@ -100,11 +111,16 @@ class CardState(Enum):
 | AUTHENTICATED | CONNECTED   | INSERTED          | READABLE       |
 | BLANK         | CONNECTED   | INSERTED          | PARTIAL_READ   |
 | ERROR         | UNKNOWN*    | UNKNOWN*          | READ_ERROR*    |
+| NOT_POWERED   | CONNECTED   | INSERTED          | READ_ERROR     |
 
 \* ERROR is ambiguous — it conflates no-reader, reader hardware error, and transient
 PCSC failure. Use the error message content to distinguish:
 - Message contains `"No smart-card reader"` → reader physically absent
 - Other messages → transient PCSC error; card may still be physically present
+
+NOT_POWERED is unambiguous: the card is physically inserted (PCSC returned an ATR) but
+pySim-read failed with a "not powered" error. It is distinct from ERROR because the card
+presence is confirmed and the corrective action is known (re-seat).
 
 ---
 
@@ -114,11 +130,14 @@ These rules are non-negotiable. Violating them causes incorrect UI behaviour.
 
 ### Reader and card presence
 
-- If `CardState in (BLANK, DETECTED, AUTHENTICATED)` → card is physically inserted.
-  Do NOT show "Insert a SIM card...".
+- If `CardState in (BLANK, DETECTED, AUTHENTICATED, NOT_POWERED)` → card is physically
+  inserted. Do NOT show "Insert a SIM card...".
 - If `CardState == NO_CARD` → reader is connected but no card; show "Insert a SIM card...".
 - If `CardState == ERROR` → unknown; preserve the last known card-present state if
   any was established in this session.
+- If `CardState == NOT_POWERED` → card is physically inserted but not readable. Show the
+  canonical status text `"Card not powered - re-seat the SIM in the reader"` from
+  `StateManager.status_text`. Never show "Insert a SIM card..." for this state.
 
 ### ERROR handling
 
@@ -128,10 +147,14 @@ These rules are non-negotiable. Violating them causes incorrect UI behaviour.
 - `ERROR` may be set only if:
   1. The error message contains `"No smart-card reader"` (reader physically absent), OR
   2. No card has ever been physically confirmed present in this session
-     (`_card_present == False` AND `card_state not in (BLANK, DETECTED, AUTHENTICATED)`)
+     (`_card_present == False` AND
+     `card_state not in (BLANK, DETECTED, AUTHENTICATED, NOT_POWERED)`)
 - When a widget receives `card_state_changed(ERROR)` and has previously established
   card-present state (`_step >= 1` or equivalent), it must preserve the card-present
   display rather than resetting to "Insert a SIM card...".
+- A `"card not powered"` error always sets `NOT_POWERED`, never `ERROR`, regardless of
+  prior state. `NOT_POWERED` is in the card-present guard so a subsequent generic PCSC
+  error will not demote it to `ERROR`.
 
 ### Missing ICCID / IMSI
 
@@ -188,13 +211,14 @@ handling `CardState.ERROR`.
 
 ## UI Mapping — Program SIM Tab
 
-| Condition                                            | Status message                          | Program Card |
-|------------------------------------------------------|-----------------------------------------|--------------|
-| No reader connected (`ERROR` from no-reader message) | "No card reader detected"               | Disabled     |
-| Reader connected, no card (`NO_CARD`)                | "Insert a SIM card..."                  | Disabled     |
-| Card inserted, no form data (`BLANK`/`DETECTED`)     | "Blank/Card detected — select data..."  | Disabled     |
-| Card inserted, form data present                     | "Card detected — ready to program"      | **Enabled**  |
-| `ERROR` with prior card presence (`_step >= 1`)      | Preserve last card-present message      | Preserved    |
+| Condition                                            | Status message                                          | Program Card |
+|------------------------------------------------------|---------------------------------------------------------|--------------|
+| No reader connected (`ERROR` from no-reader message) | "No card reader detected"                               | Disabled     |
+| Reader connected, no card (`NO_CARD`)                | "Insert a SIM card..."                                  | Disabled     |
+| Card inserted, no form data (`BLANK`/`DETECTED`)     | "Blank/Card detected — select data..."                  | Disabled     |
+| Card inserted, form data present                     | "Card detected — ready to program"                      | **Enabled**  |
+| `ERROR` with prior card presence (`_step >= 1`)      | Preserve last card-present message                      | Preserved    |
+| `NOT_POWERED`                                        | "Card not powered - re-seat the SIM in the reader"      | Disabled     |
 
 ### Program Card enablement rule
 
@@ -202,6 +226,10 @@ Program Card is enabled when ALL of the following are true:
 1. `card_state in (BLANK, DETECTED, AUTHENTICATED)` — card is physically inserted, OR
    `_step >= 1` — card presence was established before a transient error
 2. At least one form field has data (IMSI, Ki, OPc, ADM1, etc.)
+
+`NOT_POWERED` keeps the panel idle (`_step` does not advance). The status text comes
+exclusively from `StateManager.status_text` via the `status_changed` signal — the panel
+sets no local wording for this state.
 
 ICCID and IMSI are NOT required. Blank cards have neither.
 
@@ -220,6 +248,7 @@ stateDiagram-v2
     detected : Card Detected\n(DETECTED — has ICCID)
     authenticated : Authenticated\n(AUTHENTICATED)
     transient_err : Transient Error\n(ERROR — card still present)
+    not_powered : Not Powered\n(NOT_POWERED — card present\nbut not electrically powered)
 
     no_reader --> no_card : reader connected
     no_card --> no_reader : reader removed
@@ -227,11 +256,16 @@ stateDiagram-v2
     no_card --> reading : PCSC ATR detected
     reading --> blank : pySim-read: no ICCID\n(blank/gialersim)
     reading --> detected : pySim-read: ICCID found
-    reading --> blank : pySim-read failed\n(PCSC confirmed card present)
+    reading --> not_powered : pySim-read failed\n("not powered" error)
     reading --> transient_err : probe error during read\n(_card_present=True)
 
     transient_err --> reading : next probe succeeds\n(same ATR → skip re-read)
     transient_err --> no_card : two consecutive\n"No card" probes
+
+    not_powered --> blank : re-seat + retry succeeds\n(no ICCID)
+    not_powered --> detected : re-seat + retry succeeds\n(ICCID found)
+    not_powered --> not_powered : retry still fails\n(still not powered)
+    not_powered --> no_card : card removed
 
     blank --> authenticated : ADM1 provided\n(no VERIFY for blank)
     detected --> authenticated : ADM1 VERIFY success
@@ -246,6 +280,7 @@ stateDiagram-v2
     blank --> no_reader : reader disconnected
     detected --> no_reader : reader disconnected
     authenticated --> no_reader : reader disconnected
+    not_powered --> no_reader : reader disconnected
 ```
 
 ---

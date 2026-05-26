@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from main import _map_watcher_error
+from main import _NOT_POWERED_TEXT, _map_watcher_error
 from state_manager import CardState, ShareStatus, StateManager
 
 _app = QApplication.instance() or QApplication(sys.argv)
@@ -105,6 +105,42 @@ class TestRepeatedNoReaderEventsStable:
         _map_watcher_error(sm, NO_READER_MSG, CardState.NO_CARD, False)
         _map_watcher_error(sm, NO_READER_MSG, CardState.ERROR, False)
         assert sm.card_state == CardState.ERROR
+
+
+class TestNotPoweredMapsToNotPoweredState:
+    """'Card not powered' error must set NOT_POWERED state with canonical
+    status text — not ERROR."""
+
+    def test_not_powered_msg_sets_not_powered_state(self):
+        sm = StateManager()
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
+        assert sm.card_state == CardState.NOT_POWERED
+
+    def test_not_powered_msg_sets_canonical_status_text(self):
+        sm = StateManager()
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
+        assert sm.status_text == _NOT_POWERED_TEXT
+
+    def test_not_powered_does_not_set_error_state(self):
+        sm = StateManager()
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
+        assert sm.card_state != CardState.ERROR
+
+    def test_reseat_substring_case_insensitive_maps_to_not_powered(self):
+        sm = StateManager()
+        _map_watcher_error(sm, "Card not powered - Re-Seat the SIM in the reader",
+                           CardState.NO_CARD, False)
+        assert sm.card_state == CardState.NOT_POWERED
+
+    def test_not_powered_state_preserved_on_subsequent_generic_error(self):
+        """NOT_POWERED is in the card-present guard — a subsequent generic PCSC
+        error must not demote it to ERROR."""
+        sm = StateManager()
+        sm.card_state = CardState.NOT_POWERED
+        sm.status_text = _NOT_POWERED_TEXT
+        _map_watcher_error(sm, "Some PCSC glitch", CardState.NOT_POWERED, True)
+        assert sm.card_state == CardState.NOT_POWERED
+        assert sm.status_text == _NOT_POWERED_TEXT
 
 
 class TestTransientErrorDoesNotDemoteCardPresent:

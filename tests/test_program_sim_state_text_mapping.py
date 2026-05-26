@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from main import _map_watcher_error
+from main import _NOT_POWERED_TEXT, _map_watcher_error
 from state_manager import CardState, StateManager
 from widgets.program_sim_panel import ProgramSIMPanel
 
@@ -146,4 +146,25 @@ class TestProgramSimRepeatedNoReader:
     def test_repeated_no_reader_never_shows_insert_sim(self, panel, sm):
         _map_watcher_error(sm, NO_READER_MSG, CardState.NO_CARD, False)
         _map_watcher_error(sm, NO_READER_MSG, CardState.ERROR, False)
+        assert "Insert a SIM card" not in _action_text(panel)
+
+
+# ---------------------------------------------------------------------------
+# 6. NOT_POWERED → Program SIM shows canonical status text, not local wording
+# ---------------------------------------------------------------------------
+
+class TestProgramSimNotPoweredText:
+    """NOT_POWERED state: Program SIM must display the global canonical status
+    text.  No local 'Insert a SIM card...' or other local wording."""
+
+    def test_not_powered_shows_canonical_text(self, panel, sm):
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
+        assert _NOT_POWERED_TEXT in _action_text(panel)
+
+    def test_not_powered_matches_global_status(self, panel, sm):
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
+        assert _action_text(panel) == sm.status_text
+
+    def test_not_powered_does_not_show_insert_sim(self, panel, sm):
+        _map_watcher_error(sm, _NOT_POWERED_TEXT, CardState.NO_CARD, False)
         assert "Insert a SIM card" not in _action_text(panel)
