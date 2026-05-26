@@ -23,6 +23,7 @@ ENV/
 
 # Build artifacts
 GITHASH
+dist.old/
 
 # macOS
 .DS_Store
