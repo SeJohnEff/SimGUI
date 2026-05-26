@@ -953,5 +953,228 @@ class TestIccidCheckSkippedForBlankAndGialersim(unittest.TestCase):
         mock_read.assert_not_called()
 
 
+class TestWrongADMPySimOutput(unittest.TestCase):
+    """Wrong ADM1: pySim-shell may exit 0 but print verify failure to stdout.
+
+    Regression tests for the bug where SimGUI logged "ADM1 authentication
+    successful (safe mode)" even though pySim-shell stdout contained
+    "Failed to verify chv_no 0x0A ..., 2 tries left." and then proceeded
+    to burn a second attempt via the programming call.
+    """
+
+    # pySim output text for a failed verify_adm call (exit code 0)
+    FAILED_VERIFY_STDOUT = (
+        "Failed to verify chv_no 0x0A with code "
+        "0x3838383838383838, 2 tries left."
+    )
+
+    def _make_sja5_manager(self):
+        """Non-empty SJA5 card manager, pre-detection state."""
+        from managers.card_manager import CardManager, CLIBackend, CardType
+        cm = CardManager.__new__(CardManager)
+        cm.cli_path = '/opt/pysim'
+        cm.cli_backend = CLIBackend.PYSIM
+        cm._venv_python = None
+        cm._pcsc_reader_index = 0
+        cm.card_type = CardType.SJA5
+        cm.authenticated = False
+        cm.card_info = {
+            'ICCID': '8946000000000000001',
+            'IMSI': '001010000000001',
+        }
+        cm._authenticated_adm1_hex = None
+        cm._original_card_data = {
+            'ICCID': '8946000000000000001',
+            'IMSI': '001010000000001',
+        }
+        cm.card_blocked = False
+        cm._adm1_remaining_attempts = 3
+        cm._safety_override_acknowledged = False
+        return cm
+
+    # ------------------------------------------------------------------
+    # 1. Pattern detection: "failed to verify" / "tries left" in stdout
+    #    must cause _run_pysim_shell_impl to return False even with exit 0
+    # ------------------------------------------------------------------
+
+    @patch('subprocess.run')
+    def test_failed_to_verify_in_stdout_returns_false(self, mock_run):
+        """_run_pysim_shell_safe must return False when stdout has 'failed to verify'."""
+        import subprocess
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=self.FAILED_VERIFY_STDOUT,
+            stderr='',
+        )
+        cm = self._make_sja5_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_safe('verify_adm --pin-is-hex 3838383838383838')
+        self.assertFalse(ok, "Must return False when 'failed to verify' is in stdout")
+        self.assertIn('failed to verify', stdout.lower())
+
+    @patch('subprocess.run')
+    def test_tries_left_in_stdout_returns_false(self, mock_run):
+        """_run_pysim_shell_safe must return False when stdout has 'tries left'."""
+        import subprocess
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='Wrong CHV, 2 tries left.',
+            stderr='',
+        )
+        cm = self._make_sja5_manager()
+        ok, stdout, stderr = cm._run_pysim_shell_safe('verify_adm --pin-is-hex 3838383838383838')
+        self.assertFalse(ok, "Must return False when 'tries left' is in stdout")
+
+    # ------------------------------------------------------------------
+    # 2. authenticate() must return (False, ...) on verify failure
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_authenticate_failed_verify_returns_failure(
+            self, mock_safe, mock_retry):
+        """authenticate() must return False when pySim reports verify failure."""
+        cm = self._make_sja5_manager()
+        mock_retry.side_effect = [3, 2]   # pre-flight=3, post-failure=2
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        ok, msg = cm.authenticate('88888888')
+
+        self.assertFalse(ok)
+        self.assertFalse(cm.authenticated, "authenticated must NOT be set after ADM failure")
+        self.assertIsNone(cm._authenticated_adm1_hex)
+        self.assertIn('FAILED', msg.upper())
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_authenticate_failed_verify_includes_remaining_attempts(
+            self, mock_safe, mock_retry):
+        """Error message must include remaining-attempts count from retry counter."""
+        cm = self._make_sja5_manager()
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        ok, msg = cm.authenticate('88888888')
+
+        self.assertFalse(ok)
+        self.assertIn('2', msg)
+        self.assertIn('attempt', msg.lower())
+
+    # ------------------------------------------------------------------
+    # 3. programming aborts before IMSI/FPLMN writes when auth failed
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_program_card_refused_when_authenticate_failed(
+            self, mock_safe, mock_retry):
+        """program_card() must refuse when authenticate() failed due to wrong ADM."""
+        cm = self._make_sja5_manager()
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        ok, _ = cm.authenticate('88888888')
+        self.assertFalse(ok)
+        self.assertFalse(cm.authenticated)
+
+        ok_prog, msg_prog = cm.program_card(
+            {'IMSI': '001010000000099', 'FPLMN': '24001'})
+        self.assertFalse(ok_prog)
+        self.assertIn('authenticated', msg_prog.lower())
+
+    @patch('managers.card_manager.CardManager._run_pysim_shell')
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_pysim_shell_a_flag_never_called_after_auth_failure(
+            self, mock_safe, mock_retry, mock_shell_a):
+        """The -A variant (write shell) must never be called after auth failure."""
+        cm = self._make_sja5_manager()
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        cm.authenticate('88888888')
+        cm.program_card({'IMSI': '001010000000099', 'FPLMN': '24001'})
+
+        mock_shell_a.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # 4. no clean-success result on ADM failure
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_no_success_result_on_adm_failure(self, mock_safe, mock_retry):
+        """program_card() must not return (True, ...) after ADM failure."""
+        cm = self._make_sja5_manager()
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        cm.authenticate('88888888')
+        ok, _ = cm.program_card({'IMSI': '001010000000099'})
+
+        self.assertFalse(ok, "Must not return success after ADM authentication failure")
+
+    # ------------------------------------------------------------------
+    # 5. already-read card data is preserved after ADM failure
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_card_info_not_poisoned_by_adm_failure(self, mock_safe, mock_retry):
+        """Failed authenticate() must not clear or modify already-read card_info."""
+        cm = self._make_sja5_manager()
+        original_card_info = dict(cm.card_info)
+        mock_retry.side_effect = [3, 2]
+        mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
+
+        cm.authenticate('88888888')
+
+        self.assertEqual(cm.card_info, original_card_info,
+                         "card_info must be unchanged after ADM failure")
+
+    # ------------------------------------------------------------------
+    # 6. read-only card detection does NOT require ADM1
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager._read_public_fields_via_shell')
+    @patch('managers.card_manager.CardManager._run_cli')
+    def test_detect_card_does_not_require_adm1(self, mock_cli, mock_shell):
+        """detect_card() must succeed without any ADM1 interaction."""
+        mock_cli.return_value = (
+            True,
+            'ICCID: 8946000000000000001\nIMSI: 001010000000001\n'
+            'Autodetected card type: sysmoISIM-SJA5',
+            '',
+        )
+        mock_shell.return_value = None
+        cm = self._make_sja5_manager()
+        cm.card_info = {}
+        cm._original_card_data = None
+
+        with patch.object(cm, 'check_adm1_retry_counter') as mock_retry:
+            ok, msg = cm.detect_card()
+            mock_retry.assert_not_called()
+
+        self.assertTrue(ok)
+        self.assertIn('ICCID', cm.card_info)
+
+    # ------------------------------------------------------------------
+    # 7. valid ADM success path still proceeds (regression guard)
+    # ------------------------------------------------------------------
+
+    @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
+    @patch('managers.card_manager.CardManager._run_pysim_shell_safe')
+    def test_valid_adm_authenticate_succeeds(self, mock_safe, mock_retry):
+        """Correct ADM1 must still result in successful authentication."""
+        cm = self._make_sja5_manager()
+        mock_retry.return_value = 3
+        mock_safe.return_value = (True, 'SimGUI sim APDU> verify_adm ok', '')
+
+        ok, msg = cm.authenticate('88888888')
+
+        self.assertTrue(ok)
+        self.assertTrue(cm.authenticated)
+        self.assertEqual(cm._authenticated_adm1_hex, '3838383838383838')
+
+
 if __name__ == '__main__':
     unittest.main()

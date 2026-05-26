@@ -533,6 +533,8 @@ class CardManager:
         'got 6f00',           # "Expected 9000 and got 6f00"
         'got 6982',           # "Expected 9000 and got 6982"
         'got 6983',           # "Expected 9000 and got 6983"
+        'failed to verify',   # pySim user-message for verify_adm failure
+        'tries left',         # "N tries left" suffix in verify failure output
     )
 
     def _run_pysim_shell_safe(self, commands: str,
@@ -1075,6 +1077,23 @@ class CardManager:
                 )
             return False, detail
 
+        # "Failed to verify chv_no" / "N tries left" \u2014 pySim user-message for
+        # verify_adm failure.  pySim-shell prints this to stdout and exits 0;
+        # _PYSIM_SHELL_CMD_ERRORS catches it and makes _run_pysim_shell_impl
+        # return False, but we need an explicit check here to give a clear
+        # error message with remaining-attempts info.
+        if 'failed to verify' in combined or 'tries left' in combined:
+            remaining = self.check_adm1_retry_counter()
+            remaining_msg = ""
+            if remaining is not None:
+                remaining_msg = f" ({remaining} attempt(s) remaining)"
+                if remaining == 0:
+                    self.card_blocked = True
+            return False, (
+                f"Authentication FAILED \u2014 wrong ADM1 key.{remaining_msg} "
+                f"3 wrong attempts = permanent card lock!"
+            )
+
         error_msg = self._clean_pysim_error(stderr) if stderr else "Authentication failed"
         return False, f"Authentication failed: {error_msg}"
 
@@ -1382,6 +1401,21 @@ class CardManager:
             )
 
         combined = (stdout + '\n' + stderr).lower()
+        # ADM1 auth failure detected in pySim-shell output (even with exit 0).
+        # This is a safety guard: primary protection is authenticate() refusing
+        # to set authenticated=True; this catches the residual case where the
+        # -A flag auth attempt during programming itself fails.
+        if 'failed to verify' in combined or 'tries left' in combined:
+            remaining = self.check_adm1_retry_counter()
+            remaining_msg = ""
+            if remaining is not None:
+                remaining_msg = f" ({remaining} attempt(s) remaining)"
+                if remaining == 0:
+                    self.card_blocked = True
+            return False, (
+                f"Programming ABORTED — ADM1 authentication failed.{remaining_msg} "
+                f"3 wrong attempts = permanent card lock!"
+            )
         if 'sw mismatch' in combined:
             error_detail = self._clean_pysim_error(stderr) if stderr else "write error"
             return False, f"Programming failed (write error): {error_detail}"
