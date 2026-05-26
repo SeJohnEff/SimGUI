@@ -324,21 +324,27 @@ class SimGUIApp(QMainWindow):
     @staticmethod
     def _get_git_hash() -> str:
         """Return short git commit hash, or empty string if unavailable."""
+        import sys as _sys
         import subprocess as _sp
         app_dir = os.path.dirname(os.path.abspath(__file__))
+        # In a packaged app sys.frozen is True. Never call git there:
+        # the git stub on macOS triggers an Xcode CLT install dialog on
+        # machines that don't have developer tools installed.
+        if not getattr(_sys, "frozen", False):
+            try:
+                r = _sp.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    capture_output=True, text=True, timeout=3,
+                    cwd=app_dir,
+                )
+                if r.returncode == 0:
+                    return r.stdout.strip()
+            except Exception:
+                pass
+        # Packaged app: read hash written by build-macos-app.sh at build time.
+        githash_file = os.path.join(app_dir, "GITHASH")
         try:
-            r = _sp.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True, timeout=3,
-                cwd=app_dir,
-            )
-            if r.returncode == 0:
-                return r.stdout.strip()
-        except Exception:
-            pass
-        build_file = os.path.join(app_dir, "BUILD")
-        try:
-            with open(build_file, "r") as fh:
+            with open(githash_file, "r") as fh:
                 return fh.read().strip()
         except OSError:
             pass

@@ -21,6 +21,9 @@ ENV/
 *.swo
 *~
 
+# Build artifacts
+GITHASH
+
 # macOS
 .DS_Store
 .AppleDouble

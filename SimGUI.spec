@@ -12,6 +12,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ('assets', 'assets'),
+        # GITHASH is written by build-macos-app.sh before PyInstaller runs.
+        # Conditional so a bare `pyinstaller SimGUI.spec` still works without it.
+        *([('GITHASH', '.')] if os.path.exists('GITHASH') else []),
     ],
     hiddenimports=[
         'smartcard',

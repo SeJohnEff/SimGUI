@@ -43,9 +43,19 @@ fi
 # force source build so the C extension compiles correctly on Apple Silicon.
 "$VENV_PIP" install --quiet --no-binary pyscard -r requirements.txt
 
-# Run PyInstaller
+# Write git hash into GITHASH so the packaged app can show it in the
+# title bar without ever calling git at runtime (which triggers the
+# Xcode CLT install dialog on machines without developer tools).
+git rev-parse --short HEAD > "$PROJECT_ROOT/GITHASH" 2>/dev/null \
+    || echo "unknown" > "$PROJECT_ROOT/GITHASH"
+echo "GITHASH: $(cat "$PROJECT_ROOT/GITHASH")"
+
+# Run PyInstaller — GITHASH is read by SimGUI.spec and bundled
 echo "Running PyInstaller with SimGUI.spec..."
 "$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y
+
+# Remove GITHASH from the source tree after bundling — it's a build artifact
+rm -f "$PROJECT_ROOT/GITHASH"
 
 # Verify the output
 if [ -d "dist/SimGUI.app" ]; then
