@@ -106,6 +106,7 @@ class ShareStatus:
     connected: bool = False
     labels: list[str] = field(default_factory=list)
     mount_paths: list[tuple[str, str]] = field(default_factory=list)
+    error_text: str = ""   # explicit failure message; takes precedence over generic "No network storage connected"
 
     @property
     def display_text(self) -> str:
@@ -240,7 +241,8 @@ class StateManager(QObject):
 
     def update_share_status(
         self,
-        mount_paths: Optional[list[tuple[str, str]]]= None,
+        mount_paths: Optional[list[tuple[str, str]]] = None,
+        error: str = "",
     ) -> None:
         """Refresh share status from the active mount list.
 
@@ -250,16 +252,22 @@ class StateManager(QObject):
             List of ``(label, path)`` tuples from
             ``NetworkStorageManager.get_active_mount_paths()``.
             Pass ``None`` or ``[]`` when no shares are connected.
+        error :
+            Optional explicit error message (e.g. reconnect failure text).
+            When set, the UI shows this instead of the generic disconnected
+            indicator, so a specific failure reason remains visible.
         """
         mounts = mount_paths or []
         new = ShareStatus(
             connected=bool(mounts),
             labels=[label for label, _path in mounts],
             mount_paths=list(mounts),
+            error_text=error,
         )
         # Only emit if something actually changed
         if (new.connected != self._share_status.connected
-                or new.labels != self._share_status.labels):
+                or new.labels != self._share_status.labels
+                or new.error_text != self._share_status.error_text):
             self._share_status = new
             self.share_status_changed.emit(new)
 

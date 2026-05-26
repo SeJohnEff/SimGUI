@@ -190,6 +190,36 @@ class _CardWatcherRelay(QObject):
 # Main Application Window
 # ---------------------------------------------------------------------------
 
+def _map_watcher_error(
+    state_manager: "StateManager",
+    msg: str,
+    current_state: "CardState",
+    card_physically_present: bool,
+) -> None:
+    """Map a CardWatcher error to StateManager card_state + status_text.
+
+    Sets card_state = ERROR and status_text = msg when the reader is
+    genuinely absent ('No smart-card reader' in msg) or when the current
+    state is not a card-present state and the card is not physically present
+    (covers other transient-becomes-permanent errors).
+
+    Guard: if a card is physically in the reader (DETECTED/BLANK/AUTHENTICATED,
+    or _card_present=True), transient PCSC errors do NOT demote the state to
+    ERROR — preserving the card-present display during programming windows.
+
+    Always calls report_error to log the message regardless of state change.
+    """
+    is_no_reader = "No smart-card reader" in msg
+    if is_no_reader or (
+        current_state
+        not in (CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED)
+        and not card_physically_present
+    ):
+        state_manager.card_state = CardState.ERROR
+        state_manager.status_text = msg
+    state_manager.report_error(msg)
+
+
 class SimGUIApp(QMainWindow):
     """Main application window using PyQt6."""
 
@@ -354,7 +384,8 @@ class SimGUIApp(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_label = QLabel("Ready")
         self._status_bar.addWidget(self._status_label, stretch=1)
-        self._share_label = QLabel("")
+        self._share_label = QLabel("No network storage connected")
+        self._share_label.setStyleSheet("color: #D4860A;")
         self._status_bar.addPermanentWidget(self._share_label)
 
     # ---- Menu bar ---------------------------------------------------
@@ -444,8 +475,11 @@ class SimGUIApp(QMainWindow):
                 self._share_label.setText(status.display_text)
             self._share_label.setStyleSheet(f"color: {QtTheme.get_color('success')};")
         else:
-            self._share_label.setText("")
-            self._share_label.setStyleSheet("")
+            # Show explicit error text (e.g. reconnect failure) when set;
+            # otherwise show the generic disconnected indicator.
+            text = getattr(status, "error_text", "") or "No network storage connected"
+            self._share_label.setText(text)
+            self._share_label.setStyleSheet("color: #D4860A;")
 
     # ---- CardWatcher → StateManager bridge ----------------------------
 
@@ -506,23 +540,11 @@ class SimGUIApp(QMainWindow):
             self.state_manager.status_text = "Card removed"
 
         def on_error(msg):
-            current = self.state_manager.card_state
-            # Only set ERROR when the reader is genuinely absent.
-            # Two guard layers:
-            # 1. StateManager layer: if current state is already a card-present state
-            #    (BLANK/DETECTED/AUTHENTICATED), don't demote to ERROR.
-            # 2. Watcher layer: _card_present is set True by the PCSC probe BEFORE
-            #    pySim-read starts.  During the window when _card_present=True but
-            #    card_state is still NO_CARD (pySim-read running), a transient probe
-            #    failure must NOT set ERROR — the card is physically present.
-            is_no_reader = 'No smart-card reader' in msg
-            card_physically_present = self._card_watcher._card_present
-            if is_no_reader or (
-                    current not in (
-                        CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED)
-                    and not card_physically_present):
-                self.state_manager.card_state = CardState.ERROR
-            self.state_manager.report_error(msg)
+            _map_watcher_error(
+                self.state_manager, msg,
+                self.state_manager.card_state,
+                self._card_watcher._card_present,
+            )
 
         # Connect relay signals to handlers with explicit QueuedConnection.
         # This guarantees handlers execute on the main thread's event loop
