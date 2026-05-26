@@ -40,24 +40,26 @@ if ! command -v pkgbuild &>/dev/null; then
 fi
 
 # --- Temp package root ---
+# Layout: $PKG_ROOT/SimGUI.app + --install-location /Applications
+# is unambiguous. Avoid nesting under Applications/ inside the root,
+# which causes pkgbuild's component inference to produce a double-path.
 PKG_ROOT=$(mktemp -d)
 trap 'rm -rf "$PKG_ROOT"' EXIT
 
-INSTALL_DIR="$PKG_ROOT/Applications"
-mkdir -p "$INSTALL_DIR"
-cp -R "$APP_SRC" "$INSTALL_DIR/SimGUI.app"
-echo "Staged: $INSTALL_DIR/SimGUI.app"
+# COPYFILE_DISABLE=1 suppresses AppleDouble (._*) metadata files.
+COPYFILE_DISABLE=1 cp -R "$APP_SRC" "$PKG_ROOT/SimGUI.app"
+echo "Staged: $PKG_ROOT/SimGUI.app"
 
 # --- Build .pkg ---
 mkdir -p "$PROJECT_ROOT/dist"
 PKG_OUT="$PROJECT_ROOT/dist/SimGUI-v${VERSION}.pkg"
 
 echo "Building $PKG_OUT ..."
-pkgbuild \
-    --root        "$PKG_ROOT" \
-    --identifier  "com.virtugrp.simgui" \
-    --version     "$VERSION" \
-    --install-location "/" \
+COPYFILE_DISABLE=1 pkgbuild \
+    --root             "$PKG_ROOT" \
+    --install-location "/Applications" \
+    --identifier       "com.virtugrp.simgui" \
+    --version          "$VERSION" \
     "$PKG_OUT"
 
 if [ ! -f "$PKG_OUT" ]; then
