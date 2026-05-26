@@ -122,6 +122,7 @@ class ProgramSIMPanel(QWidget):
         if self.state_manager:
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.card_state_changed.connect(self._on_card_state_changed)
+            self.state_manager.status_changed.connect(self._on_global_status_changed)
             self._on_card_state_changed(self.state_manager.card_state)
             # Bootstrap: if a card is already detected when the panel is created,
             # populate public fields from the existing CardInfo.
@@ -253,6 +254,17 @@ class ProgramSIMPanel(QWidget):
             self._detected_non_empty = False
             self._step = 1
             self._update_program_btn_state()
+
+    def _on_global_status_changed(self, text: str) -> None:
+        """Mirror global status text when the panel shows no-card/reader prompt.
+
+        _on_card_state_changed runs first (card_state fires before status_text in
+        main.py), so _reset_step() may set "Insert a SIM card..." before this slot
+        runs.  When _step == 0 we overwrite that with the common mapping text so
+        Program SIM and the global status bar always agree.
+        """
+        if self._step == 0 and not self._detected_non_empty:
+            self._set_action_status(text)
 
     def _on_card_info_changed(self, card_info: CardInfo):
         """Populate public read fields from shared CardInfo; never touch protected fields.
