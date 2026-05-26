@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_watcher import CardWatcher
 from state_manager import CardState, StateManager
-from widgets.card_status_panel import CardStatusPanel
 
 
 def _ensure_qapp():
@@ -45,17 +44,6 @@ _qapp = _ensure_qapp()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _make_panel(sm=None):
-    if sm is None:
-        sm = StateManager()
-    panel = CardStatusPanel(state_manager=sm)
-    return panel, sm
-
-
-def _status_text(panel):
-    return panel.status_label.text()
-
 
 # ---------------------------------------------------------------------------
 # 1. _check_once_slow fires on_error when detect_card fails, no prior card
@@ -158,128 +146,6 @@ class TestCheckOnceSlowOnError(unittest.TestCase):
         watcher._check_once_slow()
 
         self.assertEqual(received, [msg])
-
-
-# ---------------------------------------------------------------------------
-# 2. CardStatusPanel status mapping per state-machine.md UI Mapping table
-# ---------------------------------------------------------------------------
-
-class TestCardStatusPanelStateMapping(unittest.TestCase):
-    """CardStatusPanel must map card states and error messages to the correct
-    status text per the state-machine.md UI Mapping table.
-
-    These tests are platform-independent: they exercise common signal/slot
-    wiring and state mapping, not device-specific detection logic.
-    """
-
-    def test_reader_missing_error_shows_no_reader_not_insert_sim(self):
-        """state-machine.md: ERROR (no-reader msg) -> 'No card reader detected'.
-
-        'Insert a SIM card...' must never be shown when no reader is detected.
-        """
-        panel, sm = _make_panel()
-
-        sm.report_error("No smart-card reader detected")
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"reader-missing error must not show insert-sim; got: {text!r}")
-        self.assertIn(
-            "reader", text.lower(),
-            f"reader-missing error must mention reader; got: {text!r}")
-
-    def test_tool_missing_error_shows_error_not_insert_sim(self):
-        """state-machine.md: ERROR (tool-missing msg) -> error state.
-
-        'pySim not found' must produce an error status, not 'Insert a SIM card...'.
-        """
-        panel, sm = _make_panel()
-
-        sm.report_error("No CLI tool found. Install pySim and restart.")
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"tool-missing error must not show insert-sim; got: {text!r}")
-
-    def test_no_card_state_shows_insert_sim(self):
-        """state-machine.md: NO_CARD -> 'Insert a SIM card...'.
-
-        Reader is present but no card — correct to show 'Insert a SIM card...'.
-        Transition via BLANK -> NO_CARD to force signal emission (StateManager
-        deduplicates same-value assignments).
-        """
-        panel, sm = _make_panel()
-        sm.card_state = CardState.BLANK
-        sm.card_state = CardState.NO_CARD
-
-        text = _status_text(panel)
-        self.assertIn(
-            "Insert a SIM card", text,
-            f"NO_CARD must show insert-sim; got: {text!r}")
-
-    def test_blank_state_does_not_show_insert_sim(self):
-        """state-machine.md: BLANK -> card-present (not 'Insert a SIM card...')."""
-        panel, sm = _make_panel()
-        sm.card_state = CardState.BLANK
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"BLANK must not show insert-sim; got: {text!r}")
-
-    def test_detected_state_does_not_show_insert_sim(self):
-        """state-machine.md: DETECTED -> card-present (not 'Insert a SIM card...')."""
-        panel, sm = _make_panel()
-        sm.card_state = CardState.DETECTED
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"DETECTED must not show insert-sim; got: {text!r}")
-
-    def test_authenticated_state_does_not_show_insert_sim(self):
-        """state-machine.md: AUTHENTICATED -> card-present."""
-        panel, sm = _make_panel()
-        sm.card_state = CardState.AUTHENTICATED
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"AUTHENTICATED must not show insert-sim; got: {text!r}")
-
-    def test_transient_error_after_blank_does_not_show_insert_sim(self):
-        """state-machine.md ERROR-handling: ERROR after BLANK is transient.
-
-        _on_card_state_changed(ERROR) does nothing for card_status_panel
-        (it delegates to _on_error_occurred).  Without a report_error call,
-        the label must stay at the BLANK display, not reset to insert-sim.
-        """
-        panel, sm = _make_panel()
-        sm.card_state = CardState.BLANK
-        sm.card_state = CardState.ERROR
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"transient ERROR after BLANK must not show insert-sim; got: {text!r}")
-
-    def test_reader_missing_then_card_detected_shows_detected(self):
-        """After a no-reader error, DETECTED must show card-present status."""
-        panel, sm = _make_panel()
-
-        sm.report_error("No smart-card reader detected")
-        self.assertNotIn("Insert a SIM card", _status_text(panel))
-
-        sm.card_state = CardState.DETECTED
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"DETECTED after no-reader must not show insert-sim; got: {text!r}")
-        self.assertIn(
-            "detect", text.lower(),
-            f"DETECTED after no-reader must show detected status; got: {text!r}")
 
 
 if __name__ == '__main__':

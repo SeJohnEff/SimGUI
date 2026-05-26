@@ -430,51 +430,6 @@ class TestDisconnectResetsBlockedState(unittest.TestCase):
         self.assertFalse(cm._safety_override_acknowledged)
 
 
-class TestCardStatusPanelBlockedIndicator(unittest.TestCase):
-    """Tests for the blocked card indicator in the UI panel."""
-
-    def _make_panel(self):
-        """Create a CardStatusPanel with mocked Tk."""
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        from widgets.card_status_panel import CardStatusPanel
-        panel = CardStatusPanel(root)
-        return panel, root
-
-    def test_panel_has_blocked_status_color(self):
-        """'blocked' state should produce a deep red indicator."""
-        try:
-            panel, root = self._make_panel()
-            panel.set_status('blocked', 'BLOCKED')
-            # Just verify it doesn't crash
-            root.update_idletasks()
-            root.destroy()
-        except Exception:
-            # No display in CI — just verify the method exists
-            from widgets.card_status_panel import CardStatusPanel
-            self.assertTrue(hasattr(CardStatusPanel, 'set_status'))
-
-    def test_panel_has_set_blocked_indicator(self):
-        """CardStatusPanel must have set_blocked_indicator method."""
-        from widgets.card_status_panel import CardStatusPanel
-        self.assertTrue(hasattr(CardStatusPanel, 'set_blocked_indicator'))
-
-    def test_panel_has_set_adm1_attempts(self):
-        """CardStatusPanel must have set_adm1_attempts method."""
-        from widgets.card_status_panel import CardStatusPanel
-        self.assertTrue(hasattr(CardStatusPanel, 'set_adm1_attempts'))
-
-    def test_panel_has_adm1_attempts_info_var(self):
-        """Panel should have 'adm1_attempts' in its info vars."""
-        try:
-            panel, root = self._make_panel()
-            self.assertIn('adm1_attempts', panel._info_vars)
-            root.destroy()
-        except Exception:
-            pass  # No display in CI
-
-
 class TestAuthenticateWrongKeyUpdatesRetryCounter(unittest.TestCase):
     """After a failed auth (6982), the retry counter should be refreshed."""
 

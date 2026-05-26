@@ -43,7 +43,6 @@ from state_manager import StateManager, CardState, CardInfo
 from utils import get_browse_initial_dir
 from version import __version__
 from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
-from widgets.card_status_panel import CardStatusPanel
 from widgets.read_sim_panel import ReadSIMPanel
 from widgets.program_sim_panel import ProgramSIMPanel
 from widgets.batch_program_panel import BatchProgramPanel
@@ -296,17 +295,8 @@ class SimGUIApp(QMainWindow):
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(8, 8, 8, 0)
 
-        # Card status panel
-        self._card_panel = CardStatusPanel(
-            state_manager=self.state_manager)
-
         # Tab widget
         self._tabs = QTabWidget()
-
-        # Card Status tab kept but hidden — safety fields now visible in Program SIM.
-        # CardStatusPanel and its signal subscriptions remain intact.
-        self._tabs.addTab(self._card_panel, "Card Status")
-        self._tabs.setTabVisible(self._tabs.indexOf(self._card_panel), False)
 
         self._read_panel = ReadSIMPanel(
             self._tabs,

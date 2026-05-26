@@ -372,7 +372,6 @@ class TestReadSimPanelLookup:
 class TestMainHelpers:
     def _load_main(self):
         return _load_module("main.py", "main_module", extra_mocks={
-            "widgets.card_status_panel": _mock.MagicMock(),
             "widgets.csv_editor_panel": _mock.MagicMock(),
             "widgets.progress_panel": _mock.MagicMock(),
             "widgets.read_sim_panel": _mock.MagicMock(),

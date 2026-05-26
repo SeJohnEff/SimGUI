@@ -52,14 +52,11 @@ def _load_main():
         return FakePanel
 
     _widgets_pkg = _mock.MagicMock()
-    _widgets_pkg.CardStatusPanel = _fake_panel("CardStatusPanel")
     _widgets_pkg.CSVEditorPanel = _fake_panel("CSVEditorPanel")
     _widgets_pkg.ProgressPanel = _fake_panel("ProgressPanel")
 
     mocks = {
         "widgets": _widgets_pkg,
-        "widgets.card_status_panel": _mock.MagicMock(
-            CardStatusPanel=_fake_panel("CardStatusPanel")),
         "widgets.csv_editor_panel": _mock.MagicMock(
             CSVEditorPanel=_fake_panel("CSVEditorPanel")),
         "widgets.progress_panel": _mock.MagicMock(
@@ -120,29 +117,12 @@ def app_instance():
     return instance
 
 
-class TestCardStatusTabHidden:
-
-    def _tab_texts(self, app):
-        tabs = app._tabs
-        return [tabs.tabText(i) for i in range(tabs.count())]
+class TestMainWindowTabs:
 
     def _visible_tab_texts(self, app):
         tabs = app._tabs
         return [tabs.tabText(i) for i in range(tabs.count())
                 if tabs.isTabVisible(i)]
-
-    def test_card_status_tab_exists_in_widget(self, app_instance):
-        """Tab must still exist (panel + signals intact)."""
-        texts = self._tab_texts(app_instance)
-        assert "Card Status" in texts
-
-    def test_card_status_tab_not_visible(self, app_instance):
-        """Tab must be hidden from the user."""
-        app = app_instance
-        tabs = app._tabs
-        idx = next(i for i in range(tabs.count())
-                   if tabs.tabText(i) == "Card Status")
-        assert not tabs.isTabVisible(idx)
 
     def test_read_sim_tab_visible(self, app_instance):
         assert "Read SIM" in self._visible_tab_texts(app_instance)
@@ -152,11 +132,6 @@ class TestCardStatusTabHidden:
 
     def test_batch_tab_visible(self, app_instance):
         assert "Batch Program" in self._visible_tab_texts(app_instance)
-
-    def test_card_panel_attribute_intact(self, app_instance):
-        """_card_panel must still be constructed and accessible."""
-        assert hasattr(app_instance, "_card_panel")
-        assert app_instance._card_panel is not None
 
     def test_program_sim_is_default_tab(self, app_instance):
         """Program SIM must be the selected tab at startup."""

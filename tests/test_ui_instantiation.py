@@ -1099,65 +1099,6 @@ class TestCSVEditorPanelInstantiation:
 
 
 # ---------------------------------------------------------------------------
-# CardStatusPanel  (widgets/card_status_panel.py)
-# ---------------------------------------------------------------------------
-
-class TestCardStatusPanelInstantiation:
-    """Instantiate CardStatusPanel and exercise status updates."""
-
-    def _make_panel(self):
-        mod = _load_module("widgets/card_status_panel.py",
-                           "widgets.card_status_panel")
-        parent = None
-        panel = mod.CardStatusPanel(parent)
-        return mod, panel
-
-    def test_instantiation_succeeds(self):
-        mod, panel = self._make_panel()
-        assert panel is not None
-
-    def test_set_status_ready(self):
-        mod, panel = self._make_panel()
-        panel.set_status("ready")
-
-    def test_set_status_authenticating(self):
-        mod, panel = self._make_panel()
-        panel.set_status("authenticating")
-
-    def test_set_status_authenticated(self):
-        mod, panel = self._make_panel()
-        panel.set_status("authenticated")
-
-    def test_set_status_error(self):
-        mod, panel = self._make_panel()
-        panel.set_status("error")
-
-    def test_set_card_info(self):
-        mod, panel = self._make_panel()
-        panel.set_card_info(iccid="89001", imsi="99988", card_type="USIM")
-
-    def test_set_auth_status_authenticated(self):
-        mod, panel = self._make_panel()
-        panel.set_auth_status(True)
-
-    def test_set_auth_status_failed(self):
-        mod, panel = self._make_panel()
-        panel.set_auth_status(False)
-
-    def test_clear_card_info(self):
-        mod, panel = self._make_panel()
-        panel.clear_card_info()
-
-    def test_set_programmed_indicator_true(self):
-        mod, panel = self._make_panel()
-        panel.set_programmed_indicator(True)
-
-    def test_set_programmed_indicator_false(self):
-        mod, panel = self._make_panel()
-        panel.set_programmed_indicator(False)
-
-
-# ---------------------------------------------------------------------------
 # ProgressPanel  (widgets/progress_panel.py)
 # ---------------------------------------------------------------------------
 

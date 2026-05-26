@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_watcher import CardWatcher
 from state_manager import CardState, StateManager
-from widgets.card_status_panel import CardStatusPanel
 
 
 def _ensure_qapp():
@@ -50,16 +49,6 @@ def _make_watcher(card_present=False, last_iccid=None):
     watcher._card_present = card_present
     watcher._last_iccid = last_iccid
     return watcher
-
-
-def _make_panel(sm=None):
-    if sm is None:
-        sm = StateManager()
-    return CardStatusPanel(state_manager=sm), sm
-
-
-def _status_text(panel):
-    return panel.status_label.text()
 
 
 # ---------------------------------------------------------------------------
@@ -204,73 +193,7 @@ class TestReaderReadyStateTransition(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. CardStatusPanel shows correct text for each state
-# ---------------------------------------------------------------------------
-
-class TestStatusPanelReaderReadyMapping(unittest.TestCase):
-    """CardStatusPanel must map NO_CARD → 'Insert a SIM card...' and
-    ERROR (no-reader) → 'No card reader detected', per state-machine.md UI Mapping.
-
-    These tests cover the full chain: on_reader_ready callback → StateManager
-    → card_state_changed signal → CardStatusPanel._on_card_state_changed.
-    """
-
-    def test_no_reader_error_does_not_show_insert_sim(self):
-        """ERROR (no-reader message) must NOT show 'Insert a SIM card...'."""
-        panel, sm = _make_panel()
-
-        sm.report_error("No smart-card reader detected")
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"ERROR must not show insert-sim; got: {text!r}")
-        self.assertIn(
-            "reader", text.lower(),
-            f"ERROR must mention reader; got: {text!r}")
-
-    def test_no_card_state_shows_insert_sim(self):
-        """NO_CARD must show 'Insert a SIM card...' — reader present, no card."""
-        panel, sm = _make_panel()
-
-        # Arrive from ERROR (simulating reader hot-plug via on_reader_ready)
-        sm.card_state = CardState.ERROR
-        sm.report_error("No smart-card reader detected")
-        sm.card_state = CardState.NO_CARD  # on_reader_ready fires this
-
-        text = _status_text(panel)
-        self.assertIn(
-            "Insert a SIM card", text,
-            f"NO_CARD must show insert-sim; got: {text!r}")
-
-    def test_reader_ready_then_card_detected_shows_detected(self):
-        """After reader-ready → card detected, panel must show detected state."""
-        panel, sm = _make_panel()
-
-        sm.card_state = CardState.NO_CARD   # reader ready, no card
-        sm.card_state = CardState.DETECTED  # card inserted
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"DETECTED must not show insert-sim; got: {text!r}")
-
-    def test_no_card_then_no_reader_does_not_show_insert_sim(self):
-        """After reader removal (NO_CARD → ERROR), must not show insert-sim."""
-        panel, sm = _make_panel()
-
-        sm.card_state = CardState.BLANK
-        sm.card_state = CardState.NO_CARD   # card removed
-        sm.report_error("No smart-card reader detected")  # reader removed
-
-        text = _status_text(panel)
-        self.assertNotIn(
-            "Insert a SIM card", text,
-            f"ERROR after NO_CARD must not show insert-sim; got: {text!r}")
-
-
-# ---------------------------------------------------------------------------
-# 4. Existing card-removal behavior unchanged (regression guard)
+# 3. Existing card-removal behavior unchanged (regression guard)
 # ---------------------------------------------------------------------------
 
 class TestCardRemovalUnchanged(unittest.TestCase):

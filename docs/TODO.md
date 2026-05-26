@@ -13,14 +13,18 @@ deferred. Do not implement in this thread.
   Preserve Ubuntu/macOS common behavior (no platform-specific branches in
   `card_manager.py` per Forensic Guardrail 5a).
 
-- [ ] **Remove the Card Status tab** — Now that Program SIM and Read SIM are intended to
-  display shared card data, the Card Status tab becomes redundant. Sequence:
-  1. Defer until read/reinsert/public-field behavior is verified end-to-end.
-  2. First hide/deprecate the tab (safer); only later remove it in a cleanup pass.
-  3. Audit all references — code, tests, signal wiring, docs, and any user-visible
-     status/error behavior currently owned by the tab — before removal.
-  Removal must not change the shared state machine (`docs/reference/state-machine.md`) and
-  must not split Ubuntu/macOS behavior.
+- [x] **Remove the Card Status tab** — Done. Panel deleted, dead tests removed, 4 valid
+  tab-layout tests preserved in `TestMainWindowTabs`.
+
+- [ ] **Re-home common status/UI mapping tests** — Two test classes were deleted with
+  the Card Status panel and have no replacement:
+  `TestStatusPanelReaderReadyMapping` and `TestCardStatusPanelStateMapping`.
+  These tested state-machine.md UI Mapping invariants:
+  - `NO_CARD → "Insert a SIM card..."`
+  - `ERROR (no-reader) → "No card reader detected"`
+  These must be re-tested against whatever becomes the common status owner
+  (e.g. a status bar or shared status presenter). Do **not** put global status
+  ownership into Program SIM, Read SIM, or Batch.
 
 - [ ] **SPN write implementation remains TODO** — SPN is currently ignored/disabled
   globally in programming and displayed as "not yet implemented" where applicable.

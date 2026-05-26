@@ -266,46 +266,9 @@ class TestReadSIMPanelNoStaleDataOnRemoval:
 
 
 # ---------------------------------------------------------------------------
-# 4. Widget-level: CardStatusPanel shows IMSI when card_info_changed fires
+# 4. Widget-level: ProgramSIMPanel populates ACC/SPN/FPLMN from CardInfo
 # ---------------------------------------------------------------------------
 
-class TestCardStatusPanelIMSIBinding:
-    """CardStatusPanel must show IMSI from card_info_changed."""
-
-    @pytest.fixture()
-    def status_panel(self, qapp, sm):
-        from widgets.card_status_panel import CardStatusPanel
-        p = CardStatusPanel(state_manager=sm)
-        yield p
-        p.deleteLater()
-
-    def test_imsi_shown_after_card_info_changed(self, status_panel, sm):
-        """IMSI label must show IMSI after update_card_info fires.
-
-        This works IF StateManager has IMSI. If on_unknown drops IMSI,
-        this test won't help — the IMSI-forwarding tests above cover that.
-        """
-        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789")
-        assert status_panel._info_vars["imsi"].text() == "310410123456789"
-
-    def test_iccid_shown_after_card_info_changed(self, status_panel, sm):
-        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789")
-        assert status_panel._info_vars["iccid"].text() == "8988601234567890123"
-
-    def test_imsi_cleared_after_card_removed(self, status_panel, sm):
-        # Must transition from a card-present state so NO_CARD fires the signal
-        sm.card_state = CardState.DETECTED
-        sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789")
-        assert status_panel._info_vars["imsi"].text() == "310410123456789"
-        # Card removed: state transitions back to NO_CARD
-        sm.card_state = CardState.NO_CARD
-        # CardStatusPanel._on_card_state_changed(NO_CARD) calls self.clear_card_info()
-        assert status_panel._info_vars["imsi"].text() == "Not available"
-
-
-# ---------------------------------------------------------------------------
-# 5. Widget-level: ProgramSIMPanel populates ACC/SPN/FPLMN from CardInfo
-# ---------------------------------------------------------------------------
 
 class TestProgramSIMPanelPublicFieldsFromCardInfo:
     """ProgramSIMPanel must fill ACC/SPN/FPLMN from CardInfo when fields are empty."""

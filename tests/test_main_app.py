@@ -218,9 +218,6 @@ def _load_main():
         FakePanel.__name__ = name
         return FakePanel
 
-    _card_panel_mock = _mock.MagicMock()
-    _card_panel_mock.CardStatusPanel = _fake_panel_class("CardStatusPanel")
-
     _csv_panel_mock = _mock.MagicMock()
     _csv_panel_mock.CSVEditorPanel = _fake_panel_class("CSVEditorPanel")
 
@@ -255,7 +252,6 @@ def _load_main():
         "widgets": _widgets_pkg,
         "widgets.tooltip": _mock.MagicMock(),
         "dialogs": _dialogs_pkg,
-        "widgets.card_status_panel": _card_panel_mock,
         "widgets.csv_editor_panel": _csv_panel_mock,
         "widgets.progress_panel": _prog_panel_mock,
         "widgets.read_sim_panel": _read_panel_mock,
