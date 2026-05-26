@@ -157,3 +157,8 @@ class TestCardStatusTabHidden:
         """_card_panel must still be constructed and accessible."""
         assert hasattr(app_instance, "_card_panel")
         assert app_instance._card_panel is not None
+
+    def test_program_sim_is_default_tab(self, app_instance):
+        """Program SIM must be the selected tab at startup."""
+        tabs = app_instance._tabs
+        assert tabs.tabText(tabs.currentIndex()) == "Program SIM"

@@ -350,6 +350,7 @@ class SimGUIApp(QMainWindow):
             state_manager=self.state_manager)
         self._tabs.addTab(self._progress_panel, "Progress")
 
+        self._tabs.setCurrentWidget(self._program_panel)
         root_layout.addWidget(self._tabs)
 
         # Status bar
