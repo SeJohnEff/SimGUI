@@ -33,6 +33,8 @@ def _make_ns(profiles=None, tracked=False):
     ns = MagicMock()
     ns.load_profiles.return_value = profiles or []
     ns.is_tracked_as_mounted.return_value = tracked
+    # New: label uniqueness validation — default to valid so existing tests pass
+    ns.validate_label_unique.return_value = (True, "")
     return ns
 
 

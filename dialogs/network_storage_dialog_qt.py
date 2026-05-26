@@ -34,6 +34,10 @@ class NetworkStorageDialogQt(QDialog):
         # monitor when the user switches away and back to SimGUI.
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.ns_manager = ns_manager
+        # Label of the profile currently loaded from the combo; used as
+        # exclude_label for uniqueness validation so re-saving the same
+        # profile under the same label is allowed.
+        self._editing_label: str = None
         self._build_ui()
         self._prefill_from_saved()
 
@@ -109,6 +113,12 @@ class NetworkStorageDialogQt(QDialog):
 
         # Buttons
         button_layout = QHBoxLayout()
+
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.clicked.connect(self._on_delete)
+        button_layout.addWidget(self.delete_btn)
+
         button_layout.addStretch()
 
         self.test_btn = QPushButton("Test Connection")
@@ -141,8 +151,13 @@ class NetworkStorageDialogQt(QDialog):
     def _on_profile_selected(self, idx: int) -> None:
         """Populate form fields from the chosen saved profile (UI-only, no network ops)."""
         if idx <= 0 or idx > len(self._saved_profiles):
+            self._editing_label = None
+            self.delete_btn.setEnabled(False)
             return
-        self._populate(self._saved_profiles[idx - 1])
+        profile = self._saved_profiles[idx - 1]
+        self._editing_label = profile.label
+        self.delete_btn.setEnabled(True)
+        self._populate(profile)
 
     def _prefill_from_saved(self):
         """Populate form fields from the first mounted (or auto-connect) profile."""
@@ -153,12 +168,16 @@ class NetworkStorageDialogQt(QDialog):
         # avoids blocking stat() on stale mounts on the UI thread).
         for p in profiles:
             if self.ns_manager.is_tracked_as_mounted(p):
+                self._editing_label = p.label
+                self.delete_btn.setEnabled(True)
                 self._populate(p)
                 self._select_profile_in_combo(p)
                 return
         # Fall back to the first profile with auto_connect enabled
         for p in profiles:
             if p.auto_connect:
+                self._editing_label = p.label
+                self.delete_btn.setEnabled(True)
                 self._populate(p)
                 self._select_profile_in_combo(p)
                 return
@@ -195,6 +214,12 @@ class NetworkStorageDialogQt(QDialog):
         if not profile:
             return
 
+        valid, err = self.ns_manager.validate_label_unique(
+            profile.label, exclude_label=self._editing_label)
+        if not valid:
+            QMessageBox.warning(self, "Label Error", err)
+            return
+
         ok, msg = self.ns_manager.test_connection(profile)
         if ok:
             QMessageBox.information(self, "Success", f"Connection successful:\n{msg}")
@@ -211,12 +236,17 @@ class NetworkStorageDialogQt(QDialog):
         if not profile:
             return
 
+        valid, err = self.ns_manager.validate_label_unique(
+            profile.label, exclude_label=self._editing_label)
+        if not valid:
+            QMessageBox.warning(self, "Label Error", err)
+            return
+
         # Mount the profile
         ok, msg = self.ns_manager.mount(profile)
         if ok:
-            # Save the profile
+            # Save the profile — update in-place if label exists, else append
             profiles = self.ns_manager.load_profiles()
-            # Check if label already exists and update or append
             idx = next((i for i, p in enumerate(profiles) if p.label == profile.label), -1)
             if idx >= 0:
                 profiles[idx] = profile
@@ -227,6 +257,19 @@ class NetworkStorageDialogQt(QDialog):
             self.accept()
         else:
             QMessageBox.warning(self, "Mount Failed", msg)
+
+    def _on_delete(self):
+        """Delete the currently selected saved profile."""
+        if not self.ns_manager or not self._editing_label:
+            return
+        ok, msg = self.ns_manager.delete_profile(self._editing_label)
+        if ok:
+            self._editing_label = None
+            self.delete_btn.setEnabled(False)
+            self._load_saved_profiles_combo()
+            QMessageBox.information(self, "Deleted", msg)
+        else:
+            QMessageBox.warning(self, "Cannot Delete", msg)
 
     def _build_profile(self) -> StorageProfile:
         """Build a StorageProfile from form inputs."""

@@ -144,6 +144,47 @@ class NetworkStorageManager:
                 self._write_password(p.label, p.username, p.password,
                                      p.domain)
 
+    def validate_label_unique(
+        self, label: str, exclude_label: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """Return (True, "") if *label* is not used by any other saved profile.
+
+        Parameters
+        ----------
+        label :
+            The label the user wants to use.
+        exclude_label :
+            When editing an existing profile, pass its current label so that
+            re-saving the same profile under the same name is allowed.
+
+        Returns (False, error_message) if another saved profile already uses
+        *label*.
+        """
+        for p in self.load_profiles():
+            if p.label == label and p.label != exclude_label:
+                return False, "Label has to be unique. Label/name already used."
+        return True, ""
+
+    def delete_profile(self, label: str) -> tuple[bool, str]:
+        """Remove a saved profile by label.
+
+        Refuses if the profile is currently active (mounted), because an
+        in-flight mount state would be left orphaned.
+
+        On success: removes the settings entry and deletes the credential file.
+        """
+        if label in self._active_mounts:
+            return False, "Cannot delete a connected share. Disconnect first."
+        profiles = [p for p in self.load_profiles() if p.label != label]
+        self.save_profiles(profiles)
+        cred = self._cred_file_path(label)
+        try:
+            if os.path.isfile(cred):
+                os.remove(cred)
+        except OSError as exc:
+            logger.warning("Failed to delete credential file %s: %s", cred, exc)
+        return True, f"Profile '{label}' deleted."
+
     # ---- Mount / unmount -----------------------------------------------
 
     def mount(self, profile: StorageProfile) -> tuple[bool, str]:
