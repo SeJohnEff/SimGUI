@@ -50,6 +50,19 @@ deferred. Do not implement in this thread.
     preserve the verified-only green "connected" status — no green without a verified
     reachability check.
 
+- [ ] **Network Storage mountpoint cleanup and error clarity** — Follow-ups for
+  robust `/tmp/simgui-mounts/` lifecycle and clear error messages:
+  - Clean up stale empty `/tmp/simgui-mounts/<label>` directories when disconnecting,
+    deleting profiles, or before mounting.
+  - Before mounting, if the target mountpoint exists but is not an actual mount:
+    - remove/recreate it if empty
+    - refuse with a clear non-authentication error if non-empty
+  - If `mount_smbfs` returns "File exists", distinguish stale mountpoint /
+    already-mounted cases from authentication failure.
+  - Never show SMB credentials/passwords in UI error messages or logs.
+  - If an OS/Finder SMB mount already exists, adopt the actual mount path when safe
+    instead of failing.
+
 ---
 
 ## Current Blockers (v0.5.38+)
