@@ -1,5 +1,53 @@
 # SimGUI — TODO / Backlog
 
+## Deferred from current debugging/release thread (2026-05-26)
+
+These items were captured during the current debugging/release cycle and are intentionally
+deferred. Do not implement in this thread.
+
+- [ ] **Remove dependency on `pySim-read.py`** — pySim-read is legacy/brittle and crashed on
+  a real card while decoding SMSP, aborting the entire card read. Migrate SimGUI read
+  operations to `pySim-shell.py` (or lower-level pySim APIs) where individual EFs can be
+  read independently. Public reads must tolerate per-field failures instead of aborting
+  the whole read. Implement in the common `CardManager`/backend layer — not in UI tabs.
+  Preserve Ubuntu/macOS common behavior (no platform-specific branches in
+  `card_manager.py` per Forensic Guardrail 5a).
+
+- [ ] **Remove the Card Status tab** — Now that Program SIM and Read SIM are intended to
+  display shared card data, the Card Status tab becomes redundant. Sequence:
+  1. Defer until read/reinsert/public-field behavior is verified end-to-end.
+  2. First hide/deprecate the tab (safer); only later remove it in a cleanup pass.
+  3. Audit all references — code, tests, signal wiring, docs, and any user-visible
+     status/error behavior currently owned by the tab — before removal.
+  Removal must not change the shared state machine (`docs/reference/state-machine.md`) and
+  must not split Ubuntu/macOS behavior.
+
+- [ ] **SPN write implementation remains TODO** — SPN is currently ignored/disabled
+  globally in programming and displayed as "not yet implemented" where applicable.
+  Implement SPN write/read/verify only after safe ADM/auth behavior is fully understood
+  and tested. Investigate the previous SPN write failure (6983 / retry-burn behavior) on
+  gialersim/sysmocom cards before re-enabling. Do not falsely verify SPN, and do not save
+  clean artifacts for unverified SPN writes. Ties into the existing "Implement and test
+  SPN write/read/verify safely" item under section 4 below.
+
+- [ ] **Result-state model / partial-success UI** — Replace message-string based
+  success/failure checks with explicit result states (e.g. `OK`, `PARTIAL`, `FAILED`,
+  `VERIFY_FAILED`). Support clearer amber/red UI states for partial or failed
+  programming runs. Keep artifact-save gating tied strictly to verified clean success —
+  no artifact save on partial or unverified runs.
+
+- [ ] **macOS / network storage UX follow-ups** — Remaining items after the
+  saved-profile dropdown / rename work (commit `0bfa96c`):
+  - Add a saved-profile recall dropdown showing up to the last 5 server/share profiles.
+  - Selecting a saved profile must populate fields only — it must not connect, mount,
+    stat, or verify reachability.
+  - Rename the confusing "Connect & Save" button to "Save & Connect".
+  - Keep all network operations off the UI thread (QThread workers + signals) and
+    preserve the verified-only green "connected" status — no green without a verified
+    reachability check.
+
+---
+
 ## Current Blockers (v0.5.38+)
 
 ### [RESOLVED v0.5.38] macOS GUI Asset Loading
