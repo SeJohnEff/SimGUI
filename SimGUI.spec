@@ -11,17 +11,12 @@ a = Analysis(
     pathex=[os.getcwd()],
     binaries=[],
     datas=[
-        ('simulator/data', 'simulator/data'),
         ('assets', 'assets'),
     ],
     hiddenimports=[
         'smartcard',
         'smartcard.scard',
         '_smartcard',
-        'tkinter',
-        'PIL',
-        'PIL.Image',
-        'PIL.ImageTk',
     ],
     hookspath=[],
     hooksconfig={},
