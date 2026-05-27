@@ -152,6 +152,90 @@ def _find_venv_python(tool_path: str) -> Optional[str]:
     return None
 
 
+def _get_bundled_python() -> Optional[str]:
+    """Find the Python interpreter bundled inside the app bundle (frozen mode only).
+
+    Returns None in dev (non-frozen) mode.  In frozen mode, searches only
+    inside the app bundle — never system paths or /usr/bin.
+
+    Search order (first executable match wins):
+
+    1. ``Contents/Frameworks/Python3.framework/Versions/*/bin/python3*``
+       This is where a properly bundled Python framework installs its
+       interpreter.  Phase 3 build script must ensure the framework is
+       complete (not just the dylib) so a real executable exists here.
+
+    2. ``Contents/MacOS/python3.9``, ``python3``, ``python``
+       Optional fallback for a standalone interpreter copied by the
+       build script alongside the SimGUI launcher.
+
+    Phase 3 build-script requirement: ensure that after PyInstaller runs,
+    ``Contents/Frameworks/Python3.framework/Versions/<ver>/bin/python3`` (or
+    ``python3.9``) exists as an executable Mach-O binary inside the .app.
+    The current build ships only the Python3.framework dylib; the ``bin/``
+    subdirectory is absent.
+
+    Returns None when no bundled interpreter is found.  Callers MUST NOT fall
+    back to sys.executable or any system Python in frozen mode; they must
+    surface a clear "Bundled pySim runtime incomplete" error instead.
+    """
+    import glob as _glob
+
+    if not (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')):
+        return None
+
+    # sys._MEIPASS is Contents/Resources; Contents/ is one level up.
+    contents_dir = os.path.dirname(sys._MEIPASS)
+
+    # 1. Preferred: Python3.framework bin/ directory (glob over version dirs).
+    fw_bin_pattern = os.path.join(
+        contents_dir,
+        'Frameworks', 'Python3.framework', 'Versions', '*', 'bin', 'python3*',
+    )
+    for candidate in sorted(_glob.glob(fw_bin_pattern), reverse=True):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            logger.info("Found bundled Python interpreter (framework): %s", candidate)
+            return candidate
+
+    # 2. Fallback: standalone interpreter next to the SimGUI launcher.
+    for rel in ('MacOS/python3.9', 'MacOS/python3', 'MacOS/python'):
+        candidate = os.path.join(contents_dir, rel)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            logger.info("Found bundled Python interpreter (MacOS/): %s", candidate)
+            return candidate
+
+    logger.warning(
+        "Frozen mode: no bundled Python interpreter found in %s. "
+        "Phase 3 must ensure Python3.framework/Versions/*/bin/python3 "
+        "exists as an executable inside the app bundle.",
+        contents_dir,
+    )
+    return None
+
+
+def _get_pysim_env() -> Optional[Dict[str, str]]:
+    """Return a subprocess env dict with PYTHONPATH for bundled pySim.
+
+    In frozen mode returns a copy of os.environ with PYTHONPATH prepended to
+    include the bundled pySim scripts directory and pySim site-packages.
+    In dev mode returns None so subprocess calls inherit the process env.
+    """
+    if not (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')):
+        return None
+
+    pysim_dir = os.path.join(sys._MEIPASS, 'pysim')
+    site_pkgs = os.path.join(sys._MEIPASS, 'pysim-site-packages')
+
+    extra = [p for p in (pysim_dir, site_pkgs) if os.path.isdir(p)]
+    if not extra:
+        return None
+
+    env = dict(os.environ)
+    existing = env.get('PYTHONPATH', '')
+    env['PYTHONPATH'] = os.pathsep.join(extra + ([existing] if existing else []))
+    return env
+
+
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     """Locate sysmo-usim-tool or pySim repo on the system.
 
@@ -197,12 +281,20 @@ def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     etc.) anywhere else in this module.  Path differences belong here
     only; SIM logic must remain unconditional.
     """
-    # 1. PyInstaller bundle — active only in frozen .app executables
+    # 1. PyInstaller bundle — active only in frozen .app executables.
+    # When frozen, the bundle is the ONLY valid source.  Do NOT fall through
+    # to ~/pysim or any other filesystem candidate if the bundle is absent.
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         bundle_pysim = os.path.join(sys._MEIPASS, 'pysim')
         if os.path.isdir(bundle_pysim):
             logger.info("Found pySim in PyInstaller bundle: %s", bundle_pysim)
             return bundle_pysim, CLIBackend.PYSIM
+        logger.error(
+            "Frozen mode: bundled pySim not found at %s. "
+            "Rebuild the app to include pySim resources (SimGUI.spec datas).",
+            bundle_pysim,
+        )
+        return None, CLIBackend.NONE
 
     # 2. SYSMO_USIM_TOOL_PATH env var — explicit sysmo-usim-tool override
     env_path = os.environ.get('SYSMO_USIM_TOOL_PATH')
@@ -280,6 +372,7 @@ class CardManager:
         self._venv_python: Optional[str] = None
         if self.cli_path:
             self._venv_python = _find_venv_python(self.cli_path)
+        self._bundled_python: Optional[str] = _get_bundled_python()
         self.card_type: CardType = CardType.UNKNOWN
         self.authenticated: bool = False
         self.card_info: Dict[str, str] = {}
@@ -288,8 +381,10 @@ class CardManager:
         self.card_blocked: bool = False   # True when ADM1 retry counter = 0
         self._adm1_remaining_attempts: Optional[int] = None
         self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
-        logger.info("CardManager init: backend=%s, cli_path=%s, venv_python=%s",
-                    self.cli_backend.name, self.cli_path, self._venv_python)
+        logger.info(
+            "CardManager init: backend=%s, cli_path=%s, venv_python=%s, bundled_python=%s",
+            self.cli_backend.name, self.cli_path, self._venv_python, self._bundled_python,
+        )
 
     # ---- helpers -------------------------------------------------------
 
@@ -330,12 +425,20 @@ class CardManager:
         if script_path is None:
             return False, "", f"Invalid script path: {script}"
 
-        python_exe = self._venv_python or sys.executable
+        if getattr(sys, 'frozen', False):
+            if self._bundled_python is None:
+                return (False, "",
+                        "Bundled pySim runtime incomplete: no Python interpreter "
+                        "in app bundle. Phase 3 must copy python3 into MacOS/.")
+            python_exe = self._bundled_python
+        else:
+            python_exe = self._venv_python or sys.executable
+        pysim_env = _get_pysim_env()
         cmd = [python_exe, script_path] + list(args)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout,
-                cwd=self.cli_path,
+                cwd=self.cli_path, env=pysim_env,
             )
             return (result.returncode == 0,
                     result.stdout.strip(),
@@ -586,7 +689,15 @@ class CardManager:
         if script_path is None:
             return False, "", "pySim-shell.py not found"
 
-        python_exe = self._venv_python or sys.executable
+        if getattr(sys, 'frozen', False):
+            if self._bundled_python is None:
+                return (False, "",
+                        "Bundled pySim runtime incomplete: no Python interpreter "
+                        "in app bundle. Phase 3 must copy python3 into MacOS/.")
+            python_exe = self._bundled_python
+        else:
+            python_exe = self._venv_python or sys.executable
+        pysim_env = _get_pysim_env()
         cmd = [python_exe, script_path, f'-p{self._pcsc_reader_index}']
         if adm1_hex and self.card_type != CardType.GIALERSIM:
             # Gialersim cards: standard VERIFY ADM1 (CHV 0x0A) fails
@@ -599,7 +710,7 @@ class CardManager:
         try:
             result = subprocess.run(
                 cmd, input=full_input, capture_output=True, text=True,
-                timeout=timeout, cwd=self.cli_path,
+                timeout=timeout, cwd=self.cli_path, env=pysim_env,
             )
             if result.stdout:
                 logger.info("pySim-shell stdout:\n%s", result.stdout.strip())
@@ -667,7 +778,14 @@ class CardManager:
         if script_path is None:
             return False, "", "pySim-prog.py not found"
 
-        python_exe = self._venv_python or sys.executable
+        if getattr(sys, 'frozen', False):
+            if self._bundled_python is None:
+                return (False, "",
+                        "Bundled pySim runtime incomplete: no Python interpreter "
+                        "in app bundle. Phase 3 must copy python3 into MacOS/.")
+            python_exe = self._bundled_python
+        else:
+            python_exe = self._venv_python or sys.executable
 
         # Pick pySim-prog card type flag based on detected type.
         # Gialersim cards use a different VERIFY path internally
@@ -723,12 +841,13 @@ class CardManager:
         secrets = {adm1_hex}
         if self.card_type == CardType.GIALERSIM:
             secrets.add(self._hex_to_adm1_ascii(adm1_hex))
+        pysim_env = _get_pysim_env()
         logger.info("pySim-prog command: %s",
                     ' '.join('***' if c in secrets else c for c in cmd))
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
-                timeout=timeout, cwd=self.cli_path,
+                timeout=timeout, cwd=self.cli_path, env=pysim_env,
             )
             if result.stdout:
                 logger.info("pySim-prog stdout:\n%s",
