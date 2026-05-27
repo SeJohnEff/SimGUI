@@ -187,6 +187,98 @@ if [ "$PYSIM_ERRORS" -gt 0 ]; then
     exit 1
 fi
 
+# --- Bundle Python executable ---
+# Provide a real Python interpreter inside the .app so pySim scripts can be
+# launched as subprocesses by card_manager at runtime.
+#
+# The CommandLineTools python3.9 binary is a launcher that posix_spawns
+#   Resources/Python.app/Contents/MacOS/Python
+# which is the actual interpreter stub. Both are required, along with the
+# Python3 framework dylib. Layout mirrors the system framework structure.
+BUNDLED_FWK_DIR="dist/SimGUI.app/Contents/Frameworks/Python3.framework/Versions/3.9"
+BUNDLED_PYTHON_DIR="$BUNDLED_FWK_DIR/bin"
+BUNDLED_PYTHON="$BUNDLED_PYTHON_DIR/python3.9"
+BUNDLED_STUB_DIR="$BUNDLED_FWK_DIR/Resources/Python.app/Contents/MacOS"
+mkdir -p "$BUNDLED_PYTHON_DIR" "$BUNDLED_STUB_DIR"
+
+# Resolve the real Python binary behind the venv symlink.
+# Uses Python's own os.path.realpath — no readlink, bash 3.2 safe.
+REAL_PYTHON=$("$PYSIM_VENV_PYTHON" -c "import os, sys; print(os.path.realpath(sys.executable))")
+if [ ! -f "$REAL_PYTHON" ]; then
+    echo "✗ Could not locate real Python executable (resolved to: $REAL_PYTHON) — aborting"
+    exit 1
+fi
+
+REAL_FWK_DIR=$(dirname "$(dirname "$REAL_PYTHON")")   # .../Versions/3.9
+
+# Framework dylib: python3.9 launcher links @executable_path/../Python3
+REAL_PYTHON_DYLIB="$REAL_FWK_DIR/Python3"
+if [ ! -f "$REAL_PYTHON_DYLIB" ]; then
+    echo "✗ Python3 framework dylib not found at $REAL_PYTHON_DYLIB — aborting"
+    exit 1
+fi
+
+# Actual interpreter stub: python3.9 posix_spawns this binary
+REAL_PYTHON_STUB="$REAL_FWK_DIR/Resources/Python.app/Contents/MacOS/Python"
+if [ ! -f "$REAL_PYTHON_STUB" ]; then
+    echo "✗ Python interpreter stub not found at $REAL_PYTHON_STUB — aborting"
+    exit 1
+fi
+
+echo "Bundling Python launcher from: $REAL_PYTHON"
+echo "Bundling Python3 dylib from:   $REAL_PYTHON_DYLIB"
+echo "Bundling Python stub from:     $REAL_PYTHON_STUB"
+
+cp "$REAL_PYTHON"       "$BUNDLED_PYTHON"
+chmod +x "$BUNDLED_PYTHON"
+cp "$REAL_PYTHON_DYLIB" "$BUNDLED_FWK_DIR/Python3"
+cp "$REAL_PYTHON_STUB"  "$BUNDLED_STUB_DIR/Python"
+chmod +x "$BUNDLED_STUB_DIR/Python"
+
+# Bundle the Python stdlib so the app is self-contained and PYTHONHOME works.
+REAL_STDLIB="$REAL_FWK_DIR/lib/python3.9"
+if [ ! -d "$REAL_STDLIB" ]; then
+    echo "✗ Python stdlib not found at $REAL_STDLIB — aborting"
+    exit 1
+fi
+echo "Bundling Python stdlib from: $REAL_STDLIB ($(du -sh "$REAL_STDLIB" | cut -f1))"
+mkdir -p "$BUNDLED_FWK_DIR/lib"
+COPYFILE_DISABLE=1 cp -R "$REAL_STDLIB" "$BUNDLED_FWK_DIR/lib/python3.9"
+
+# Re-sign the bundle ad-hoc after adding all files (required on Apple Silicon).
+codesign --force --deep --sign - "dist/SimGUI.app" 2>/dev/null || true
+
+# Check 1: must be a Mach-O executable, not a dylib/shared library
+FILE_OUTPUT=$(file "$BUNDLED_PYTHON")
+echo "  file: $FILE_OUTPUT"
+if echo "$FILE_OUTPUT" | grep -q "Mach-O.*executable"; then
+    echo "✓ Bundled Python is a Mach-O executable"
+else
+    echo "✗ Bundled Python is not a Mach-O executable — aborting"
+    exit 1
+fi
+
+# Check 2: --version must succeed
+PY_VERSION_OUTPUT=$("$BUNDLED_PYTHON" --version 2>&1) || {
+    echo "✗ Bundled Python --version failed — aborting"
+    exit 1
+}
+echo "✓ Bundled Python version: $PY_VERSION_OUTPUT"
+
+# Check 3: pySim-read.py -h smoke test with bundled stdlib and pySim on PYTHONPATH.
+# PYTHONHOME points at the bundled framework so the stdlib is found without the
+# system CLT Python being present.
+PYSIM_READ_PATH=$(find "$BUNDLE_RESOURCES" -name "pySim-read.py" 2>/dev/null | head -1)
+BUNDLE_PYSIM_DIR=$(dirname "$PYSIM_READ_PATH")
+
+PYTHONHOME="$BUNDLED_FWK_DIR" PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH" \
+    "$BUNDLED_PYTHON" "$BUNDLE_PYSIM_DIR/pySim-read.py" -h >/dev/null 2>&1 || {
+    echo "✗ pySim-read.py -h smoke test failed with bundled Python — aborting"
+    exit 1
+}
+echo "✓ pySim-read.py -h smoke test passed"
+echo "  Bundled Python path: $BUNDLED_PYTHON"
+
 echo ""
 echo "✓ Build succeeded!"
 echo ""
