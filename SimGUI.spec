@@ -15,6 +15,12 @@ a = Analysis(
         # GITHASH is written by build-macos-app.sh before PyInstaller runs.
         # Conditional so a bare `pyinstaller SimGUI.spec` still works without it.
         *([('GITHASH', '.')] if os.path.exists('GITHASH') else []),
+        # pySim scripts + package staged by build-macos-app.sh into pysim-bundle/.
+        # Conditional so a bare `pyinstaller SimGUI.spec` still works without them.
+        *([('pysim-bundle', 'pysim')] if os.path.exists('pysim-bundle') else []),
+        # pySim runtime site-packages staged by build-macos-app.sh.
+        *([('pysim-site-packages', 'pysim-site-packages')]
+          if os.path.exists('pysim-site-packages') else []),
     ],
     hiddenimports=[
         'smartcard',

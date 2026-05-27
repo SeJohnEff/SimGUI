@@ -1,0 +1,19 @@
+# pySim runtime dependencies bundled inside SimGUI.app.
+# Used by build-macos-app.sh to populate pysim-site-packages/ inside the app bundle.
+# SMPP packages are excluded — they are only used by pySim-smpp2sim.py
+# which is not bundled.
+pyscard
+pyserial
+pytlv
+cmd2>=2.6.2,<3.0
+jsonpath-ng
+construct>=2.10.70
+bidict
+pyosmocom>=0.0.12
+pyyaml>=5.4
+termcolor
+colorlog
+pycryptodomex
+cryptography
+git+https://github.com/osmocom/asn1tools
+packaging
