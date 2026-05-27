@@ -1,5 +1,24 @@
 # SimGUI — TODO / Backlog
 
+## Network Storage state handling and self-contained macOS distribution
+
+**Network Storage state handling:**
+- [ ] Handle SMB already mounted by a different user on the same Mac. Do not silently adopt a mount if the mounted SMB username differs from the saved profile username. Show a clear message such as: "Share is already mounted as <user>. Disconnect that mount or use matching credentials."
+- [ ] Handle SMB already mounted by the same user/profile. Adopt only when server, share, and username match, and store the actual mount path.
+- [ ] Handle SMB not reachable, dropped connections, reconnects, authentication failures, timeouts, server not responding on SMB port, no CSV files found, and inability to create auto-artifact directory.
+- [ ] Treat mount_smbfs "File exists" as a mountpoint/already-mounted/stale-state condition, not as authentication failure.
+- [ ] Clean up stale empty /tmp/simgui-mounts/<label> directories before mounting, on disconnect, and on profile delete.
+- [ ] Never show SMB passwords or credential-bearing SMB URLs in logs or UI errors.
+- [ ] All SMB states must either be resolved automatically when safe, or reported with clear user action.
+
+**Self-contained macOS distribution:**
+- [ ] macOS pkg/dmg must include all runtime dependencies needed for card read/programming.
+- [ ] Target users must not install Python, pySim, sysmo-usim-tool, Homebrew, Xcode Command Line Tools, or download anything at runtime.
+- [ ] Packaged SimGUI must not depend on ~/pysim or user-installed Python.
+- [ ] Frozen packaged app should prefer bundled pySim/runtime; source/dev mode may continue to use ~/pysim or explicit environment overrides.
+
+---
+
 ## Deferred from current debugging/release thread (2026-05-26)
 
 These items were captured during the current debugging/release cycle and are intentionally
