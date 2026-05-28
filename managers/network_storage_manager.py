@@ -258,6 +258,19 @@ class NetworkStorageManager:
                     if _MACOS:
                         actual, adoption_err = self._macos_find_smb_mount_for_adoption(profile)
                         if adoption_err:
+                            # Attempt explicit mount to our own mountpoint before refusing.
+                            # macOS may allow a second connection with different credentials
+                            # even when the share is already mounted by another user.
+                            cmd2 = self._build_mount_cmd(profile)
+                            result2 = subprocess.run(
+                                cmd2, capture_output=True, text=True, timeout=30,
+                                stdin=subprocess.DEVNULL,
+                            )
+                            if result2.returncode == 0:
+                                self._active_mounts[profile.label] = profile
+                                logger.info("mount: explicit mount succeeded for %s at %s "
+                                            "after adoption refusal", profile.label, mp)
+                                return True, f"Mounted at {mp}"
                             self._active_mounts.pop(profile.label, None)
                             return False, adoption_err
                     else:
@@ -803,12 +816,14 @@ class NetworkStorageManager:
                         if mount_username is None:
                             return None, (
                                 "Share is already mounted by an unknown user. "
-                                "Disconnect that mount or use matching credentials."
+                                "Disconnect that mount, use matching credentials, "
+                                "or choose to use the existing mount."
                             )
                         if mount_username != profile.username:
                             return None, (
                                 f"Share is already mounted as {mount_username}. "
-                                "Disconnect that mount or use matching credentials."
+                                "Disconnect that mount, use matching credentials, "
+                                "or choose to use the existing mount."
                             )
                     return mp, None
         except Exception:

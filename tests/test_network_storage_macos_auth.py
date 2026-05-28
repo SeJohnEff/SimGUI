@@ -659,7 +659,8 @@ class TestMacosSmBAdoptionUsernameCheck:
 
         assert err == (
             "Share is already mounted as johneff. "
-            "Disconnect that mount or use matching credentials."
+            "Disconnect that mount, use matching credentials, "
+            "or choose to use the existing mount."
         )
         assert "s3cr3t" not in err
 
@@ -703,3 +704,79 @@ class TestMacosSmBAdoptionUsernameCheck:
 
         assert path is None
         assert err is not None
+
+    def test_refusal_message_includes_all_three_options(self):
+        """Refusal message includes disconnect, credential, and existing-mount options."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui", password="s3cr3t")
+        mount_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            _, err = ns._macos_find_smb_mount_for_adoption(p)
+
+        assert "johneff" in err
+        assert "Disconnect" in err
+        assert "matching credentials" in err
+        assert "existing mount" in err
+
+    def test_explicit_mount_attempted_after_username_mismatch(self):
+        """mount() calls mount_smbfs a second time after detecting username mismatch."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui")
+        mount_scan_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        mount_smbfs_calls = []
+
+        def fake_run(cmd, **kwargs):
+            if any("mount_smbfs" in str(x) for x in cmd):
+                mount_smbfs_calls.append(list(cmd))
+                return MagicMock(returncode=1, stderr="already mounted", stdout="")
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout=mount_scan_output, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.makedirs"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is False
+        # Two mount_smbfs calls: the initial attempt and the explicit retry
+        assert len(mount_smbfs_calls) == 2, (
+            f"Expected 2 mount_smbfs calls (initial + explicit retry), got {len(mount_smbfs_calls)}"
+        )
+
+    def test_explicit_mount_succeeds_after_username_mismatch(self):
+        """mount() succeeds and tracks the profile when the explicit retry mount works."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui", password="secret")
+        mount_scan_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            if any("mount_smbfs" in str(x) for x in cmd):
+                call_count["n"] += 1
+                # First call fails (initial attempt), second call succeeds (explicit retry)
+                rc = 1 if call_count["n"] == 1 else 0
+                return MagicMock(returncode=rc, stderr="already mounted" if rc else "", stdout="")
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout=mount_scan_output, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.makedirs"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is True
+        assert p.label in ns._active_mounts
+        assert "Mounted" in msg
