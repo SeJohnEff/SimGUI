@@ -84,6 +84,169 @@ deferred. Do not implement in this thread.
 
 ---
 
+## Post-v0.5.58 Architecture: Persistent pySim Worker
+
+**Status:** Design complete. Not started. Do not implement without resolving the CardWatcher/PCSC ownership no-go item below.
+
+### Problem
+
+Every card operation launches a cold Python subprocess that imports pySim from scratch:
+
+| Card type | Operations | Subprocess launches per card |
+|-----------|------------|------------------------------|
+| SJA5 / non-empty | detect (pySim-read) + enrich (pySim-shell) + auth (pySim-shell) + write (pySim-shell -A) + verify (pySim-read) | **5** |
+| Blank / GialerSIM | detect (pySim-read) + program (pySim-prog) + verify (pySim-read) | **3** |
+
+Each cold-start costs ~1–3 s on Ubuntu VM, ~0.5–1 s on macOS. A 50-card SJA5 batch = ~250 subprocess launches. Latency is dominated by import overhead, not card I/O.
+
+Additionally, passing the PC/SC reader between multiple short-lived subprocesses is the root cause of reader contention (spurious `6f00` errors during detect/auth/write).
+
+### Target Architecture
+
+A `worker/card_worker.py` process launched **once** when `CardManager` initialises:
+
+- Uses the bundled Python interpreter and bundled pySim `PYTHONPATH` (same as current `_get_pysim_env()` / `_get_bundled_python()`).
+- Imports pySim at startup; holds the import tree in memory for the lifetime of the app.
+- Owns the PC/SC context exclusively — no other code touches the reader while the worker is alive.
+- Communicates with `CardManager` via **JSON-lines over stdin/stdout** (one request per line, one response per line).
+- Crashes are recoverable: `CardManager` detects EOF on worker stdout and restarts it.
+- `CardManager` becomes a thin RPC proxy: `_worker_call(cmd_dict) → response_dict`. All existing `_run_cli` / `_run_pysim_shell_safe` / `_run_pysim_shell` / `_run_pysim_prog` call sites are replaced with `_worker_call`.
+
+### Worker Session State Machine
+
+```
+WORKER_STOPPED → WORKER_STARTING → READY_NO_CARD
+                                         │  card inserted
+                                    CARD_PRESENT_UNKNOWN
+                                         │  detect_card completes
+                                    CARD_IDENTIFIED
+                                         │  caller matches CSV row
+                                    CSV_MATCHED
+                                    ┌────┴────────────────────┐
+             blank/gialersim        │                         │  SJA5
+                                ADM_STORED              ADM_VERIFIED
+                                    └────────┬────────────────┘
+                                             │  program_fields()
+                                        PROGRAMMING
+                                             │
+                                        VERIFYING
+                                    ┌────┴────┐
+                               PROGRAMMED_OK  NO_CHANGES
+                                    └────┬────┘
+                                    CARD_REMOVED → READY_NO_CARD
+
+From any state on card removal   → CARD_REMOVED → READY_NO_CARD
+On APDU / recoverable error      → ERROR_RECOVERABLE → retry → CARD_IDENTIFIED
+On 6983 / blocked                → BLOCKED_OR_DANGER (only card removal resolves)
+On worker crash / timeout        → ERROR_FATAL → restart → WORKER_STARTING
+```
+
+Worker-side invariants (not caller conventions):
+- `program_fields` rejected unless state is `ADM_STORED` or `ADM_VERIFIED`.
+- VERIFY APDU never sent when card is blank or `GIALERSIM`.
+- ICCID/ATR revalidated at start of `program_fields`; mismatch → `ICCID_MISMATCH` + `CARD_REMOVED`.
+- Retry counter re-checked inside `program_fields` pre-flight.
+
+### IPC JSON-Lines Schema (examples)
+
+```jsonc
+// Request
+{"id": 1, "cmd": "detect_card"}
+// Response
+{"id": 1, "ok": true, "state": "CARD_IDENTIFIED",
+ "card_type": "SJA5", "iccid": "89...", "imsi": "240...",
+ "acc": "0001", "spn": "Fiskarheden", "fplmn": "24001;24002"}
+
+{"id": 2, "cmd": "authenticate_adm",
+ "adm1_hex": "3838383838383838", "expected_iccid": "89..."}
+// SJA5 response:
+{"id": 2, "ok": true, "state": "ADM_VERIFIED", "attempts_remaining": 3}
+// Blank/gialersim response:
+{"id": 2, "ok": true, "state": "ADM_STORED",
+ "note": "blank card — ADM1 stored for pySim-prog"}
+
+{"id": 3, "cmd": "program_fields",
+ "fields": {"IMSI": "240010000000001", "FPLMN": "24001;24002"},
+ "card_type": "SJA5"}
+{"id": 3, "ok": true, "state": "PROGRAMMED_OK",
+ "verified": ["IMSI", "FPLMN"], "written_only": []}
+```
+
+Error response shape: `{"id": N, "ok": false, "state": "...", "error": "<CODE>", "sw": "<hex>", "attempts_remaining": N, "message": "..."}`.
+
+Error codes: `AUTH_FAILED` (6982), `CARD_BLOCKED` (6983), `LOW_RETRIES` (1 attempt left), `APDU_ERROR` (6f00), `ICCID_MISMATCH`, `NO_CARD`, `NO_READER`, `PCSC_ERROR`, `WORKER_TIMEOUT`, `WORKER_CRASH`, `INVALID_STATE`.
+
+### Safety Model
+
+| Threat | Enforcement layer |
+|--------|------------------|
+| Wrong ADM1 (6982) | `authenticate_adm` returns `AUTH_FAILED` + `attempts_remaining`; state stays at `CSV_MATCHED`; `program_fields` blocked. |
+| Retry counter = 0 | Pre-flight `check_retry_counter` in both `authenticate_adm` and `program_fields`; no VERIFY sent if 0. |
+| 1 attempt remaining | Returns `LOW_RETRIES` + `BLOCKED_OR_DANGER`; requires `"force": true` in request to proceed. |
+| 6983 permanently blocked | Returns `CARD_BLOCKED`; transitions to `BLOCKED_OR_DANGER`; only card removal accepted. |
+| 6f00 on non-gialersim | Returns `APDU_ERROR` + `sw: 6f00`; re-checks counter; caller warned attempt may have been consumed. |
+| Card removed during operation | Worker detects ATR loss; emits `{"event": "card_removed"}`; clears stored ADM1; state → `CARD_REMOVED`. |
+| Card swapped (ICCID changed) | Worker re-reads ATR at `program_fields` start; if ICCID differs from session ICCID → `ICCID_MISMATCH` + `CARD_REMOVED`. |
+| Blank/GialerSIM VERIFY guard | Worker checks `card_type` before any VERIFY APDU; blank and `GIALERSIM` → skip VERIFY, stay at `ADM_STORED`. This is a worker invariant, not a caller convention. |
+
+### GialerSIM / Blank Card Compatibility
+
+**Phase 3 transitional (hybrid):** Worker handles detect and auth in-process. For `program_fields` on GialerSIM/blank, the worker suspends its PCSC context and dispatches `pySim-prog.py -t gialersim -a <ASCII_ADM1>` as a subprocess (identical to current `_run_pysim_prog`). Worker reclaims context after pySim-prog exits and runs in-process verify. Behavioral parity with today is guaranteed.
+
+**Phase 4 target:** Validate `pySim.legacy.cards.GialerSim._program()` is callable in-process. If safe, eliminate the subprocess entirely. If the gialersim internal API is too tightly coupled to CLI startup, keep the subprocess for gialersim only and document the reason.
+
+### Migration Phases
+
+**Phase 0 — Timing instrumentation only (no behavior change)**
+- Add `time.perf_counter()` logging around `_run_cli`, `_run_pysim_shell_safe`, `_run_pysim_shell`, `_run_pysim_prog`.
+- Measure baseline: single SJA5 card end-to-end, 10-card SJA5 batch, 10-card GialerSIM batch.
+- Zero behavior change. Ubuntu test baseline must hold (1900 passed).
+- Files: `managers/card_manager.py` only.
+
+**Phase 1 — Worker skeleton: detect/read only**
+- Create `worker/card_worker.py`; handles `detect_card`, `check_retry_counter`, `reset_session`, `shutdown`.
+- `CardManager.detect_card()` and `_read_public_fields_via_shell()` use `_worker_call()`; all other methods still use direct subprocesses.
+- Worker is optional with fallback: if worker fails to start, fall back to subprocess path. Ubuntu test baseline must hold.
+- **Prerequisite:** Resolve CardWatcher/PCSC ownership (see No-Go below) before marking Phase 1 complete.
+
+**Phase 2 — Authenticate via worker**
+- Worker gains `authenticate_adm` command; VERIFY APDU sent in-process via pyscard.
+- `CardManager.authenticate()` replaced with `_worker_call`.
+- The 0.3 s settle sleeps removed (no reader handoff between processes).
+- Safety invariants (blank/GialerSIM guard, retry counter, 6983/6982/6f00 classification) reimplemented as worker invariants; existing safety tests verify observable behavior.
+
+**Phase 3 — Program/verify via worker (hybrid)**
+- Worker gains `program_fields` (in-process for SJA5; subprocess dispatch for GialerSIM) and `verify_fields` (in-process pySim-read).
+- `_program_nonempty_card`, `_program_via_pysim_prog`, `verify_after_program` replaced with `_worker_call`.
+- GialerSIM subprocess path inside worker is identical to current `_run_pysim_prog` — behavioral parity guaranteed.
+
+**Phase 4 — Retire repeated subprocess path**
+- Validate GialerSIM in-process API; replace subprocess dispatch if safe.
+- Remove `_run_cli`, `_run_pysim_shell_safe`, `_run_pysim_shell`, `_run_pysim_prog` from `CardManager`.
+- Measure: compare 50-card batch time against Phase 0 baseline.
+
+### Files Affected
+
+| File | Change |
+|------|--------|
+| `worker/card_worker.py` | New file — the persistent worker process |
+| `managers/card_manager.py` | Replace subprocess dispatch with `_worker_call()`; add worker lifecycle |
+| `managers/batch_manager.py` | Call `reset_session` between cards; remove per-card settle delays |
+| `tests/test_card_manager.py` | Mock `_worker_call` instead of `subprocess.run` |
+| `tests/test_card_safety.py` | Worker-side invariant tests |
+| `tests/test_empty_card_programming.py` | Update mock targets |
+| `tests/test_worker.py` | New file — worker state machine and IPC schema tests |
+
+### No-Go: CardWatcher / PCSC Ownership
+
+**Do not implement Phase 1 or later without resolving this first.**
+
+`CardWatcher` polls the reader at 1.5 s intervals via `probe_card_presence()`. The worker must own the PCSC context exclusively. If CardWatcher keeps polling while the worker holds the context, the same reader contention that causes `6f00` errors today will persist — eliminating the main reliability benefit of the worker.
+
+Resolution required before Phase 1: either (a) route `CardWatcher`'s presence probe through the worker via a `probe` command, or (b) suspend CardWatcher polling while the worker is running and rely on worker-emitted `card_removed` / `card_inserted` events instead. Any solution must not violate `docs/reference/state-machine.md` invariants and must not add platform branches to `card_watcher.py` (Forensic Guardrail 5 / Rule 5a).
+
+---
+
 ## Current Blockers (v0.5.38+)
 
 ### [RESOLVED v0.5.38] macOS GUI Asset Loading
