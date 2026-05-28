@@ -1,14 +1,18 @@
-"""Tests for _probe_with_timeout and CardWatcher behaviour on probe timeout.
+"""Tests for subprocess and thread-based card presence probing.
 
 Test plan:
   1. _probe_with_timeout fast path returns ATR correctly.
   2. _probe_with_timeout returns (False, 'PC/SC probe timed out') within a
      short bounded time when conn.connect() blocks.
-  3. probe_card_presence delegates to _probe_with_timeout for the reader.
+  3. probe_card_presence delegates to _probe_with_timeout when subprocess
+     is unavailable (fallback path).
   4. CardWatcher continues polling when probe_card_presence returns timeout.
   5. Existing no-reader and card-removed CardWatcher behaviour still passes.
+  6. Subprocess probe tests (ATR, no-card, timeout, empty output, bad JSON,
+     launch failure, thread guard independence).
 """
 
+import subprocess
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -16,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import managers.card_manager as cm_mod
-from managers.card_manager import CardManager
+from managers.card_manager import CardManager, _ProbeResult
 from managers.card_watcher import CardWatcher
 
 
@@ -140,10 +144,15 @@ class TestProbeWithTimeoutBounded:
 
 class TestProbeCardPresenceDelegates:
     def test_probe_card_presence_calls_probe_with_timeout(self, monkeypatch):
+        """When subprocess is unavailable, probe_card_presence falls back to
+        _probe_with_timeout.  Subprocess unavailability is forced explicitly."""
         monkeypatch.setattr(cm_mod, "_pyscard_available", True)
         fake_reader = MagicMock()
         monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: [fake_reader])
         cm = CardManager(pcsc_reader_index=0)
+
+        # Force subprocess path to return unavailable so fallback is exercised.
+        cm._probe_via_subprocess = lambda idx, timeout: _ProbeResult.unavailable("no interpreter")
 
         called_with = []
 
@@ -160,6 +169,8 @@ class TestProbeCardPresenceDelegates:
         monkeypatch.setattr(cm_mod, "_pyscard_available", True)
         monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: [MagicMock()])
         cm = CardManager(pcsc_reader_index=0)
+        # Force subprocess unavailable so the thread path runs and returns timeout.
+        cm._probe_via_subprocess = lambda idx, timeout: _ProbeResult.unavailable("no interpreter")
         cm._probe_with_timeout = lambda reader, timeout=None: (False, "PC/SC probe timed out")
         ok, result = cm.probe_card_presence()
         assert ok is False
@@ -403,3 +414,149 @@ class TestInFlightGuard:
         # Subsequent fast call also works (thread completed synchronously)
         ok2, result2 = cm._probe_with_timeout(reader, timeout=1.0)
         assert ok2 is True
+
+
+# ---------------------------------------------------------------------------
+# Subprocess probe tests (new in v0.5.60)
+# ---------------------------------------------------------------------------
+
+def _make_subprocess_result(stdout="", stderr="", returncode=0):
+    """Build a fake subprocess.CompletedProcess."""
+    r = MagicMock()
+    r.stdout = stdout
+    r.stderr = stderr
+    r.returncode = returncode
+    return r
+
+
+def _patched_probe_cm(monkeypatch):
+    """CardManager with pyscard patched as available and one fake reader."""
+    monkeypatch.setattr(cm_mod, "_pyscard_available", True)
+    monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: [MagicMock()])
+    return CardManager(pcsc_reader_index=0)
+
+
+class TestSubprocessProbe:
+    """Tests for _probe_via_subprocess and its integration into probe_card_presence."""
+
+    # --- 3. ATR JSON response parses correctly ---
+
+    def test_atr_json_response(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result('{"ok": true, "atr": "3B 9F 96"}'),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is True
+        assert result.present is True
+        assert result.message == "3B 9F 96"
+
+    # --- 4. no-card JSON response parses correctly ---
+
+    def test_no_card_json_response(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result('{"ok": false, "msg": "No card in reader"}'),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is True
+        assert result.present is False
+        assert result.message == "No card in reader"
+
+    # --- 5. empty stdout returns a clean error ---
+
+    def test_empty_stdout_returns_unavailable(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result("", "some stderr"),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is False
+        assert isinstance(result.message, str) and result.message
+
+    # --- 6. malformed JSON returns a clean error ---
+
+    def test_malformed_json_returns_unavailable(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result("not json at all"),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is False
+        assert isinstance(result.message, str) and result.message
+
+    # --- 7. interpreter launch failure returns unavailable; fallback fires ---
+
+    def test_launch_failure_returns_unavailable(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+
+        def _raise(*a, **kw):
+            raise FileNotFoundError("python not found")
+
+        monkeypatch.setattr(cm_mod.subprocess, "run", _raise)
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is False
+
+    def test_launch_failure_triggers_thread_fallback(self, monkeypatch):
+        """When subprocess cannot launch, probe_card_presence uses _probe_with_timeout."""
+        cm = _patched_probe_cm(monkeypatch)
+
+        def _raise(*a, **kw):
+            raise FileNotFoundError("python not found")
+
+        monkeypatch.setattr(cm_mod.subprocess, "run", _raise)
+
+        fallback_called = []
+
+        def _fake_thread_probe(reader, timeout=None):
+            fallback_called.append(True)
+            return True, "3B AB CD"
+
+        cm._probe_with_timeout = _fake_thread_probe
+        ok, msg = cm.probe_card_presence()
+        assert fallback_called, "_probe_with_timeout was not called as fallback"
+        assert ok is True
+        assert msg == "3B AB CD"
+
+    # --- 1. subprocess timeout returns 'PC/SC probe timed out'; _probe_thread is None ---
+
+    def test_subprocess_timeout_result_and_no_thread(self, monkeypatch):
+        cm = _patched_probe_cm(monkeypatch)
+
+        def _raise_timeout(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd=["python"], timeout=2.0)
+
+        monkeypatch.setattr(cm_mod.subprocess, "run", _raise_timeout)
+        ok, msg = cm.probe_card_presence()
+        assert ok is False
+        assert msg == "PC/SC probe timed out"
+        assert cm._probe_thread is None
+
+    # --- 2. next poll succeeds after subprocess timeout (no in-flight guard blocks it) ---
+
+    def test_next_poll_unblocked_after_subprocess_timeout(self, monkeypatch):
+        call_count = [0]
+
+        def _run(*a, **kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise subprocess.TimeoutExpired(cmd=["python"], timeout=2.0)
+            return _make_subprocess_result('{"ok": true, "atr": "3B 9F"}')
+
+        monkeypatch.setattr(cm_mod, "_pyscard_available", True)
+        monkeypatch.setattr(cm_mod, "_smartcard_readers", lambda: [MagicMock()])
+        monkeypatch.setattr(cm_mod.subprocess, "run", _run)
+        cm = CardManager(pcsc_reader_index=0)
+
+        ok1, msg1 = cm.probe_card_presence()
+        assert ok1 is False
+        assert msg1 == "PC/SC probe timed out"
+        assert cm._probe_thread is None  # no orphaned thread
+
+        ok2, msg2 = cm.probe_card_presence()
+        assert ok2 is True
+        assert msg2 == "3B 9F"

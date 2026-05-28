@@ -16,6 +16,7 @@ CSV editing and offline preparation; card operations simply return an
 error message.
 """
 
+import dataclasses
 import json
 import logging
 import os
@@ -115,6 +116,65 @@ def reset_pyscard() -> None:
     _pyscard_available = None
     _smartcard_readers = None
     logger.debug("pyscard cache cleared; next probe will re-initialize")
+
+
+# ---------------------------------------------------------------------------
+# Subprocess-based PC/SC probe
+# ---------------------------------------------------------------------------
+# The script is launched in a fresh interpreter so SCardConnect cannot stall
+# the parent process.  Output is a single JSON line on stdout.
+
+_PCSC_PROBE_SCRIPT = """\
+import sys, json
+try:
+    from smartcard.System import readers
+    from smartcard.Exceptions import NoCardException, CardConnectionException
+except ImportError as e:
+    print(json.dumps({"ok": False, "msg": "pyscard import failed: " + str(e)}))
+    sys.exit(0)
+reader_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+try:
+    rlist = readers()
+except Exception as e:
+    print(json.dumps({"ok": False, "msg": "PC/SC error: " + str(e)}))
+    sys.exit(0)
+if reader_index >= len(rlist):
+    print(json.dumps({"ok": False, "msg": "reader index out of range"}))
+    sys.exit(0)
+reader = rlist[reader_index]
+try:
+    conn = reader.createConnection()
+    conn.connect()
+    atr = conn.getATR()
+    conn.disconnect()
+    print(json.dumps({"ok": True, "atr": " ".join("{:02X}".format(b) for b in atr)}))
+except NoCardException:
+    print(json.dumps({"ok": False, "msg": "No card in reader"}))
+except CardConnectionException as e:
+    print(json.dumps({"ok": False, "msg": str(e)}))
+except Exception as e:
+    print(json.dumps({"ok": False, "msg": str(e)}))
+"""
+
+
+@dataclasses.dataclass
+class _ProbeResult:
+    """Internal result type for subprocess-based card presence probe."""
+    available: bool   # True if the backend produced a definitive result
+    present: bool     # True if a card is physically present
+    message: str      # ATR hex string or error/reason text
+
+    @staticmethod
+    def card_present(atr: str) -> '_ProbeResult':
+        return _ProbeResult(available=True, present=True, message=atr)
+
+    @staticmethod
+    def card_absent(reason: str) -> '_ProbeResult':
+        return _ProbeResult(available=True, present=False, message=reason)
+
+    @staticmethod
+    def unavailable(reason: str) -> '_ProbeResult':
+        return _ProbeResult(available=False, present=False, message=reason)
 
 
 class CardType(Enum):
@@ -471,11 +531,14 @@ class CardManager:
     # ---- card presence (fast, no pySim) --------------------------------
 
     def probe_card_presence(self) -> Tuple[bool, str]:
-        """Lightweight card presence check via PC/SC (in-process).
+        """Lightweight card presence check via PC/SC.
+
+        Primary path: subprocess probe (killable; no stuck threads on
+        stalled SCardConnect).  Falls back to the in-process thread path
+        when the subprocess cannot be launched.
 
         Returns (True, atr_hex) if a card is physically present,
-        (False, reason) otherwise.  Runs in-process using the pyscard
-        library - typically completes in <50 ms, suitable for 1.5 s polling.
+        (False, reason) otherwise.
         """
         if not _init_pyscard(self._venv_python):
             return False, 'NO_PYSCARD'
@@ -493,8 +556,56 @@ class CardManager:
                 f'PCSC reader index {self._pcsc_reader_index} out of range '
                 f'({len(rlist)} reader(s) detected)'
             )
+
+        # Primary: subprocess-based probe (killable, no orphaned threads).
+        sub = self._probe_via_subprocess(self._pcsc_reader_index, self._PROBE_TIMEOUT)
+        if sub.available:
+            return sub.present, sub.message
+
+        # Fallback: in-process thread probe (v0.5.59 path).
         reader = rlist[self._pcsc_reader_index]
         return self._probe_with_timeout(reader)
+
+    def _probe_via_subprocess(self, reader_index: int, timeout: float) -> '_ProbeResult':
+        """Run the PC/SC probe in a fresh interpreter subprocess.
+
+        The child process is killed on TimeoutExpired so SCardConnect cannot
+        stall the parent.  Returns _ProbeResult.unavailable() when the
+        subprocess cannot be launched, allowing the caller to fall back to
+        the in-process thread path.
+        """
+        if getattr(sys, 'frozen', False):
+            python_exe = self._bundled_python
+        else:
+            python_exe = self._venv_python or sys.executable
+        if not python_exe:
+            return _ProbeResult.unavailable("No Python interpreter for subprocess probe")
+        try:
+            proc = subprocess.run(
+                [python_exe, '-c', _PCSC_PROBE_SCRIPT, str(reader_index)],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            stdout = proc.stdout.strip()
+            if not stdout:
+                stderr_snippet = proc.stderr.strip()[:80]
+                return _ProbeResult.unavailable(
+                    f"Subprocess probe returned no output (stderr: {stderr_snippet})"
+                )
+            try:
+                data = json.loads(stdout)
+            except json.JSONDecodeError:
+                return _ProbeResult.unavailable(
+                    f"Malformed subprocess probe output: {stdout[:80]}"
+                )
+            if data.get("ok"):
+                return _ProbeResult.card_present(data.get("atr", ""))
+            return _ProbeResult.card_absent(data.get("msg", "No card in reader"))
+        except subprocess.TimeoutExpired:
+            return _ProbeResult.card_absent("PC/SC probe timed out")
+        except FileNotFoundError:
+            return _ProbeResult.unavailable(f"Interpreter not found: {python_exe}")
+        except Exception as exc:
+            return _ProbeResult.unavailable(f"Subprocess probe failed: {exc}")
 
     # Configurable only for tests; production default is 2 s.
     _PROBE_TIMEOUT: float = 2.0
