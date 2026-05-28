@@ -600,3 +600,106 @@ class TestShareStatusLabel:
 
         text = stub._share_label.setText.call_args[0][0]
         assert "NAS" in text
+
+
+# ---------------------------------------------------------------------------
+# 11. macOS SMB existing-mount adoption username check
+# ---------------------------------------------------------------------------
+
+class TestMacosSmBAdoptionUsernameCheck:
+    """_macos_find_smb_mount_for_adoption must verify username before adopting."""
+
+    def _profile(self, **kwargs):
+        defaults = dict(label="SIM", protocol="smb", server="nas.local", share="SIM",
+                        username="simgui", password="secret")
+        defaults.update(kwargs)
+        return StorageProfile(**defaults)
+
+    def test_matching_username_is_adopted(self):
+        """Adoption succeeds when mount username matches profile.username."""
+        ns = NetworkStorageManager()
+        p = self._profile()
+        mount_output = "//simgui@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            path, err = ns._macos_find_smb_mount_for_adoption(p)
+
+        assert err is None
+        assert path == "/Volumes/SIM"
+
+    def test_different_username_is_refused(self):
+        """Adoption fails when mount username differs from profile.username."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui")
+        mount_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            path, err = ns._macos_find_smb_mount_for_adoption(p)
+
+        assert path is None
+        assert err is not None
+
+    def test_refusal_message_names_existing_username_not_password(self):
+        """Refusal error names the existing mount username and does not contain the profile password."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui", password="s3cr3t")
+        mount_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            path, err = ns._macos_find_smb_mount_for_adoption(p)
+
+        assert err == (
+            "Share is already mounted as johneff. "
+            "Disconnect that mount or use matching credentials."
+        )
+        assert "s3cr3t" not in err
+
+    def test_refused_adoption_leaves_active_mounts_empty(self):
+        """mount() with a refused adoption leaves _active_mounts and _actual_mount_paths empty."""
+        ns = NetworkStorageManager()
+        p = self._profile()
+        mount_scan_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        def fake_run(cmd, **kwargs):
+            if "mount_smbfs" in str(cmd):
+                return MagicMock(returncode=1, stderr="already mounted", stdout="")
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout=mount_scan_output, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.makedirs"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is False
+        assert "SIM" not in ns._active_mounts
+        assert "SIM" not in ns._actual_mount_paths
+
+    def test_unknown_username_does_not_silently_adopt_profile_credential_mount(self):
+        """If mount URL has no @-username and profile.username is set, adoption is refused."""
+        ns = NetworkStorageManager()
+        p = self._profile(username="simgui")
+        # Mount line without @ — username cannot be determined
+        mount_output = "//nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        with patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=mount_output, stderr="")), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True):
+            path, err = ns._macos_find_smb_mount_for_adoption(p)
+
+        assert path is None
+        assert err is not None

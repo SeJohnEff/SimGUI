@@ -255,7 +255,13 @@ class NetworkStorageManager:
                     # either a stale VFS entry that os.path.ismount() missed,
                     # or a Finder/OS mount at a different path (e.g. /Volumes/SIM).
                     # Find the actual mount path and probe accessibility there.
-                    actual = self._macos_find_smb_mount(profile) if _MACOS else None
+                    if _MACOS:
+                        actual, adoption_err = self._macos_find_smb_mount_for_adoption(profile)
+                        if adoption_err:
+                            self._active_mounts.pop(profile.label, None)
+                            return False, adoption_err
+                    else:
+                        actual = None
                     check_path = actual if actual else mp
                     if self._check_path_accessible(check_path):
                         if actual and actual != mp:
@@ -441,10 +447,13 @@ class NetworkStorageManager:
                             p.label)
             elif _MACOS and p.protocol == "smb":
                 # Check for Finder/OS mounts at non-SimGUI paths (e.g. /Volumes/SIM).
-                # _macos_find_smb_mount() scans the system mount table so it finds
-                # shares that os.path.ismount(profile.mount_point) misses.
-                actual = self._macos_find_smb_mount(p)
-                if actual and self._check_path_accessible(actual):
+                # Validates username before adopting to prevent cross-user mount
+                # adoption (e.g. Finder's johneff@ mount adopted for simgui profile).
+                actual, adoption_err = self._macos_find_smb_mount_for_adoption(p)
+                if adoption_err:
+                    logger.warning("sync_os_mounts: refused adoption for %s: %s",
+                                   p.label, adoption_err)
+                elif actual and self._check_path_accessible(actual):
                     self._actual_mount_paths[p.label] = actual
                     self._active_mounts[p.label] = p
                     logger.info("sync_os_mounts: adopted Finder/OS mount %s "
@@ -741,6 +750,70 @@ class NetworkStorageManager:
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _parse_smb_url_username(mount_line: str) -> Optional[str]:
+        """Extract the username from a macOS SMB mount line.
+
+        Parses lines of the form ``//[user@]server/share on /mountpoint (...)``.
+        Returns the username string when an ``@``-prefixed user is present,
+        or ``None`` when the URL has no user component (anonymous/guest or
+        username cannot be determined).
+        """
+        m = re.match(r'(//[^ ]+)\s+on\s+', mount_line)
+        if not m:
+            return None
+        url = m.group(1)
+        # Capture user-info before the @: may be "user" or "user:password"
+        user_match = re.match(r'//([^@/]+)@', url)
+        if user_match:
+            # Strip any embedded password ("user:pass" → "user")
+            return user_match.group(1).split(":", 1)[0]
+        return None
+
+    def _macos_find_smb_mount_for_adoption(
+        self, profile: StorageProfile,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Find an existing macOS SMB mount and validate username before adoption.
+
+        Returns ``(path, None)`` when a mount is found and the username check
+        passes (or no username check is required).
+        Returns ``(None, error_message)`` when a mount is found but a username
+        mismatch prevents safe adoption — caller must NOT update
+        ``_active_mounts`` or ``_actual_mount_paths``.
+        Returns ``(None, None)`` when no existing mount is found at all.
+        """
+        if os.path.ismount(profile.mount_point):
+            # SimGUI's own mount point — credentials were ours, no check needed.
+            return profile.mount_point, None
+        share = profile.share.strip("/")
+        server = profile.server
+        try:
+            r = subprocess.run(
+                ["/sbin/mount"], capture_output=True, text=True, timeout=5,
+                stdin=subprocess.DEVNULL,
+            )
+            for line in r.stdout.splitlines():
+                if f"{server}/{share}" in line and " on " in line:
+                    mp = line.split(" on ", 1)[1].split(" ")[0]
+                    if not mp or not os.path.isdir(mp):
+                        continue
+                    if profile.username:
+                        mount_username = self._parse_smb_url_username(line)
+                        if mount_username is None:
+                            return None, (
+                                "Share is already mounted by an unknown user. "
+                                "Disconnect that mount or use matching credentials."
+                            )
+                        if mount_username != profile.username:
+                            return None, (
+                                f"Share is already mounted as {mount_username}. "
+                                "Disconnect that mount or use matching credentials."
+                            )
+                    return mp, None
+        except Exception:
+            pass
+        return None, None
 
     def _test_smb_macos(self, profile: StorageProfile) -> tuple[bool, str]:
         """Test SMB connectivity and authentication on macOS.
