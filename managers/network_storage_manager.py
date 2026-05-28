@@ -226,9 +226,49 @@ class NetworkStorageManager:
         ``get_active_mount_paths`` returns it.
         """
         mp = profile.mount_point
+
+        # Clear stale internal state: tracked as mounted but OS disagrees.
+        # Happens after sleep/wake when the SMB VFS entry disappears silently.
+        if profile.label in self._active_mounts and not self.is_mounted(profile):
+            self._active_mounts.pop(profile.label, None)
+            self._actual_mount_paths.pop(profile.label, None)
+            logger.info("mount: cleared stale internal tracking for %s", profile.label)
+
         if self.is_mounted(profile):
-            self._active_mounts[profile.label] = profile
-            return True, f"Already mounted at {mp}"
+            # OS reports a live mount — verify it is actually accessible before trusting it.
+            # Stale VFS entries after sleep/wake report ismount=True but block on I/O.
+            if self.verify_mount_accessible(profile):
+                self._active_mounts[profile.label] = profile
+                return True, f"Already mounted at {mp}"
+            # Stale OS mount: clear internal state and attempt a force-umount.
+            self._active_mounts.pop(profile.label, None)
+            self._actual_mount_paths.pop(profile.label, None)
+            logger.info("mount: stale OS mount for %s at %s, attempting cleanup",
+                        profile.label, mp)
+            try:
+                _umount_stale = [_UMOUNT_MACOS, mp] if _MACOS else [_SUDO, _UMOUNT, mp]
+                subprocess.run(_umount_stale, capture_output=True, text=True, timeout=10,
+                               stdin=subprocess.DEVNULL)
+            except Exception:
+                pass
+            # Fall through to fresh mount attempt.
+
+        # Handle stale mount-point directory that may remain after a dead SMB mount
+        # is cleaned up by the OS (e.g. after sleep/wake with VFS entry already gone).
+        if os.path.exists(mp) and not os.path.ismount(mp):
+            try:
+                entries = os.listdir(mp)
+            except OSError as exc:
+                return False, f"Cannot inspect mount point '{mp}': {exc}"
+            if entries:
+                return False, (
+                    f"Mount point '{mp}' exists with content but is not mounted. "
+                    f"Remove it manually to reconnect."
+                )
+            try:
+                os.rmdir(mp)
+            except OSError as exc:
+                return False, f"Cannot clear stale mount point '{mp}': {exc}"
 
         os.makedirs(mp, exist_ok=True)
 

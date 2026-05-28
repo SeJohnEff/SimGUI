@@ -753,6 +753,7 @@ class TestMacosSmBAdoptionUsernameCheck:
         )
 
     def test_explicit_mount_succeeds_after_username_mismatch(self):
+
         """mount() succeeds and tracks the profile when the explicit retry mount works."""
         ns = NetworkStorageManager()
         p = self._profile(username="simgui", password="secret")
@@ -780,3 +781,126 @@ class TestMacosSmBAdoptionUsernameCheck:
         assert ok is True
         assert p.label in ns._active_mounts
         assert "Mounted" in msg
+
+
+# ---------------------------------------------------------------------------
+# 12. Stale mountpoint handling after sleep/wake
+# ---------------------------------------------------------------------------
+
+class TestStaleMountpointHandling:
+    """mount() must handle stale dirs and OS mounts safely after sleep/wake."""
+
+    def test_empty_stale_mountpoint_removed_before_fresh_mount(self):
+        """Empty stale dir is removed before fresh mount — not left as EEXIST obstacle."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="StalyNAS")
+
+        removed_dirs = []
+        created_dirs = []
+
+        def fake_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.exists", side_effect=lambda path: path == p.mount_point), \
+             patch("os.listdir", return_value=[]), \
+             patch("os.rmdir", side_effect=lambda path: removed_dirs.append(path)), \
+             patch("os.makedirs", side_effect=lambda path, exist_ok=False: created_dirs.append(path)), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is True
+        assert p.mount_point in removed_dirs, "Empty stale dir must be removed before remount"
+
+    def test_nonempty_stale_mountpoint_not_deleted(self):
+        """Non-empty stale dir is not deleted; mount returns a clear error."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="NonEmptyNAS")
+
+        removed_dirs = []
+
+        with patch("os.path.ismount", return_value=False), \
+             patch("os.path.exists", side_effect=lambda path: path == p.mount_point), \
+             patch("os.listdir", return_value=["old_data.csv"]), \
+             patch("os.rmdir", side_effect=lambda path: removed_dirs.append(path)), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is False
+        assert p.mount_point not in removed_dirs, "Non-empty stale dir must not be deleted"
+        assert "content" in msg or "not mounted" in msg.lower()
+
+    def test_file_exists_error_not_reported_as_auth_failure(self):
+        """'File exists' OS error is not labelled as authentication failure."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="FileExistsNAS")
+
+        def fake_run(cmd, **kwargs):
+            if any("mount_smbfs" in str(x) for x in cmd):
+                return MagicMock(returncode=1, stderr="File exists", stdout="")
+            if cmd and "/bin/ls" in str(cmd[0]):
+                return MagicMock(returncode=1, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.makedirs"), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is False
+        assert "auth" not in msg.lower(), f"Must not mention auth: {msg!r}"
+        assert "credential" not in msg.lower(), f"Must not mention credentials: {msg!r}"
+
+    def test_stale_internal_active_mount_cleared_before_reconnect(self):
+        """_active_mounts is cleared when OS reports share as unmounted."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="StaleInternal")
+        ns._active_mounts["StaleInternal"] = p
+        ns._actual_mount_paths["StaleInternal"] = "/stale/path"
+
+        def fake_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.makedirs"), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is True
+        assert "StaleInternal" in ns._active_mounts
+        assert "StaleInternal" not in ns._actual_mount_paths
+
+    def test_wrong_user_adoption_still_refused_after_stale_cleanup(self):
+        """Wrong-user adoption safety (89f9916/8801706) is preserved after stale-mount changes."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="SIM", server="nas.local", share="SIM", username="simgui")
+        mount_scan_output = "//johneff@nas.local/SIM on /Volumes/SIM (smbfs, nodev, nosuid)\n"
+
+        def fake_run(cmd, **kwargs):
+            if any("mount_smbfs" in str(x) for x in cmd):
+                return MagicMock(returncode=1, stderr="already mounted", stdout="")
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout=mount_scan_output, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("os.makedirs"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns.mount(p)
+
+        assert ok is False
+        assert "SIM" not in ns._active_mounts
+        assert "SIM" not in ns._actual_mount_paths
