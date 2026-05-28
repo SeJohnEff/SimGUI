@@ -112,6 +112,10 @@ class ProgramSIMPanel(QWidget):
         self._original_form_data: dict[str, str] = {}
         self._detected_non_empty: bool = False
         self._extra_card_data: dict = {}
+        # Sticky result: ICCID key set after a final Program Card action so that
+        # card-watcher polls cannot overwrite the result message while the same
+        # card is still inserted.  None means no sticky result is active.
+        self._sticky_result_iccid: Optional[str] = None
 
         self.on_csv_loaded_callback = None
         self.on_file_browsed_callback = None
@@ -280,6 +284,10 @@ class ProgramSIMPanel(QWidget):
 
         CardInfo sentinel values ("-") are treated as absent.
         """
+        if self._sticky_result_iccid is not None:
+            incoming = card_info.iccid if (card_info.iccid and card_info.iccid != "(blank)") else ""
+            if incoming != self._sticky_result_iccid:
+                self._clear_sticky_result()
         self._update_program_btn_state()
 
         if not card_info.iccid:
@@ -300,6 +308,14 @@ class ProgramSIMPanel(QWidget):
                 current = entry.text().strip()
                 if not current or current == "-":
                     entry.setText(value)
+
+    def _set_sticky_result(self, iccid: str, text: str, style: str = "normal") -> None:
+        """Set a final-action result that survives card-watcher polls for this card."""
+        self._sticky_result_iccid = iccid
+        self._set_action_status(text, style)
+
+    def _clear_sticky_result(self) -> None:
+        self._sticky_result_iccid = None
 
     def _set_action_status(self, text: str, style: str = "normal"):
         self._action_status.setPlainText(text)
@@ -333,13 +349,19 @@ class ProgramSIMPanel(QWidget):
         card_detected = _current in (
             CardState.DETECTED, CardState.AUTHENTICATED, CardState.BLANK)
         has_data = self._fields_have_data()
+        current_iccid = self._field_entries["ICCID"].text().strip()
+
+        # Preserve sticky result while the same card is still inserted.
+        if (self._sticky_result_iccid is not None
+                and self._sticky_result_iccid == current_iccid):
+            self._prog_btn.setEnabled(card_detected and has_data)
+            return
 
         if card_detected and has_data:
             self._prog_btn.setEnabled(True)
-            iccid = self._field_entries["ICCID"].text().strip()
-            if iccid:
+            if current_iccid:
                 self._set_action_status(
-                    f"Card detected (ICCID {iccid}) — click Program to continue",
+                    f"Card detected (ICCID {current_iccid}) — click Program to continue",
                     "success")
             else:
                 self._set_action_status(
@@ -351,9 +373,8 @@ class ProgramSIMPanel(QWidget):
                 self._set_action_status("Insert a SIM card...")
             else:
                 # Card is detected but no form data selected yet
-                iccid = self._field_entries["ICCID"].text().strip()
-                if iccid:
-                    self._set_action_status(f"Card detected (ICCID {iccid}) — select data to program")
+                if current_iccid:
+                    self._set_action_status(f"Card detected (ICCID {current_iccid}) — select data to program")
                 else:
                     self._set_action_status("Blank card detected — select data or enter form data")
 
@@ -438,6 +459,7 @@ class ProgramSIMPanel(QWidget):
             self._field_entries["ICCID"].setReadOnly(False)
 
     def on_card_removed(self):
+        self._clear_sticky_result()
         self._detected_non_empty = False
         self._step = 0
         self._reset_step()
@@ -524,6 +546,8 @@ class ProgramSIMPanel(QWidget):
     def _on_program(self):
         if self._step < 1:
             return
+        # Clear any previous sticky result — this is a new explicit action.
+        self._clear_sticky_result()
         adm1 = self._field_entries["ADM1"].text().strip()
         if not adm1:
             self._set_action_status("ADM1 is required", "warning")
@@ -566,13 +590,20 @@ class ProgramSIMPanel(QWidget):
             if self._card_watcher:
                 self._card_watcher.resume()
 
+        current_iccid = self._field_entries["ICCID"].text().strip()
         if ok:
+            if "No changes to program" in msg:
+                # No-op: card already matches — sticky, no popup, no artifact.
+                self._set_sticky_result(
+                    current_iccid,
+                    "No changes to program — card already matches CSV data")
+                return
             clean = self._is_clean_success(ok, msg)
             if clean and callable(getattr(self, 'on_card_programmed_callback', None)):
                 saved_paths = self.on_card_programmed_callback(card_data)
                 if saved_paths:
                     msg += f"\nArtifact saved: {saved_paths[0]}"
-            self._set_action_status(msg, "success" if clean else "warning")
+            self._set_sticky_result(current_iccid, msg, "success" if clean else "warning")
         else:
             self._set_action_status(msg, "error")
 
