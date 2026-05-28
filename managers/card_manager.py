@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
@@ -381,6 +382,7 @@ class CardManager:
         self.card_blocked: bool = False   # True when ADM1 retry counter = 0
         self._adm1_remaining_attempts: Optional[int] = None
         self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
+        self._probe_thread: Optional[threading.Thread] = None  # in-flight PCSC probe guard
         logger.info(
             "CardManager init: backend=%s, cli_path=%s, venv_python=%s, bundled_python=%s",
             self.cli_backend.name, self.cli_path, self._venv_python, self._bundled_python,
@@ -492,19 +494,57 @@ class CardManager:
                 f'({len(rlist)} reader(s) detected)'
             )
         reader = rlist[self._pcsc_reader_index]
-        try:
-            conn = reader.createConnection()
-            conn.connect()
-            atr = conn.getATR()
-            atr_hex = ' '.join(f'{b:02X}' for b in atr)
-            conn.disconnect()
-            return True, atr_hex
-        except _NoCardException:
-            return False, 'No card in reader'
-        except _CardConnectionException as exc:
-            return False, self._clean_pysim_error(str(exc))
-        except Exception as exc:
-            return False, self._clean_pysim_error(str(exc))
+        return self._probe_with_timeout(reader)
+
+    # Configurable only for tests; production default is 2 s.
+    _PROBE_TIMEOUT: float = 2.0
+
+    def _probe_with_timeout(self, reader, timeout: Optional[float] = None) -> Tuple[bool, str]:
+        """Run the SCardConnect/getATR sequence in a daemon thread.
+
+        On macOS, SCardConnect can block indefinitely in the XPC/mach layer
+        after a card is removed.  Running it in a throwaway daemon thread and
+        joining with a deadline keeps the CardWatcher poll loop bounded.
+        """
+        if timeout is None:
+            timeout = self._PROBE_TIMEOUT
+
+        # In-flight guard: at most one blocked PCSC probe thread per CardManager.
+        # If the previous probe thread is still alive (SCardConnect stalled),
+        # return immediately rather than spawning another thread.
+        if self._probe_thread is not None and self._probe_thread.is_alive():
+            logger.debug("probe_with_timeout: previous probe still in-flight, skipping new thread")
+            return False, 'PC/SC probe timed out'
+
+        result: list = []
+
+        def _run() -> None:
+            try:
+                conn = reader.createConnection()
+                conn.connect()
+                atr = conn.getATR()
+                conn.disconnect()
+                result.append((True, ' '.join(f'{b:02X}' for b in atr)))
+            except _NoCardException:
+                result.append((False, 'No card in reader'))
+            except _CardConnectionException as exc:
+                result.append((False, self._clean_pysim_error(str(exc))))
+            except Exception as exc:
+                result.append((False, self._clean_pysim_error(str(exc))))
+
+        t = threading.Thread(target=_run, daemon=True, name='pcsc-probe')
+        self._probe_thread = t
+        t.start()
+        t.join(timeout)
+        if not result:
+            logger.warning(
+                "probe_card_presence: SCardConnect did not respond within %.1f s "
+                "(macOS XPC stall after card removal — probe thread orphaned, "
+                "watcher will retry next cycle)",
+                timeout,
+            )
+            return False, 'PC/SC probe timed out'
+        return result[0]
 
     # ---- card operations -----------------------------------------------
 
