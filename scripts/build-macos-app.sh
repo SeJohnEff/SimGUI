@@ -279,6 +279,19 @@ PYTHONHOME="$BUNDLED_FWK_DIR" PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH" \
 echo "✓ pySim-read.py -h smoke test passed"
 echo "  Bundled Python path: $BUNDLED_PYTHON"
 
+# Check 4: import smoke test — verify smpp.pdu, pySim.sms, and pySim.app
+# are all importable with the bundled Python + bundled site-packages.
+# pySim-shell.py imports pySim.app which transitively imports smpp.pdu
+# unconditionally; a missing smpp package is caught here, not on another Mac.
+PYSIM_IMPORT_ERR=$(PYTHONHOME="$BUNDLED_FWK_DIR" PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH" \
+    "$BUNDLED_PYTHON" -c "import smpp.pdu; import pySim.sms; import pySim.app" 2>&1) || {
+    echo "✗ pySim import smoke test failed — missing bundled dependency:"
+    echo "$PYSIM_IMPORT_ERR"
+    echo "  Check scripts/requirements-pysim-bundle.txt for missing smpp/pySim packages"
+    exit 1
+}
+echo "✓ pySim import smoke test passed (smpp.pdu, pySim.sms, pySim.app)"
+
 echo ""
 echo "✓ Build succeeded!"
 echo ""

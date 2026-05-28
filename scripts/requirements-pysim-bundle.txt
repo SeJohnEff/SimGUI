@@ -1,7 +1,8 @@
 # pySim runtime dependencies bundled inside SimGUI.app.
 # Used by build-macos-app.sh to populate pysim-site-packages/ inside the app bundle.
-# SMPP packages are excluded — they are only used by pySim-smpp2sim.py
-# which is not bundled.
+# smpp.pdu is imported unconditionally: pySim-shell.py → pySim.app → pySim.ara_m
+# → pySim.global_platform → pySim.ota → pySim.sms → from smpp.pdu import …
+# All three smpp packages are required at runtime.
 pyscard
 pyserial
 pytlv
@@ -17,3 +18,6 @@ pycryptodomex
 cryptography
 git+https://github.com/osmocom/asn1tools
 packaging
+git+https://github.com/hologram-io/smpp.pdu
+smpp.twisted3 @ git+https://github.com/jookies/smpp.twisted
+smpplib
