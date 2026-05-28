@@ -911,6 +911,19 @@ class NetworkStorageManager:
                 )
                 return True, "Connection and authentication successful"
             err = (result.stderr or result.stdout).strip()[:200]
+            if "File exists" in err or "already mounted" in err.lower():
+                # "File exists" from mount_smbfs means macOS refused a duplicate
+                # session for this share — not an authentication error.  Re-check
+                # the mount table; the share may have appeared between the initial
+                # check and this attempt.
+                actual = self._macos_find_smb_mount(profile)
+                if actual:
+                    return True, f"Share already mounted at {actual}"
+                return False, (
+                    "Share may already be mounted by macOS or Finder. "
+                    "Open Finder > Go > Network to disconnect the existing mount, "
+                    "then retry."
+                )
             return False, f"Authentication failed: {err or 'mount_smbfs rejected credentials'}"
         except subprocess.TimeoutExpired:
             return False, "Connection timed out (15 s)"

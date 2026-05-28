@@ -904,3 +904,127 @@ class TestStaleMountpointHandling:
         assert ok is False
         assert "SIM" not in ns._active_mounts
         assert "SIM" not in ns._actual_mount_paths
+
+
+# ---------------------------------------------------------------------------
+# 13. Test Connection "File exists" classification
+# ---------------------------------------------------------------------------
+
+class TestTestConnectionFileExists:
+    """_test_smb_macos must never classify 'File exists' as authentication failure."""
+
+    def test_file_exists_not_reported_as_auth_failure(self):
+        """'File exists' from mount_smbfs during Test Connection is not labelled
+        as authentication failure (regression: ce903d5 startup fix did not
+        cover the Test Connection path)."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="DGTLAB_SIM", server="192.168.131.188", share="SIM",
+                         username="simgui", password="secret")
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "mount_smbfs" in str(cmd):
+                return MagicMock(returncode=1,
+                                 stderr="/sbin/mount_smbfs: /tmp/simgui-test-abc: File exists",
+                                 stdout="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-abc"), \
+             patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=False), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert ok is False
+        assert "auth" not in msg.lower(), f"Must not mention auth: {msg!r}"
+        assert "Authentication failed" not in msg, f"Must not say 'Authentication failed': {msg!r}"
+
+    def test_file_exists_succeeds_when_share_found_on_recheck(self):
+        """When 'File exists' is returned but share appears in mount table on recheck,
+        _test_smb_macos returns success (race between initial check and temp-mount)."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="DGTLAB_SIM", server="192.168.131.188", share="SIM",
+                         username="simgui", password="secret")
+
+        call_count = {"mount_scans": 0}
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["/sbin/mount"]:
+                call_count["mount_scans"] += 1
+                if call_count["mount_scans"] == 1:
+                    return MagicMock(returncode=0, stdout="", stderr="")
+                return MagicMock(
+                    returncode=0,
+                    stdout="//simgui@192.168.131.188/SIM on /Volumes/SIM (smbfs, nodev)\n",
+                    stderr="",
+                )
+            if "mount_smbfs" in str(cmd):
+                return MagicMock(returncode=1, stderr="File exists", stdout="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-abc"), \
+             patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert ok is True
+        assert "already mounted" in msg.lower() or "/Volumes/SIM" in msg
+
+    def test_file_exists_error_does_not_contain_password(self):
+        """Error message for 'File exists' does not contain the profile password."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="DGTLAB_SIM", server="192.168.131.188", share="SIM",
+                         username="simgui", password="s3cr3tPa$$")
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "mount_smbfs" in str(cmd):
+                return MagicMock(returncode=1, stderr="File exists", stdout="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-abc"), \
+             patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=False), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert "s3cr3tPa$$" not in msg, f"Password must not appear in error: {msg!r}"
+
+    def test_already_mounted_error_gives_descriptive_message(self):
+        """Non-auth 'File exists' message tells the user how to resolve it."""
+        ns = NetworkStorageManager()
+        p = _smb_profile(label="DGTLAB_SIM", server="192.168.131.188", share="SIM",
+                         username="simgui", password="secret")
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["/sbin/mount"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "mount_smbfs" in str(cmd):
+                return MagicMock(returncode=1, stderr="File exists", stdout="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("tempfile.mkdtemp", return_value="/tmp/simgui-test-abc"), \
+             patch("os.rmdir"), \
+             patch("os.path.ismount", return_value=False), \
+             patch("os.path.isdir", return_value=False), \
+             patch("managers.network_storage_manager._MACOS", True), \
+             patch("managers.network_storage_manager._MOUNT_SMB_FS", "/sbin/mount_smbfs"):
+            ok, msg = ns._test_smb_macos(p)
+
+        assert ok is False
+        assert any(word in msg.lower() for word in ("mounted", "finder", "disconnect")), (
+            f"Error should explain how to resolve: {msg!r}"
+        )
