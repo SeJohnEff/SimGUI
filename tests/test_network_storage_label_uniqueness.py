@@ -225,6 +225,10 @@ def _make_ns_mock(saved_labels=None, validate_result=(True, ""),
 class TestDialogLabelValidation:
     """Dialog must call validate_label_unique before Test and Save & Connect."""
 
+    @pytest.fixture(autouse=True)
+    def _lifecycle(self, qt_dialog_lifecycle):
+        self._lc = qt_dialog_lifecycle
+
     def _make_dlg(self, saved_labels=None, validate_result=(True, "")):
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
         ns = _make_ns_mock(saved_labels=saved_labels,
@@ -233,6 +237,7 @@ class TestDialogLabelValidation:
         dlg.server_input.setText("nas.local")
         dlg.share_input.setText("SIM")
         dlg.label_input.setText("NAS SIM")
+        self._lc.track(dlg)
         return dlg, ns
 
     def test_test_connection_blocked_on_duplicate_label(self):
@@ -268,8 +273,7 @@ class TestDialogLabelValidation:
         ns.test_connection.return_value = (True, "OK")
         with patch("dialogs.network_storage_dialog_qt.QMessageBox.information"):
             dlg._on_test()
-            if dlg._test_worker:
-                dlg._test_worker.wait()
+            self._lc.drain(dlg)
         ns.test_connection.assert_called_once()
 
     def test_save_and_connect_runs_when_label_is_valid(self):
@@ -284,6 +288,7 @@ class TestDialogLabelValidation:
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
         ns = _make_ns_mock(saved_labels=["NAS SIM"])
         dlg = NetworkStorageDialogQt(ns_manager=ns)
+        self._lc.track(dlg)
         dlg.server_input.setText("nas.local")
         dlg.share_input.setText("SIM")
         dlg.label_input.setText("NAS SIM")
@@ -293,8 +298,7 @@ class TestDialogLabelValidation:
         ns.test_connection.return_value = (True, "OK")
         with patch("dialogs.network_storage_dialog_qt.QMessageBox.information"):
             dlg._on_test()
-            if dlg._test_worker:
-                dlg._test_worker.wait()
+            self._lc.drain(dlg)
 
         ns.validate_label_unique.assert_called_once_with(
             "NAS SIM", exclude_label="NAS SIM")
@@ -321,6 +325,7 @@ class TestDialogLabelValidation:
         from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
         ns = _make_ns_mock()
         dlg = NetworkStorageDialogQt(ns_manager=ns)
+        self._lc.track(dlg)
         dlg.server_input.setText("nas.local")
         dlg.share_input.setText("SIM")
         dlg.label_input.setText("NAS NEW")

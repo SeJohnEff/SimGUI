@@ -205,3 +205,73 @@ def cleanup_simgui_app(instance) -> None:
             instance.close()
     except Exception:
         _cleanup_log.debug("cleanup_simgui_app: close() raised", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Qt dialog worker lifecycle fixture
+# ---------------------------------------------------------------------------
+
+_WORKER_ATTRS = ("_test_worker",)
+
+
+@pytest.fixture
+def qt_dialog_lifecycle():
+    """Reusable lifecycle tracker for Qt objects that own QThread workers.
+
+    Lifecycle states per tracked object:
+      TRACKED → TEARDOWN_REQUESTED → WORKER_STOPPED → EVENTS_DRAINED → CLOSED
+
+    Usage in tests::
+        def test_foo(qt_dialog_lifecycle):
+            dlg = MyDialog()
+            qt_dialog_lifecycle.track(dlg)
+            dlg._on_test()  # spawns _test_worker
+            # teardown is automatic; or call drain(dlg) before asserting async results
+
+    ``drain(obj)`` advances WORKER_STOPPED → EVENTS_DRAINED without closing,
+    so tests can assert on completed-async results mid-test.
+    """
+    from PyQt6.QtWidgets import QApplication
+
+    class _LifecycleTracker:
+        def __init__(self):
+            self._tracked = []
+
+        def track(self, obj):
+            """TRACKED: register obj for automatic teardown."""
+            self._tracked.append(obj)
+            return obj
+
+        def drain(self, obj):
+            """WORKER_STOPPED → EVENTS_DRAINED: wait for any worker, then pump events."""
+            for attr in _WORKER_ATTRS:
+                worker = getattr(obj, attr, None)
+                if worker is None:
+                    continue
+                try:
+                    if callable(getattr(worker, "isRunning", None)) and worker.isRunning():
+                        worker.wait()
+                    elif callable(getattr(worker, "wait", None)):
+                        worker.wait()
+                except Exception:
+                    _cleanup_log.debug("qt_dialog_lifecycle: drain worker.wait() raised", exc_info=True)
+            app = QApplication.instance()
+            if app:
+                app.processEvents()
+
+        def _teardown(self):
+            """Drive each tracked object through TEARDOWN_REQUESTED … CLOSED."""
+            for obj in self._tracked:
+                self.drain(obj)  # TEARDOWN_REQUESTED → WORKER_STOPPED → EVENTS_DRAINED
+                try:
+                    if callable(getattr(obj, "close", None)):
+                        obj.close()   # CLOSED
+                except Exception:
+                    _cleanup_log.debug("qt_dialog_lifecycle: close() raised", exc_info=True)
+            app = QApplication.instance()
+            if app:
+                app.processEvents()
+
+    tracker = _LifecycleTracker()
+    yield tracker
+    tracker._teardown()
