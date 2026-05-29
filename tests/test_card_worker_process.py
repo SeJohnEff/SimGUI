@@ -8,6 +8,9 @@ import time
 import uuid
 
 import pytest
+from unittest.mock import MagicMock, patch
+
+import card_worker_process
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "card_worker_process.py")
 
@@ -106,7 +109,7 @@ def test_capabilities_contains_four_verbs():
         resp, _ = _send(proc, "capabilities")
         assert resp["ok"] is True
         caps = resp["result"]
-        assert set(caps) == {"ping", "status", "capabilities", "shutdown"}
+        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe"}
     finally:
         proc.terminate()
         proc.wait()
@@ -184,3 +187,105 @@ def test_multiple_requests_use_same_process():
     finally:
         proc.terminate()
         proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _handle_probe (import card_worker_process as module)
+# ---------------------------------------------------------------------------
+
+def _reset_probe_state():
+    card_worker_process._card_gen = 0
+    card_worker_process._session_id = None
+    card_worker_process._last_atr = None
+    card_worker_process._card_present = False
+
+
+def _fake_reader(atr=None, raise_on_connect=False, hang_connect=False):
+    conn = MagicMock()
+    if raise_on_connect:
+        conn.connect.side_effect = Exception("no card")
+    elif hang_connect:
+        conn.connect.side_effect = lambda: time.sleep(10)
+    else:
+        conn.connect.return_value = None
+        conn.getATR.return_value = atr or [0x3B, 0x9F, 0x94]
+    reader = MagicMock()
+    reader.createConnection.return_value = conn
+    return reader
+
+
+class TestHandleProbeUnit:
+
+    def setup_method(self):
+        _reset_probe_state()
+
+    def test_present_returns_atr_card_gen_session_id(self):
+        atr_bytes = [0x3B, 0x9F, 0x94]
+        reader = _fake_reader(atr=atr_bytes)
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+        resp = captured[0]
+        assert resp["ok"] is True
+        assert resp["present"] is True
+        assert resp["atr"] == bytes(atr_bytes).hex()
+        assert resp["card_gen"] == 1
+        assert isinstance(resp["session_id"], str) and len(resp["session_id"]) > 0
+
+    def test_two_present_probes_keep_same_card_gen(self):
+        reader = _fake_reader()
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+                card_worker_process._handle_probe("req2", {})
+        assert captured[0]["card_gen"] == 1
+        assert captured[1]["card_gen"] == 1
+
+    def test_present_absent_present_increments_card_gen(self):
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", side_effect=[
+            [_fake_reader()],
+            [_fake_reader(raise_on_connect=True)],
+            [_fake_reader()],
+        ]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+                card_worker_process._handle_probe("req2", {})
+                card_worker_process._handle_probe("req3", {})
+        assert captured[0]["card_gen"] == 1
+        assert captured[1]["present"] is False
+        assert captured[2]["card_gen"] == 2
+
+    def test_no_reader_returns_present_false(self):
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+        resp = captured[0]
+        assert resp["ok"] is True
+        assert resp["present"] is False
+
+    def test_no_card_returns_present_false(self):
+        reader = _fake_reader(raise_on_connect=True)
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+        resp = captured[0]
+        assert resp["ok"] is True
+        assert resp["present"] is False
+
+    def test_timeout_returns_ok_false_probe_timeout(self):
+        reader = _fake_reader(hang_connect=True)
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {"timeout": 0.05})
+        resp = captured[0]
+        assert resp["ok"] is False
+        assert resp["error"] == "PROBE_TIMEOUT"
+
+    def test_capabilities_include_probe(self):
+        assert "probe" in card_worker_process._CAPABILITIES
