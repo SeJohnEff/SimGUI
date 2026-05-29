@@ -456,9 +456,9 @@ class TestSyncOsMountsFinderMount:
         ns = self._make_ns(p)
         # SimGUI's own path is not mounted
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
-        # But _macos_find_smb_mount finds /Volumes/SIM
-        monkeypatch.setattr(ns, "_macos_find_smb_mount",
-                            lambda prof: "/Volumes/SIM")
+        # _macos_find_smb_mount_for_adoption finds /Volumes/SIM with no error
+        monkeypatch.setattr(ns, "_macos_find_smb_mount_for_adoption",
+                            lambda prof: ("/Volumes/SIM", None))
         monkeypatch.setattr(ns, "_check_path_accessible",
                             lambda path, timeout=5: True)
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
@@ -473,8 +473,8 @@ class TestSyncOsMountsFinderMount:
         p = self._smb_profile()
         ns = self._make_ns(p)
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
-        monkeypatch.setattr(ns, "_macos_find_smb_mount",
-                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_macos_find_smb_mount_for_adoption",
+                            lambda prof: ("/Volumes/SIM", None))
         monkeypatch.setattr(ns, "_check_path_accessible",
                             lambda path, timeout=5: False)
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
@@ -485,11 +485,12 @@ class TestSyncOsMountsFinderMount:
         assert p.label not in ns._actual_mount_paths
 
     def test_no_finder_mount_found_is_not_adopted(self, monkeypatch):
-        """If _macos_find_smb_mount returns None, nothing is adopted."""
+        """If _macos_find_smb_mount_for_adoption returns (None, None), nothing is adopted."""
         p = self._smb_profile()
         ns = self._make_ns(p)
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
-        monkeypatch.setattr(ns, "_macos_find_smb_mount", lambda prof: None)
+        monkeypatch.setattr(ns, "_macos_find_smb_mount_for_adoption",
+                            lambda prof: (None, None))
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
 
         ns.sync_os_mounts()
