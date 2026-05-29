@@ -32,6 +32,7 @@ from managers.network_storage_manager import (
     _MOUNT_SMB_FS,
     _SUDO,
     _UMOUNT,
+    _UMOUNT_MACOS,
 )
 
 
@@ -97,7 +98,7 @@ class TestAbsolutePathsInCommands:
         assert cmd[1] == "/usr/bin/mount"
 
     def test_unmount_uses_absolute_paths(self):
-        """unmount() must use absolute sudo and umount paths."""
+        """unmount() must use absolute umount paths (passwordless on macOS, sudo on Linux)."""
         ns = NetworkStorageManager()
         p = StorageProfile(label="test_umount")
         with patch.object(ns, "is_mounted", return_value=True), \
@@ -106,10 +107,17 @@ class TestAbsolutePathsInCommands:
              patch("os.rmdir"):
             ns.unmount(p)
         args = mock_run.call_args[0][0]
-        assert args[0] == "/usr/bin/sudo", (
-            f"umount sudo should be absolute, got: {args[0]}")
-        assert args[1] == "/usr/bin/umount", (
-            f"umount should be absolute, got: {args[1]}")
+        if sys.platform == "darwin":
+            # macOS: passwordless umount — no sudo to avoid TTY prompt
+            assert args[0] == _UMOUNT_MACOS, (
+                f"umount should be {_UMOUNT_MACOS} on macOS, got: {args[0]}")
+            assert args[1].startswith(MOUNT_BASE), (
+                f"umount target should be under {MOUNT_BASE}, got: {args[1]}")
+        else:
+            assert args[0] == _SUDO, (
+                f"umount sudo should be absolute, got: {args[0]}")
+            assert args[1] == _UMOUNT, (
+                f"umount should be absolute, got: {args[1]}")
 
     def test_check_sudo_mount_checks_sudoers_file(self):
         """check_sudo_mount() checks for the sudoers drop-in file."""
@@ -164,12 +172,14 @@ class TestSudoersRuleMatching:
         p = StorageProfile(label="sudoers_test", protocol="smb",
                            server="nas.local", share="simdata")
         cmd = ns._build_mount_cmd(p)
-        # macOS: /usr/bin/sudo /sbin/mount_smbfs ...
+        # macOS: /sbin/mount_smbfs ... (no sudo — mount_smbfs is user-executable)
         # Linux: /usr/bin/sudo /usr/bin/mount -t cifs ...
         if sys.platform == "darwin":
-            assert cmd[1] == _MOUNT_SMB_FS
+            # macOS: no sudo — mount_smbfs is user-executable; sudoers rule does not apply
+            assert cmd[0] == _MOUNT_SMB_FS
         else:
-            assert cmd[1] == "/usr/bin/mount"
+            # Linux: must match sudoers rule /usr/bin/sudo /usr/bin/mount -t cifs ...
+            assert cmd[1] == _MOUNT
             assert cmd[2] == "-t"
             assert cmd[3] == "cifs"
 
@@ -193,9 +203,14 @@ class TestSudoersRuleMatching:
              patch("os.rmdir"):
             ns.unmount(p)
         cmd = mock_run.call_args[0][0]
-        # Rule: /usr/bin/umount /tmp/simgui-mounts/*
-        assert cmd[1] == "/usr/bin/umount"
-        assert cmd[2].startswith("/tmp/simgui-mounts/")
+        if sys.platform == "darwin":
+            # macOS: passwordless umount — no sudo, so sudoers rule does not apply
+            assert cmd[0] == _UMOUNT_MACOS
+            assert cmd[1].startswith(MOUNT_BASE)
+        else:
+            # Linux: must match sudoers rule /usr/bin/umount /tmp/simgui-mounts/*
+            assert cmd[1] == _UMOUNT
+            assert cmd[2].startswith(MOUNT_BASE)
 
     def test_mount_point_always_under_mount_base(self):
         """All mount points must be under MOUNT_BASE for sudoers to match."""
@@ -310,7 +325,9 @@ class TestSudoPermissionDetection:
             ok, msg = ns.unmount(p)
         assert ok is False
         if sys.platform == "darwin":
-            assert "macOS" in msg or "mount_smbfs" in msg
+            # macOS unmount is passwordless (/sbin/umount, no sudo); a sudo error
+            # is unexpected and returned as-is rather than as a fix message.
+            assert "Unmount failed:" in msg
         else:
             assert "simgui-setup-mount" in msg
 
@@ -695,10 +712,11 @@ class TestReconnectResilience:
             sm = SettingsManager(path=path)
             ns = NetworkStorageManager(sm)
             with patch("os.path.ismount", return_value=True), \
+                 patch.object(ns, "verify_mount_accessible", return_value=True), \
                  patch("subprocess.run") as mock_run:
                 results = ns.reconnect_saved()
 
-            # Should not have called subprocess (already mounted)
+            # Should not have called subprocess (already mounted and accessible)
             mock_run.assert_not_called()
             assert len(results) == 1
             assert results[0][1] is True  # ok
