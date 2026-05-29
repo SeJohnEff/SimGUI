@@ -579,14 +579,14 @@ class TestShareStatusLabel:
         assert "/tmp/simgui-mounts/NAS" in text
 
     def test_disconnected_status_clears_label(self):
-        """Handler sets _share_label to empty string when not connected."""
+        """Handler sets _share_label to 'No network storage connected' when not connected."""
         from state_manager import ShareStatus
         stub = self._make_app_stub()
 
         status = ShareStatus(connected=False, labels=[], mount_paths=[])
         stub._on_share_status_changed(status)
 
-        stub._share_label.setText.assert_called_with("")
+        stub._share_label.setText.assert_called_with("No network storage connected")
 
     def test_connected_no_paths_falls_back_to_display_text(self):
         """Handler falls back to display_text when mount_paths is empty."""
