@@ -135,10 +135,7 @@ def test_card_watcher_index_preserved_if_recreated():
 def test_connected_share_shows_label_and_mount_path(qt_app):
     """Status label shows share label and local mount path when connected."""
     from main import SimGUIApp
-
-    class _FakeStatus:
-        connected = True
-        display_text = "Connected"
+    from state_manager import ShareStatus
 
     class _FakeLabel:
         def __init__(self):
@@ -151,22 +148,19 @@ def test_connected_share_shows_label_and_mount_path(qt_app):
     class _FakeApp:
         def __init__(self):
             self._share_label = _FakeLabel()
-            self._active_mounts = [("SIM NAS", "/mnt/simdata")]
 
     subject = _FakeApp()
-    SimGUIApp._on_share_status_changed(subject, _FakeStatus())
+    status = ShareStatus(connected=True, mount_paths=[("SIM NAS", "/mnt/simdata")])
+    SimGUIApp._on_share_status_changed(subject, status)
 
     assert "SIM NAS" in subject._share_label._text
     assert "/mnt/simdata" in subject._share_label._text
 
 
 def test_disconnected_shows_fallback_display_text(qt_app):
-    """Status label falls back to status.display_text when not connected."""
+    """Status label shows generic fallback when disconnected with no error_text."""
     from main import SimGUIApp
-
-    class _FakeStatus:
-        connected = False
-        display_text = "Not connected"
+    from state_manager import ShareStatus
 
     class _FakeLabel:
         def __init__(self):
@@ -179,12 +173,11 @@ def test_disconnected_shows_fallback_display_text(qt_app):
     class _FakeApp:
         def __init__(self):
             self._share_label = _FakeLabel()
-            self._active_mounts = []
 
     subject = _FakeApp()
-    SimGUIApp._on_share_status_changed(subject, _FakeStatus())
+    SimGUIApp._on_share_status_changed(subject, ShareStatus(connected=False))
 
-    assert subject._share_label._text == "Not connected"
+    assert subject._share_label._text == "No network storage connected"
 
 
 # ---------------------------------------------------------------------------
