@@ -243,3 +243,56 @@ class TestSuccessSticky:
         assert panel._sticky_result_iccid == iccid
         sm.card_state = CardState.NO_CARD
         assert panel._sticky_result_iccid is None
+
+
+# ---------------------------------------------------------------------------
+# 7. on_card_detected (index update) does NOT overwrite sticky for same ICCID
+# ---------------------------------------------------------------------------
+
+class TestOnCardDetectedStickyGuard:
+    """on_card_detected must not overwrite sticky result for the same ICCID."""
+
+    _CARD_DATA = {"ICCID": "8946020123456789012", "IMSI": "242010000000001", "ADM1": "88888888"}
+    _ICCID = "8946020123456789012"
+
+    def test_same_iccid_card_data_does_not_overwrite_success_sticky(self, qapp):
+        sm = StateManager()
+        panel, cm = _make_panel(sm)
+        _put_card_in_panel(panel, sm, self._ICCID)
+        cm.authenticate.return_value = (True, "OK")
+        cm.program_card.return_value = (True, "Programming complete")
+        panel._step = 1
+        panel._on_program()
+        success_text = _action_text(panel)
+        panel.on_card_detected(self._ICCID, card_data=self._CARD_DATA)
+        assert _action_text(panel) == success_text
+        panel.deleteLater()
+
+    def test_same_iccid_card_data_does_not_overwrite_noop_sticky(self, qapp):
+        sm = StateManager()
+        panel, cm = _make_panel(sm)
+        _put_card_in_panel(panel, sm, self._ICCID)
+        _simulate_noop(panel, cm, self._ICCID)
+        assert _action_text(panel) == EXPECTED_NOOP_DISPLAY
+        panel.on_card_detected(self._ICCID, card_data=self._CARD_DATA)
+        assert _action_text(panel) == EXPECTED_NOOP_DISPLAY
+        panel.deleteLater()
+
+    def test_no_sticky_card_data_shows_loaded_from_index(self, qapp):
+        sm = StateManager()
+        panel, cm = _make_panel(sm)
+        # No sticky — fresh detection
+        panel.on_card_detected(self._ICCID, card_data=self._CARD_DATA)
+        assert "data loaded from" in _action_text(panel)
+        panel.deleteLater()
+
+    def test_different_iccid_card_data_shows_normal_status(self, qapp):
+        sm = StateManager()
+        panel, cm = _make_panel(sm)
+        _put_card_in_panel(panel, sm, self._ICCID)
+        _simulate_noop(panel, cm, self._ICCID)
+        assert panel._sticky_result_iccid == self._ICCID
+        iccid_b = "8946020987654321098"
+        panel.on_card_detected(iccid_b, card_data={"ICCID": iccid_b, "IMSI": "242010000000099", "ADM1": "88888888"})
+        assert "data loaded from" in _action_text(panel)
+        panel.deleteLater()

@@ -408,6 +408,11 @@ class ProgramSIMPanel(QWidget):
         self._prog_btn.setEnabled(True)
         self._detected_non_empty = bool(iccid)
 
+        _preserve_sticky = (
+            self._sticky_result_iccid is not None
+            and self._sticky_result_iccid == (iccid or "")
+        )
+
         if card_data:
             normalized = _normalize_card_data(card_data)
             for key, _, _ in _FORM_FIELDS:
@@ -430,28 +435,32 @@ class ProgramSIMPanel(QWidget):
             # through to the card manager's own baseline.
             self._original_form_data = {}
             src = os.path.basename(file_path) if file_path else "index"
-            self._set_action_status(
-                f"Card detected — data loaded from {src}",
-                "success")
+            if not _preserve_sticky:
+                self._set_action_status(
+                    f"Card detected — data loaded from {src}",
+                    "success")
         elif not iccid and self._fields_have_data():
             self._extra_card_data = {}
             self._original_form_data = {}
-            self._set_action_status(
-                "Blank card detected — ready to program",
-                "success")
+            if not _preserve_sticky:
+                self._set_action_status(
+                    "Blank card detected — ready to program",
+                    "success")
         else:
             self._extra_card_data = {}
             if iccid:
                 self._field_entries["ICCID"].setText(iccid)
             self._original_form_data = {}
             if iccid:
-                self._set_action_status(
-                    f"Card detected (ICCID {iccid}) — not in index, enter data manually",
-                    "warning")
+                if not _preserve_sticky:
+                    self._set_action_status(
+                        f"Card detected (ICCID {iccid}) — not in index, enter data manually",
+                        "warning")
             else:
-                self._set_action_status(
-                    "Blank card detected — select a CSV row or enter data manually",
-                    "warning")
+                if not _preserve_sticky:
+                    self._set_action_status(
+                        "Blank card detected — select a CSV row or enter data manually",
+                        "warning")
 
         if self._detected_non_empty:
             self._field_entries["ICCID"].setReadOnly(True)
