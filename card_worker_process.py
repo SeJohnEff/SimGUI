@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 
-_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields"]
+_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"]
 
 # --- session state ---
 _card_gen = 0
@@ -192,6 +192,49 @@ def _handle_detect(req_id, params):
     _write({"id": req_id, "ok": True, "blank": blank, "fields": fields})
 
 
+def _handle_authenticate(req_id, params):
+    p = params or {}
+    session_id = p.get("session_id")
+    card_gen = p.get("card_gen")
+
+    if session_id != _session_id or card_gen != _card_gen:
+        _write({"id": req_id, "ok": False, "error": "STALE_SESSION"})
+        return
+
+    if _session_profile is None:
+        _write({"id": req_id, "ok": False, "error": "NO_PROFILE"})
+        return
+
+    adm1_hex = p.get("adm1_hex")
+    if not adm1_hex:
+        _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST"})
+        return
+
+    ok, msg = _session_profile.authenticate(adm1_hex)
+
+    if ok:
+        deferred = msg.startswith("DEFERRED") if msg else False
+        _write({
+            "id": req_id,
+            "ok": True,
+            "result": {
+                "session_id": _session_id,
+                "card_gen": _card_gen,
+                "deferred": deferred,
+            },
+        })
+        return
+
+    if msg and msg.startswith("CARD_BLOCKED"):
+        error = "CARD_BLOCKED"
+    elif msg and msg.startswith("TRANSPORT_ERROR"):
+        error = "TRANSPORT_ERROR"
+    else:
+        error = "AUTH_FAILED"
+
+    _write({"id": req_id, "ok": False, "error": error, "msg": msg})
+
+
 def _handle(line: str) -> bool:
     """Parse one request line and write one response. Returns False to stop."""
     try:
@@ -216,6 +259,8 @@ def _handle(line: str) -> bool:
         _handle_probe(req_id, req.get("params"))
     elif verb in ("detect", "read_fields"):
         _handle_detect(req_id, req.get("params"))
+    elif verb == "authenticate":
+        _handle_authenticate(req_id, req.get("params"))
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 

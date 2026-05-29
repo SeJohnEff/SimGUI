@@ -109,7 +109,7 @@ def test_capabilities_contains_four_verbs():
         resp, _ = _send(proc, "capabilities")
         assert resp["ok"] is True
         caps = resp["result"]
-        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields"}
+        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"}
     finally:
         proc.terminate()
         proc.wait()
@@ -492,3 +492,103 @@ class TestSessionProfile:
                 card_worker_process._handle_probe("req1", {})
         assert captured[0]["present"] is False
         assert card_worker_process._session_profile is None
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _handle_authenticate (Phase 3B-1)
+# ---------------------------------------------------------------------------
+
+def _make_fake_profile(ok, msg):
+    profile = MagicMock()
+    profile.authenticate.return_value = (ok, msg)
+    return profile
+
+
+def _reset_auth_state(session_id="sess1", card_gen=2):
+    card_worker_process._session_id = session_id
+    card_worker_process._card_gen = card_gen
+    card_worker_process._card_present = True
+
+
+def _run_authenticate(params, profile, session_id="sess1", card_gen=2):
+    _reset_auth_state(session_id, card_gen)
+    card_worker_process._session_profile = profile
+    captured = []
+    with patch.object(card_worker_process, "_write", side_effect=captured.append):
+        card_worker_process._handle_authenticate("req1", params)
+    return captured[0]
+
+
+class TestHandleAuthenticate:
+
+    def setup_method(self):
+        _reset_probe_state()
+        _reset_session_profile()
+
+    def test_authenticate_success_ok_true_deferred_false(self):
+        profile = _make_fake_profile(True, "")
+        params = {"session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is True
+        assert resp["result"]["deferred"] is False
+        assert resp["result"]["session_id"] == "sess1"
+        assert resp["result"]["card_gen"] == 2
+        profile.authenticate.assert_called_once_with("3838383838383838")
+
+    def test_authenticate_deferred_ok_true_deferred_true(self):
+        profile = _make_fake_profile(True, "DEFERRED: blank card, no VERIFY sent")
+        params = {"session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is True
+        assert resp["result"]["deferred"] is True
+
+    def test_auth_failed_msg_maps_to_auth_failed_error(self):
+        profile = _make_fake_profile(False, "AUTH_FAILED: wrong key")
+        params = {"session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is False
+        assert resp["error"] == "AUTH_FAILED"
+
+    def test_card_blocked_msg_maps_to_card_blocked_error(self):
+        profile = _make_fake_profile(False, "CARD_BLOCKED: retries exhausted")
+        params = {"session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is False
+        assert resp["error"] == "CARD_BLOCKED"
+
+    def test_transport_error_msg_maps_to_transport_error(self):
+        profile = _make_fake_profile(False, "TRANSPORT_ERROR: reader disconnected")
+        params = {"session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is False
+        assert resp["error"] == "TRANSPORT_ERROR"
+
+    def test_stale_session_id_returns_stale_session_and_profile_not_called(self):
+        profile = _make_fake_profile(True, "")
+        params = {"session_id": "wrong", "card_gen": 2, "adm1_hex": "3838383838383838"}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is False
+        assert resp["error"] == "STALE_SESSION"
+        profile.authenticate.assert_not_called()
+
+    def test_no_profile_returns_no_profile(self):
+        _reset_auth_state()
+        card_worker_process._session_profile = None
+        captured = []
+        with patch.object(card_worker_process, "_write", side_effect=captured.append):
+            card_worker_process._handle_authenticate("req1", {
+                "session_id": "sess1", "card_gen": 2, "adm1_hex": "3838383838383838",
+            })
+        assert captured[0]["ok"] is False
+        assert captured[0]["error"] == "NO_PROFILE"
+
+    def test_missing_adm1_hex_returns_invalid_request(self):
+        profile = _make_fake_profile(True, "")
+        params = {"session_id": "sess1", "card_gen": 2}
+        resp = _run_authenticate(params, profile)
+        assert resp["ok"] is False
+        assert resp["error"] == "INVALID_REQUEST"
+        profile.authenticate.assert_not_called()
+
+    def test_capabilities_includes_authenticate(self):
+        assert "authenticate" in card_worker_process._CAPABILITIES
