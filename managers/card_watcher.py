@@ -346,6 +346,8 @@ class CardWatcher:
             if self._no_reader_poll_count >= _NO_READER_RESET_AFTER:
                 self._no_reader_poll_count = 0
                 try:
+                    if self._worker_client is not None:
+                        return
                     self._cm.reset_pyscard()
                     logger.debug("Reset pyscard context (no reader detected)")
                 except Exception:
