@@ -158,11 +158,12 @@ class _SelfCallVisitor(ast.NodeVisitor):
 class _ModuleCallVisitor(ast.NodeVisitor):
     """Find all module-level function calls like ``_find_all_field_headers(...)``."""
 
-    def __init__(self):
+    def __init__(self, local_names: set):
         self.calls: list[tuple[str, int]] = []  # (func_name, lineno)
+        self._local_names = local_names
 
     def visit_Call(self, node: ast.Call):
-        if isinstance(node.func, ast.Name):
+        if isinstance(node.func, ast.Name) and node.func.id not in self._local_names:
             self.calls.append((node.func.id, node.lineno))
         self.generic_visit(node)
 
@@ -179,6 +180,19 @@ def _get_class_methods(cls_node: ast.ClassDef) -> set[str]:
                     names.add(target.id)
                 elif isinstance(target, ast.Attribute):
                     names.add(target.attr)
+    return names
+
+
+def _get_function_local_names(func_node) -> set[str]:
+    """Collect names imported inside a function body (function-local imports)."""
+    names = set()
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[-1])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
     return names
 
 
@@ -206,6 +220,18 @@ def _get_module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
+# Methods inherited from QWidget/QDialog/QMainWindow that may be called via self.*
+# without being redefined in the subclass.  Kept minimal — only add entries that
+# actually cause false positives.
+_QT_INHERITED_METHODS = frozenset({
+    "accept", "addDockWidget", "centralWidget", "close", "exec",
+    "frameGeometry", "geometry", "hide", "layout", "menuBar",
+    "move", "parent", "rect", "reject", "resize",
+    "setCentralWidget", "setLayout", "setMinimumWidth", "setWindowModality",
+    "setWindowTitle", "show", "size", "statusBar", "update",
+})
+
+
 def _collect_self_call_issues():
     """Return list of (file, class, method_call, lineno) for unresolved self calls."""
     issues = []
@@ -226,6 +252,9 @@ def _collect_self_call_issues():
             for method_name, lineno in visitor.calls:
                 # Skip dunder and property access (not necessarily methods)
                 if method_name.startswith("__") and method_name.endswith("__"):
+                    continue
+                # Skip methods inherited from Qt base classes (QWidget/QDialog/etc.)
+                if method_name in _QT_INHERITED_METHODS:
                     continue
                 # It's either defined in this class OR it's an attribute
                 # set in __init__ (also in 'defined').  If not found, flag it.
@@ -274,10 +303,11 @@ def _collect_module_call_issues():
             if isinstance(node, ast.ClassDef):
                 continue
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                visitor = _ModuleCallVisitor()
+                local_names = _get_function_local_names(node)
+                visitor = _ModuleCallVisitor(module_names | local_names)
                 visitor.visit(node)
                 for func_name, lineno in visitor.calls:
-                    if func_name not in module_names:
+                    if func_name not in module_names | local_names:
                         issues.append((
                             str(path.relative_to(PROJECT_ROOT)),
                             func_name,
