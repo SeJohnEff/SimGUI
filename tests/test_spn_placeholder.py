@@ -46,6 +46,7 @@ def _make_panel():
         panel.on_card_programmed_callback = None
         panel._prog_btn = MagicMock()
         panel._action_status = MagicMock()
+        panel._sticky_result_iccid = None
         # Build lightweight QLineEdit stand-ins
         for key, _, _ in _FORM_FIELDS:
             entry = MagicMock()
@@ -233,7 +234,8 @@ class TestCardManagerDropsSPN(unittest.TestCase):
 
     def test_program_card_drops_spn_from_changed_fields(self):
         """program_card() must silently drop SPN before calling _program_via_pysim_prog."""
-        cm = _make_card_manager()
+        cm = _make_card_manager(card_type=CardType.GIALERSIM)
+        cm._original_card_data = {}  # blank card → empty path → _program_via_pysim_prog
         card_data = {
             "IMSI": "240010000000002",
             "SPN": "ShouldBeDropped",

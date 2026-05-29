@@ -395,7 +395,7 @@ class TestCardStateEnum:
 
     def test_all_members(self):
         names = {s.name for s in CardState}
-        assert names == {"NO_CARD", "DETECTED", "AUTHENTICATED", "ERROR", "BLANK"}
+        assert names == {"NO_CARD", "DETECTED", "AUTHENTICATED", "ERROR", "BLANK", "NOT_POWERED"}
 
     def test_is_enum(self):
         assert CardState.NO_CARD is not CardState.DETECTED

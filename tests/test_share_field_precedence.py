@@ -282,7 +282,7 @@ class TestOnProgramMergesExtras:
         # Form values win for displayed fields
         assert captured["IMSI"] == "NEW_IMSI_VAL"
         assert captured["Ki"] == "CC" * 16
-        assert captured["SPN"] == "MyNetwork"
+        assert "SPN" not in captured  # SPN excluded before program_card (not yet implemented)
         # Non-displayed share fields still present
         assert captured["PIN1"] == "1234"
 
