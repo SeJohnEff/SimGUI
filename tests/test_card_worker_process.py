@@ -413,3 +413,82 @@ class TestHandleDetectUnit:
     def test_capabilities_include_detect_and_read_fields(self):
         assert "detect" in card_worker_process._CAPABILITIES
         assert "read_fields" in card_worker_process._CAPABILITIES
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for session profile state (Phase 3A-4)
+# ---------------------------------------------------------------------------
+
+def _reset_session_profile():
+    card_worker_process._session_profile = None
+    card_worker_process._session_pysim_path = ""
+    card_worker_process._session_reader_index = 0
+
+
+class TestSessionProfile:
+
+    def setup_method(self):
+        _reset_probe_state()
+        _reset_session_profile()
+
+    def test_sja5_detect_stores_sja5_profile(self):
+        from card_profiles import SJA5Profile
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        _reset_detect_state()
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                with patch.object(card_worker_process, "_write", side_effect=lambda x: None):
+                    card_worker_process._handle_detect("req1", params)
+        assert isinstance(card_worker_process._session_profile, SJA5Profile)
+        assert card_worker_process._session_pysim_path == "/opt/pysim"
+        assert card_worker_process._session_reader_index == 0
+
+    def test_gialersim_detect_stores_gialersimprofile(self):
+        from card_profiles import GialerSIMProfile
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=GIALERSIM_OUTPUT, stderr="")
+        _reset_detect_state()
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                with patch.object(card_worker_process, "_write", side_effect=lambda x: None):
+                    card_worker_process._handle_detect("req1", params)
+        assert isinstance(card_worker_process._session_profile, GialerSIMProfile)
+
+    def test_profile_creation_failure_leaves_none_but_detect_ok(self):
+        import card_profiles
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        _reset_detect_state()
+        card_worker_process._session_profile = object()  # non-None sentinel
+        captured = []
+        with patch.object(card_profiles.ProfileFactory, "create", side_effect=Exception("boom")):
+            with patch("card_worker_process.subprocess.run", return_value=completed):
+                with patch("card_worker_process.os.path.isfile", return_value=True):
+                    with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                        card_worker_process._handle_detect("req1", params)
+        assert captured[0]["ok"] is True
+        assert card_worker_process._session_profile is None
+
+    def test_probe_new_insertion_clears_stale_session_profile(self):
+        card_worker_process._session_profile = object()  # non-None sentinel
+        card_worker_process._card_present = False
+        atr_bytes = [0x3B, 0x9F, 0x94]
+        reader = _fake_reader(atr=atr_bytes)
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+        assert captured[0]["present"] is True
+        assert card_worker_process._session_profile is None
+
+    def test_probe_no_card_clears_session_profile(self):
+        card_worker_process._session_profile = object()  # non-None sentinel
+        card_worker_process._card_present = True  # previously detected
+        reader = _fake_reader(raise_on_connect=True)
+        captured = []
+        with patch.object(card_worker_process, "_smartcard_readers", return_value=[reader]):
+            with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                card_worker_process._handle_probe("req1", {})
+        assert captured[0]["present"] is False
+        assert card_worker_process._session_profile is None

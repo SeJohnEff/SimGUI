@@ -20,6 +20,34 @@ _session_id = None      # hex string; assigned on each new card insertion
 _last_atr = None        # hex string of last seen ATR
 _card_present = False   # True while card is seated
 
+# --- session profile state ---
+_session_profile = None
+_session_pysim_path = ""
+_session_reader_index = 0
+
+
+class WorkerAuthDelegate:
+    """Stub delegate wired to the active worker session. authenticate_adm deferred to Phase 3A-5."""
+
+    def __init__(self, pysim_path, reader_index):
+        self.pysim_path = pysim_path
+        self.reader_index = reader_index
+
+    def authenticate_adm(self, adm1_hex):
+        raise NotImplementedError
+
+    def read_card(self):
+        raise NotImplementedError
+
+    def check_retry_counter(self):
+        raise NotImplementedError
+
+    def program_fields(self, fields):
+        raise NotImplementedError
+
+    def verify_fields(self, expected):
+        raise NotImplementedError
+
 
 def _write(obj: dict) -> None:
     sys.stdout.write(json.dumps(obj) + "\n")
@@ -37,6 +65,7 @@ def _smartcard_readers():
 
 def _handle_probe(req_id, params):
     global _card_gen, _session_id, _last_atr, _card_present
+    global _session_profile, _session_pysim_path, _session_reader_index
 
     p = params or {}
     reader_index = p.get("reader_index", 0)
@@ -45,6 +74,9 @@ def _handle_probe(req_id, params):
     readers = _smartcard_readers()
     if not readers or reader_index >= len(readers):
         _card_present = False
+        _session_profile = None
+        _session_pysim_path = ""
+        _session_reader_index = 0
         _write({"id": req_id, "ok": True, "present": False, "msg": "No smart-card reader detected"})
         return
 
@@ -72,6 +104,9 @@ def _handle_probe(req_id, params):
     if exc_box or "atr" not in result:
         if _card_present:
             _card_present = False
+            _session_profile = None
+            _session_pysim_path = ""
+            _session_reader_index = 0
         _write({"id": req_id, "ok": True, "present": False, "msg": "No card in reader"})
         return
 
@@ -82,6 +117,9 @@ def _handle_probe(req_id, params):
         _session_id = os.urandom(8).hex()
         _last_atr = atr_hex
         _card_present = True
+        _session_profile = None
+        _session_pysim_path = ""
+        _session_reader_index = 0
 
     _write({
         "id": req_id,
@@ -139,6 +177,17 @@ def _handle_detect(req_id, params):
     if proc.returncode != 0 and not card_type and not has_iccid and not has_imsi:
         _write({"id": req_id, "ok": False, "error": "DETECT_FAILED"})
         return
+
+    global _session_profile, _session_pysim_path, _session_reader_index
+    try:
+        from card_profiles import ProfileFactory
+        _session_profile = ProfileFactory().create(card_type, delegate=WorkerAuthDelegate(pysim_path, reader_index))
+        _session_pysim_path = pysim_path
+        _session_reader_index = reader_index
+    except Exception:
+        _session_profile = None
+        _session_pysim_path = ""
+        _session_reader_index = 0
 
     _write({"id": req_id, "ok": True, "blank": blank, "fields": fields})
 
