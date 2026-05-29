@@ -484,7 +484,8 @@ class TestMountUnmount:
         """mount() returns success immediately if already mounted."""
         ns = NetworkStorageManager()
         p = _make_smb_profile()
-        with patch.object(ns, "is_mounted", return_value=True):
+        with patch.object(ns, "is_mounted", return_value=True), \
+             patch.object(ns, "verify_mount_accessible", return_value=True):
             ok, msg = ns.mount(p)
         assert ok is True
         assert "Already mounted" in msg
@@ -499,7 +500,8 @@ class TestMountUnmount:
         ns = NetworkStorageManager()
         p = _make_smb_profile()
         assert ns._active_mounts == {}
-        with patch.object(ns, "is_mounted", return_value=True):
+        with patch.object(ns, "is_mounted", return_value=True), \
+             patch.object(ns, "verify_mount_accessible", return_value=True):
             ok, msg = ns.mount(p)
         assert ok is True
         assert p.label in ns._active_mounts
@@ -508,7 +510,9 @@ class TestMountUnmount:
         """get_active_mount_paths must include 'Already mounted' shares."""
         ns = NetworkStorageManager()
         p = _make_smb_profile()
-        with patch.object(ns, "is_mounted", return_value=True):
+        with patch.object(ns, "is_mounted", return_value=True), \
+             patch.object(ns, "verify_mount_accessible", return_value=True), \
+             patch("os.path.ismount", return_value=True):
             ns.mount(p)
             paths = ns.get_active_mount_paths()
         assert len(paths) == 1
@@ -638,10 +642,7 @@ class TestMountUnmount:
         p2 = _make_nfs_profile(label="stale")
         ns._active_mounts = {"active": p1, "stale": p2}
 
-        def is_mounted(profile):
-            return profile.label == "active"
-
-        with patch.object(ns, "is_mounted", side_effect=is_mounted):
+        with patch("os.path.ismount", side_effect=lambda path: path == p1.mount_point):
             paths = ns.get_active_mount_paths()
         labels = [lbl for lbl, _ in paths]
         assert "active" in labels
