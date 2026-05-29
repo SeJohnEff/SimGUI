@@ -45,6 +45,7 @@ class TestAtrCacheClearedOnRemoval(unittest.TestCase):
         watcher._last_iccid = None
         watcher._card_present = True
         watcher._programmed_iccids = set()
+        watcher._last_read_failed = False
         watcher.on_card_removed = None
         watcher.on_card_detected = None
         watcher.on_error = None
