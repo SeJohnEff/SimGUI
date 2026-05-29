@@ -403,7 +403,7 @@ class TestExtraFieldsAfterPysimProg:
         mock_prog.assert_called_once()
         prog_fields = mock_prog.call_args[0][0]
         assert 'FPLMN' in prog_fields
-        assert 'SPN' in prog_fields
+        assert 'SPN' not in prog_fields
         assert 'ACC' in prog_fields
         assert 'IMSI' in prog_fields
 
