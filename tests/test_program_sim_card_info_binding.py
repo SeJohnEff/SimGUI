@@ -71,7 +71,7 @@ class TestPublicFieldsPopulateFromCardInfo:
 
     def test_spn_populated(self, panel, sm):
         _set_card(sm)
-        assert panel._field_entries["SPN"].text() == "TestNet"
+        assert panel._field_entries["SPN"].text() == "-- not yet implemented --"
 
     def test_fplmn_populated(self, panel, sm):
         _set_card(sm)
@@ -83,7 +83,7 @@ class TestPublicFieldsPopulateFromCardInfo:
         assert panel._field_entries["ICCID"].text() == "1111111111111111111"
         assert panel._field_entries["IMSI"].text() == "901700000000001"
         assert panel._field_entries["ACC"].text() == "0001"
-        assert panel._field_entries["SPN"].text() == "MySPN"
+        assert panel._field_entries["SPN"].text() == "-- not yet implemented --"
         assert panel._field_entries["FPLMN"].text() == "24201"
 
 
@@ -264,7 +264,7 @@ class TestCSVDoesNotClearCardInfoPublicFields:
     def test_spn_from_card_info_preserved_after_csv_load(self, panel, sm):
         _set_card(sm, spn="TestNet")
         panel.on_card_detected("8988601234567890123", self._CSV_PARTIAL, "/data/test.csv")
-        assert panel._field_entries["SPN"].text() == "TestNet"
+        assert panel._field_entries["SPN"].text() == "-- not yet implemented --"
 
     def test_fplmn_from_card_info_preserved_after_csv_load(self, panel, sm):
         _set_card(sm, fplmn="242010")
@@ -301,5 +301,5 @@ class TestCSVDoesNotClearCardInfoPublicFields:
         assert panel._field_entries["ICCID"].text() == "8988601234567890123"
         assert panel._field_entries["IMSI"].text() == "310410123456789"
         assert panel._field_entries["ACC"].text() == "ffff"
-        assert panel._field_entries["SPN"].text() == "TestNet"
+        assert panel._field_entries["SPN"].text() == "-- not yet implemented --"
         assert panel._field_entries["FPLMN"].text() == "242010"
