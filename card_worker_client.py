@@ -65,6 +65,19 @@ class ProbeResult:
     error: Optional[str] = None
 
 
+@dataclass
+class DetectResult:
+    """Typed result from a worker detect() or read_fields() call."""
+    ok: bool
+    card_type: Optional[str] = None
+    blank: bool = False
+    fields: Dict[str, Any] = field(default_factory=dict)
+    session_id: Optional[str] = None
+    card_gen: Optional[int] = None
+    error: Optional[str] = None
+    msg: Optional[str] = None
+
+
 class PersistentWorkerClient:
     """Manages a single card_worker_process.py subprocess."""
 
@@ -221,6 +234,82 @@ class PersistentWorkerClient:
                 card_gen=result.get("card_gen") if result else None,
                 session_id=result.get("session_id") if result else None,
             )
+
+    def detect(
+        self,
+        session_id: str,
+        card_gen: int,
+        pysim_path: str,
+        reader_index: int = 0,
+        timeout: float = 30.0,
+        request_timeout: Optional[float] = None,
+    ) -> DetectResult:
+        """Run pySim-read on the card; returns a typed DetectResult."""
+        rt = request_timeout if request_timeout is not None else timeout + 1.0
+        resp = self.send(
+            "detect",
+            params={
+                "session_id": session_id,
+                "card_gen": card_gen,
+                "pysim_path": pysim_path,
+                "reader_index": reader_index,
+                "timeout": timeout,
+            },
+            timeout=rt,
+        )
+        result = resp.get("result") or {}
+        if resp.get("ok"):
+            return DetectResult(
+                ok=True,
+                card_type=result.get("card_type"),
+                blank=bool(result.get("blank", False)),
+                fields=result.get("fields") or {},
+                session_id=result.get("session_id"),
+                card_gen=result.get("card_gen"),
+            )
+        return DetectResult(
+            ok=False,
+            error=resp.get("error"),
+            msg=resp.get("msg"),
+        )
+
+    def read_fields(
+        self,
+        session_id: str,
+        card_gen: int,
+        pysim_path: str,
+        reader_index: int = 0,
+        timeout: float = 30.0,
+        request_timeout: Optional[float] = None,
+    ) -> DetectResult:
+        """Read card fields via pySim-read; returns a typed DetectResult."""
+        rt = request_timeout if request_timeout is not None else timeout + 1.0
+        resp = self.send(
+            "read_fields",
+            params={
+                "session_id": session_id,
+                "card_gen": card_gen,
+                "pysim_path": pysim_path,
+                "reader_index": reader_index,
+                "timeout": timeout,
+            },
+            timeout=rt,
+        )
+        result = resp.get("result") or {}
+        if resp.get("ok"):
+            return DetectResult(
+                ok=True,
+                card_type=result.get("card_type"),
+                blank=bool(result.get("blank", False)),
+                fields=result.get("fields") or {},
+                session_id=result.get("session_id"),
+                card_gen=result.get("card_gen"),
+            )
+        return DetectResult(
+            ok=False,
+            error=resp.get("error"),
+            msg=resp.get("msg"),
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers

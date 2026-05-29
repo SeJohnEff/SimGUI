@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from card_worker_client import (
+    DetectResult,
     PersistentWorkerClient,
     ProbeResult,
     WorkerCrashError,
@@ -344,6 +345,131 @@ def test_probe_ok_false_with_result_preserves_card_gen():
     assert result.error == "READER_ERROR"
     assert result.card_gen == "unknown"
     assert result.session_id == "xyz"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2D-B2 — detect() and read_fields() helpers
+# ---------------------------------------------------------------------------
+
+def test_detect_sends_correct_verb_and_params():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {"card_type": "sysmoISIM-SJA5", "blank": False, "fields": {}}}
+    client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", reader_index=0, timeout=30.0)
+    assert len(client._send_calls) == 1
+    call = client._send_calls[0]
+    assert call["verb"] == "detect"
+    assert call["params"] == {
+        "session_id": "s1",
+        "card_gen": 1,
+        "pysim_path": "/opt/pysim",
+        "reader_index": 0,
+        "timeout": 30.0,
+    }
+
+
+def test_detect_default_request_timeout_is_timeout_plus_one():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {}}
+    client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", timeout=30.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(31.0)
+
+
+def test_detect_custom_request_timeout_overrides_default():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {}}
+    client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", timeout=30.0, request_timeout=45.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(45.0)
+
+
+def test_detect_ok_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {
+            "card_type": "sysmoISIM-SJA5",
+            "blank": False,
+            "fields": {"ICCID": "8946001234567890123", "IMSI": "240011234567890"},
+            "session_id": "sess-42",
+            "card_gen": 7,
+        },
+    }
+    result = client.detect(session_id="sess-42", card_gen=7, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is True
+    assert result.card_type == "sysmoISIM-SJA5"
+    assert result.blank is False
+    assert result.fields["ICCID"] == "8946001234567890123"
+    assert result.session_id == "sess-42"
+    assert result.card_gen == 7
+    assert result.error is None
+
+
+def test_detect_blank_card_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {
+            "card_type": "gialersim",
+            "blank": True,
+            "fields": {},
+            "session_id": "sess-blank",
+            "card_gen": 3,
+        },
+    }
+    result = client.detect(session_id="sess-blank", card_gen=3, pysim_path="/opt/pysim")
+    assert result.ok is True
+    assert result.blank is True
+    assert result.card_type == "gialersim"
+    assert result.fields == {}
+
+
+def test_detect_stale_session_response_parsed_as_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "STALE_SESSION",
+        "msg": "card changed between probe and detect",
+    }
+    result = client.detect(session_id="old-sess", card_gen=2, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is False
+    assert result.error == "STALE_SESSION"
+    assert result.msg == "card changed between probe and detect"
+    assert result.card_type is None
+
+
+def test_read_fields_sends_correct_verb():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {}}
+    client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim")
+    assert client._send_calls[0]["verb"] == "read_fields"
+
+
+def test_read_fields_ok_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {
+            "card_type": "sysmoISIM-SJA5",
+            "blank": False,
+            "fields": {"IMSI": "240019876543210", "ACC": "0001"},
+            "session_id": "s2",
+            "card_gen": 5,
+        },
+    }
+    result = client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is True
+    assert result.fields["IMSI"] == "240019876543210"
+    assert result.card_gen == 5
+    assert result.error is None
+
+
+def test_read_fields_default_request_timeout_is_timeout_plus_one():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {}}
+    client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim", timeout=20.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(21.0)
 
 
 def test_stderr_does_not_block_caller():
