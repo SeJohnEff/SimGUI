@@ -29,6 +29,7 @@ from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
 
 from utils.validation import validate_adm1
+from pysim_parser import parse_pysim_output as _parse_pysim_output_fn
 
 logger = logging.getLogger(__name__)
 
@@ -1947,53 +1948,17 @@ class CardManager:
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info.
 
-        Extracts ICCID, IMSI, ACC, SPN, FPLMN, and auto-detected card
-        type from pySim-read.py output.  These are public fields that
-        don't require ADM1 auth.
+        Delegates to pysim_parser.parse_pysim_output() and applies the
+        result to self.card_info and self.card_type.
         """
-        fplmn_values: list[str] = []
-        in_fplmn_block = False
-        for line in output.splitlines():
-            # Handle indented FPLMN sub-lines (e.g. "\t42f010 # MCC: 240 MNC: 01")
-            if in_fplmn_block and line.startswith('\t'):
-                if '# MCC:' in line and 'MNC:' in line:
-                    try:
-                        mcc = line.split('MCC:')[1].split()[0].strip()
-                        mnc = line.split('MNC:')[1].split()[0].strip()
-                        fplmn_values.append(f"{mcc}{mnc.zfill(2)}")
-                    except (IndexError, ValueError):
-                        pass
-                continue
-            else:
-                in_fplmn_block = False
-            if ':' not in line:
-                continue
-            # Skip lines that look like tracebacks or file paths
-            stripped = line.strip()
-            if stripped.startswith(('File "', 'Traceback', 'raise ')):
-                continue
-            key, _, val = line.partition(':')
-            key = key.strip().upper()
-            val = val.strip()
-            if not val:
-                if 'FPLMN' in key or 'FORBIDDEN' in key:
-                    in_fplmn_block = True
-                continue
-            if 'IMSI' in key:
-                self.card_info['IMSI'] = val
-            elif 'ICCID' in key:
-                self.card_info['ICCID'] = val
-            elif key == 'ACC' or 'ACCESS CONTROL' in key:
-                self.card_info['ACC'] = val
-            elif key == 'SPN' or 'SERVICE PROVIDER' in key:
-                self.card_info['SPN'] = val
-            elif 'FPLMN' in key or 'FORBIDDEN' in key:
-                in_fplmn_block = True
-            elif 'AUTODETECTED CARD TYPE' in key:
-                ct = self._PYSIM_CARD_TYPE_MAP.get(val.lower())
-                if ct is not None:
-                    self.card_type = ct
-                    logger.info("pySim auto-detected card type: %s -> %s",
-                                val, ct.name)
-        if fplmn_values:
-            self.card_info['FPLMN'] = ';'.join(fplmn_values)
+        parsed = _parse_pysim_output_fn(output)
+        for field in ('IMSI', 'ICCID', 'ACC', 'SPN', 'FPLMN'):
+            if field in parsed:
+                self.card_info[field] = parsed[field]
+        ct_str = parsed.get('card_type_str', '')
+        if ct_str:
+            ct = self._PYSIM_CARD_TYPE_MAP.get(ct_str)
+            if ct is not None:
+                self.card_type = ct
+                logger.info("pySim auto-detected card type: %s -> %s",
+                            ct_str, ct.name)
