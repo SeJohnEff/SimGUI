@@ -536,6 +536,85 @@ class TestSubprocessProbe:
         assert msg == "PC/SC probe timed out"
         assert cm._probe_thread is None
 
+    # --- env: frozen mode passes PYTHONPATH including sys._MEIPASS ---
+
+    def test_subprocess_receives_probe_env_in_frozen_mode(self, monkeypatch):
+        """_probe_via_subprocess passes env with sys._MEIPASS in PYTHONPATH (frozen)."""
+        import sys as _sys
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(_sys, 'frozen', True, raising=False)
+        monkeypatch.setattr(_sys, '_MEIPASS', '/fake/meipass', raising=False)
+        # _bundled_python is None in dev mode; simulate a frozen bundled interpreter
+        cm._bundled_python = '/fake/python3'
+
+        captured = {}
+
+        def _capture(*a, **kw):
+            captured.update(kw)
+            return _make_subprocess_result('{"ok": false, "msg": "No card in reader"}')
+
+        monkeypatch.setattr(cm_mod.subprocess, "run", _capture)
+        cm._probe_via_subprocess(0, 2.0)
+
+        env = captured.get('env')
+        assert env is not None, "env not passed to subprocess.run in frozen mode"
+        assert '/fake/meipass' in env.get('PYTHONPATH', ''), (
+            f"sys._MEIPASS not in PYTHONPATH: {env.get('PYTHONPATH')}"
+        )
+
+    # --- pyscard ImportError in msg key returns unavailable ---
+
+    def test_pyscard_import_error_msg_key_returns_unavailable(self, monkeypatch):
+        """'pyscard import failed' in 'msg' must return unavailable, not card_absent."""
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result(
+                '{"ok": false, "msg": "pyscard import failed: No module named \'smartcard\'"}'
+            ),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is False, "ImportError via 'msg' must return unavailable"
+        assert "pyscard import failed" in result.message
+
+    # --- pyscard ImportError in error key returns unavailable ---
+
+    def test_pyscard_import_error_error_key_returns_unavailable(self, monkeypatch):
+        """'pyscard import failed' in 'error' must return unavailable, not card_absent."""
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result(
+                '{"ok": false, "error": "pyscard import failed: No module named \'smartcard\'"}'
+            ),
+        )
+        result = cm._probe_via_subprocess(0, 2.0)
+        assert result.available is False, "ImportError via 'error' must return unavailable"
+        assert "pyscard import failed" in result.message
+
+    # --- ImportError triggers _probe_with_timeout fallback ---
+
+    def test_import_error_triggers_thread_fallback(self, monkeypatch):
+        """probe_card_presence falls back to _probe_with_timeout on pyscard import failure."""
+        cm = _patched_probe_cm(monkeypatch)
+        monkeypatch.setattr(
+            cm_mod.subprocess, "run",
+            lambda *a, **kw: _make_subprocess_result(
+                '{"ok": false, "msg": "pyscard import failed: No module named \'smartcard\'"}'
+            ),
+        )
+        fallback_called = []
+
+        def _fake_thread_probe(reader, timeout=None):
+            fallback_called.append(True)
+            return True, "3B AB CD"
+
+        cm._probe_with_timeout = _fake_thread_probe
+        ok, msg = cm.probe_card_presence()
+        assert fallback_called, "_probe_with_timeout not called on pyscard import failure"
+        assert ok is True
+        assert msg == "3B AB CD"
+
     # --- 2. next poll succeeds after subprocess timeout (no in-flight guard blocks it) ---
 
     def test_next_poll_unblocked_after_subprocess_timeout(self, monkeypatch):

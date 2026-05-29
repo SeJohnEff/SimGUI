@@ -297,6 +297,30 @@ def _get_pysim_env() -> Optional[Dict[str, str]]:
     return env
 
 
+def _get_probe_env() -> Optional[Dict[str, str]]:
+    """Return subprocess env with PYTHONPATH for the PC/SC probe helper.
+
+    In frozen mode: prepends sys._MEIPASS (where PyInstaller bundles all
+    packages including smartcard/pyscard) to PYTHONPATH so the probe
+    subprocess can import smartcard.  Also adds pysim-site-packages if
+    present.  In dev mode returns None so the subprocess inherits the
+    active process env (venv already on sys.path).
+    """
+    if not (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')):
+        return None
+
+    meipass = sys._MEIPASS
+    extra = [meipass]
+    site_pkgs = os.path.join(meipass, 'pysim-site-packages')
+    if os.path.isdir(site_pkgs):
+        extra.append(site_pkgs)
+
+    env = dict(os.environ)
+    existing = env.get('PYTHONPATH', '')
+    env['PYTHONPATH'] = os.pathsep.join(extra + ([existing] if existing else []))
+    return env
+
+
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     """Locate sysmo-usim-tool or pySim repo on the system.
 
@@ -584,6 +608,7 @@ class CardManager:
             proc = subprocess.run(
                 [python_exe, '-c', _PCSC_PROBE_SCRIPT, str(reader_index)],
                 capture_output=True, text=True, timeout=timeout,
+                env=_get_probe_env(),
             )
             stdout = proc.stdout.strip()
             if not stdout:
@@ -599,7 +624,10 @@ class CardManager:
                 )
             if data.get("ok"):
                 return _ProbeResult.card_present(data.get("atr", ""))
-            return _ProbeResult.card_absent(data.get("msg", "No card in reader"))
+            msg = data.get("msg") or data.get("error") or "No card in reader"
+            if "pyscard import failed" in msg or "No module named" in msg:
+                return _ProbeResult.unavailable(msg)
+            return _ProbeResult.card_absent(msg)
         except subprocess.TimeoutExpired:
             return _ProbeResult.card_absent("PC/SC probe timed out")
         except FileNotFoundError:
