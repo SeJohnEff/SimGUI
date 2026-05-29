@@ -1261,7 +1261,7 @@ class CardManager:
         adm1_hex = self._adm1_to_hex(adm1)
 
         # --- Worker path (before any PCSC operations) ---
-        if self._worker_client is not None:
+        if getattr(self, "_worker_client", None) is not None:
             return self._authenticate_via_worker(adm1_hex)
 
         # ICCID cross-verification safety check.
