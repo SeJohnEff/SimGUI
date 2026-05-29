@@ -592,3 +592,81 @@ class TestHandleAuthenticate:
 
     def test_capabilities_includes_authenticate(self):
         assert "authenticate" in card_worker_process._CAPABILITIES
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for WorkerAuthDelegate.authenticate_adm (Phase 3B-2)
+# ---------------------------------------------------------------------------
+
+class TestWorkerAuthDelegateAuthenticateAdm:
+
+    def _make_delegate(self, pysim_path="/opt/pysim", reader_index=0):
+        return card_worker_process.WorkerAuthDelegate(pysim_path, reader_index)
+
+    def test_success_returns_true_empty_msg_and_uses_expected_args(self):
+        delegate = self._make_delegate()
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="Welcome\n", stderr="")
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run", return_value=completed) as mock_run:
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is True
+        assert msg == ""
+        call_args = mock_run.call_args
+        cmd = call_args[0][0]
+        assert cmd[2] == "-p"
+        assert cmd[3] == "0"
+        assert cmd[4] == "-A"
+        assert cmd[5] == "3838383838383838"
+        assert call_args.kwargs["input"] == "quit\n"
+
+    def test_6982_in_output_returns_auth_failed(self):
+        delegate = self._make_delegate()
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="SW: 6982\n", stderr="")
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run", return_value=completed):
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg.startswith("AUTH_FAILED")
+
+    def test_swmatcherror_in_output_returns_auth_failed(self):
+        delegate = self._make_delegate()
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="SwMatchError: ...\n", stderr="")
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run", return_value=completed):
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg.startswith("AUTH_FAILED")
+
+    def test_6983_in_output_returns_card_blocked(self):
+        delegate = self._make_delegate()
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="SW: 6983\n", stderr="")
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run", return_value=completed):
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg.startswith("CARD_BLOCKED")
+
+    def test_missing_script_returns_transport_error_cli_not_found(self):
+        delegate = self._make_delegate()
+        with patch("card_worker_process.os.path.isfile", return_value=False):
+            ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg == "TRANSPORT_ERROR:CLI_NOT_FOUND"
+
+    def test_timeout_expired_returns_transport_error(self):
+        delegate = self._make_delegate()
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run",
+                       side_effect=subprocess.TimeoutExpired(cmd="x", timeout=15)):
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg.startswith("TRANSPORT_ERROR")
+
+    def test_nonzero_returncode_unknown_output_returns_transport_error(self):
+        delegate = self._make_delegate()
+        completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="unexpected error\n", stderr="")
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            with patch("card_worker_process.subprocess.run", return_value=completed):
+                ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is False
+        assert msg.startswith("TRANSPORT_ERROR")

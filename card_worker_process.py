@@ -34,7 +34,29 @@ class WorkerAuthDelegate:
         self.reader_index = reader_index
 
     def authenticate_adm(self, adm1_hex):
-        raise NotImplementedError
+        script = os.path.join(self.pysim_path, "pySim-shell.py")
+        if not os.path.isfile(script):
+            return (False, "TRANSPORT_ERROR:CLI_NOT_FOUND")
+        try:
+            proc = subprocess.run(
+                [sys.executable, script, "-p", str(self.reader_index), "-A", adm1_hex],
+                input="quit\n",
+                text=True,
+                capture_output=True,
+                timeout=15.0,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return (False, f"TRANSPORT_ERROR:{exc}")
+        except Exception as exc:
+            return (False, f"TRANSPORT_ERROR:{exc}")
+        combined = proc.stdout + proc.stderr
+        if "6983" in combined:
+            return (False, "CARD_BLOCKED:6983")
+        if "6982" in combined or "SwMatchError" in combined:
+            return (False, "AUTH_FAILED:6982")
+        if proc.returncode != 0:
+            return (False, f"TRANSPORT_ERROR:{combined.strip() or proc.returncode}")
+        return (True, "")
 
     def read_card(self):
         raise NotImplementedError
