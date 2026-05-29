@@ -173,6 +173,7 @@ class TestSyncOsMounts:
         monkeypatch.setattr(ns, "load_profiles", lambda: [p])
         monkeypatch.setattr(os.path, "ismount",
                             lambda mp: mp == p.mount_point)
+        monkeypatch.setattr(ns, "verify_mount_accessible", lambda _p: True)
         assert ns.get_active_mount_paths() == []  # not tracked yet
         ns.sync_os_mounts()
         paths = ns.get_active_mount_paths()
