@@ -140,3 +140,68 @@ def tmp_path_factory_file():
     yield path
     if os.path.exists(path):
         os.unlink(path)
+
+
+import logging as _logging
+_cleanup_log = _logging.getLogger("simgui.test.cleanup")
+
+
+def cleanup_simgui_app(instance) -> None:
+    """Defensively tear down a SimGUIApp-like instance started by tests.
+
+    Lifecycle: STARTED → TEARDOWN_REQUESTED → STOPPED
+      Each step signals the relevant subsystem to stop, then waits for it.
+      Order mirrors SimGUIApp._cleanup_threads so no new work is spawned
+      after the watcher is stopped.
+
+    Safe to call on partially-constructed objects and idempotent (each
+    attribute is fetched with getattr and each step is independently guarded).
+    Exceptions are logged at DEBUG and never re-raised so teardown cannot
+    mask the original test failure.
+
+    Owned resources released (in order):
+      1. _card_watcher          — CardWatcher daemon poll thread (stop())
+      2. _worker_client         — CardWorkerClient or similar (stop/close/shutdown)
+      3. _startup_worker_thread — QThread for BackgroundStartupWorker (quit + wait)
+      4. window                 — Qt window / pending event queue (close())
+    """
+    if instance is None:
+        return
+
+    # 1. CardWatcher daemon thread
+    try:
+        watcher = getattr(instance, "_card_watcher", None)
+        if watcher is not None and callable(getattr(watcher, "stop", None)):
+            watcher.stop()
+    except Exception:
+        _cleanup_log.debug("cleanup_simgui_app: _card_watcher.stop() raised", exc_info=True)
+
+    # 2. Worker-process client (CardWorkerClient or similar)
+    try:
+        client = getattr(instance, "_worker_client", None)
+        if client is not None:
+            for method in ("stop", "close", "shutdown"):
+                fn = getattr(client, method, None)
+                if callable(fn):
+                    fn()
+                    break
+    except Exception:
+        _cleanup_log.debug("cleanup_simgui_app: worker_client cleanup raised", exc_info=True)
+
+    # 3. QThread startup worker
+    try:
+        thread = getattr(instance, "_startup_worker_thread", None)
+        if thread is not None:
+            if callable(getattr(thread, "quit", None)):
+                thread.quit()
+            if callable(getattr(thread, "wait", None)):
+                thread.wait(2000)  # 2 s max
+    except Exception:
+        _cleanup_log.debug("cleanup_simgui_app: _startup_worker_thread cleanup raised", exc_info=True)
+
+    # 4. Qt window close (drains pending events; guard against already-destroyed)
+    try:
+        if callable(getattr(instance, "close", None)):
+            instance.close()
+    except Exception:
+        _cleanup_log.debug("cleanup_simgui_app: close() raised", exc_info=True)

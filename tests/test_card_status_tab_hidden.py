@@ -89,6 +89,7 @@ def _load_main():
 
 @pytest.fixture(scope="module")
 def app_instance():
+    from conftest import cleanup_simgui_app
     mod = _load_main()
     with _mock.patch("managers.card_manager.CardManager") as cm_cls, \
          _mock.patch("managers.backup_manager.BackupManager"), \
@@ -114,7 +115,9 @@ def app_instance():
         nm_cls.return_value = ns_mgr
 
         instance = mod.SimGUIApp()
-    return instance
+
+    yield instance
+    cleanup_simgui_app(instance)
 
 
 class TestMainWindowTabs:
