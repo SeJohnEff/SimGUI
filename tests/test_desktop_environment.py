@@ -60,13 +60,19 @@ class TestAbsolutePathsInCommands:
         assert _UMOUNT == "/usr/bin/umount"
 
     def test_build_mount_cmd_smb_uses_absolute_sudo(self):
-        """SMB mount command must start with absolute sudo path."""
+        """SMB mount command must start with absolute sudo path (Linux) or
+        absolute mount_smbfs path (macOS, which skips sudo intentionally)."""
         ns = NetworkStorageManager()
         p = StorageProfile(label="test", protocol="smb",
                            server="nas", share="data")
         cmd = ns._build_mount_cmd(p)
-        assert cmd[0] == "/usr/bin/sudo", (
-            f"First element should be absolute sudo, got: {cmd[0]}")
+        if sys.platform == "darwin":
+            assert cmd[0] == _MOUNT_SMB_FS, (
+                f"On macOS first element should be {_MOUNT_SMB_FS}, got: {cmd[0]}")
+            assert "/usr/bin/sudo" not in cmd, "sudo must not appear in macOS SMB cmd"
+        else:
+            assert cmd[0] == "/usr/bin/sudo", (
+                f"First element should be absolute sudo, got: {cmd[0]}")
 
     def test_build_mount_cmd_smb_uses_absolute_mount(self):
         """SMB mount command must use absolute mount path."""
@@ -74,8 +80,12 @@ class TestAbsolutePathsInCommands:
         p = StorageProfile(label="test", protocol="smb",
                            server="nas", share="data")
         cmd = ns._build_mount_cmd(p)
-        assert cmd[1] == _MOUNT_SMB_FS, (
-            f"Second element should be absolute mount, got: {cmd[1]}")
+        if sys.platform == "darwin":
+            assert cmd[0] == _MOUNT_SMB_FS, (
+                f"On macOS mount path should be cmd[0], got: {cmd[0]}")
+        else:
+            assert cmd[1] == _MOUNT_SMB_FS, (
+                f"Second element should be absolute mount, got: {cmd[1]}")
 
     def test_build_mount_cmd_nfs_uses_absolute_paths(self):
         """NFS mount command must use absolute sudo and mount paths."""
