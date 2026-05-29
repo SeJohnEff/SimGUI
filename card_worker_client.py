@@ -1,0 +1,210 @@
+"""
+Phase 1 — PersistentWorkerClient.
+
+Spawns card_worker_process.py as a subprocess and communicates via JSON-lines.
+No PCSC, no pySim, no card operations, no Qt, no managers.
+Standard library only.
+"""
+
+import json
+import logging
+import os
+import subprocess
+import sys
+import threading
+import uuid
+from typing import Any, Dict, Optional
+
+_LOG = logging.getLogger(__name__)
+_STDERR_LOG = logging.getLogger("card_worker.stderr")
+
+
+class WorkerError(Exception):
+    """Base for all worker exceptions."""
+
+
+class WorkerStartError(WorkerError):
+    """Worker process failed to start or did not emit ready banner in time."""
+
+
+class WorkerTimeoutError(WorkerError):
+    """No response received within the deadline."""
+    def __init__(self, verb: str, timeout: float) -> None:
+        self.verb = verb
+        self.timeout = timeout
+        super().__init__(f"Timeout waiting for {verb!r} response after {timeout}s")
+
+
+class WorkerEOFError(WorkerError):
+    """Worker stdout closed before a response was received."""
+
+
+class WorkerCrashError(WorkerError):
+    """Worker process exited with a non-zero return code."""
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+        super().__init__(f"Worker crashed with return code {returncode}")
+
+
+class WorkerProtocolError(WorkerError):
+    """Worker returned data that is not valid JSON."""
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        super().__init__(f"Worker returned invalid JSON: {raw!r}")
+
+
+class PersistentWorkerClient:
+    """Manages a single card_worker_process.py subprocess."""
+
+    def __init__(
+        self,
+        worker_script: Optional[str] = None,
+        start_timeout: float = 5.0,
+    ) -> None:
+        if worker_script is None:
+            worker_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "card_worker_process.py"
+            )
+        self._script = worker_script
+        self._start_timeout = start_timeout
+        self._process: Optional[subprocess.Popen] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Spawn the worker process and wait for the ready banner."""
+        self._process = subprocess.Popen(
+            [sys.executable, self._script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # Read the ready banner from stderr with a timeout.
+        banner_line = self._readline_with_timeout(
+            self._process.stderr, self._start_timeout
+        )
+        if banner_line is None:
+            self._process.terminate()
+            raise WorkerStartError("Worker did not emit ready banner in time")
+
+        try:
+            banner = json.loads(banner_line)
+        except (json.JSONDecodeError, ValueError):
+            self._process.terminate()
+            raise WorkerStartError(f"Worker emitted non-JSON banner: {banner_line!r}")
+
+        if banner.get("event") != "ready":
+            self._process.terminate()
+            raise WorkerStartError(f"Unexpected banner event: {banner!r}")
+
+        # Start background stderr drain.
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, daemon=True, name="worker-stderr-drain"
+        )
+        self._stderr_thread.start()
+
+    def stop(self) -> None:
+        """Send shutdown request; terminate if the process lingers."""
+        if self._process is None:
+            return
+        try:
+            self.send("shutdown", timeout=3.0)
+        except WorkerError:
+            pass
+        try:
+            self._process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            self._process.terminate()
+        self._process = None
+
+    def is_alive(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    # ------------------------------------------------------------------
+    # Sending requests
+    # ------------------------------------------------------------------
+
+    def send(
+        self,
+        verb: str,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Send one request and return the parsed response dict."""
+        if self._process is None:
+            raise WorkerStartError("not started")
+
+        req_id = str(uuid.uuid4())
+        request = {"id": req_id, "verb": verb}
+        if params:
+            request["params"] = params
+
+        line = json.dumps(request) + "\n"
+
+        with self._lock:
+            try:
+                self._process.stdin.write(line.encode())
+                self._process.stdin.flush()
+            except OSError as exc:
+                raise WorkerEOFError() from exc
+
+            raw = self._readline_with_timeout(self._process.stdout, timeout)
+
+        if raw is None:
+            if self._process.poll() is not None and self._process.returncode != 0:
+                raise WorkerCrashError(self._process.returncode)
+            if not self.is_alive():
+                raise WorkerEOFError()
+            raise WorkerTimeoutError(verb, timeout)
+
+        if not raw.strip():
+            raise WorkerEOFError()
+
+        try:
+            response = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            raise WorkerProtocolError(raw)
+
+        return response
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _readline_with_timeout(stream, timeout: float) -> Optional[str]:
+        """Read one line from *stream* within *timeout* seconds. Returns None on timeout/EOF."""
+        result: list = []
+        done = threading.Event()
+
+        def _reader():
+            try:
+                data = stream.readline()
+                result.append(data.decode() if isinstance(data, bytes) else data)
+            except OSError:
+                result.append(None)
+            finally:
+                done.set()
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        fired = done.wait(timeout)
+        if not fired:
+            return None
+        if not result or result[0] is None or result[0] == "":
+            return None
+        return result[0]
+
+    def _drain_stderr(self) -> None:
+        """Consume stderr lines and log them. Runs in a daemon thread."""
+        try:
+            for raw in self._process.stderr:
+                line = raw.decode() if isinstance(raw, bytes) else raw
+                _STDERR_LOG.debug("%s", line.rstrip())
+        except OSError:
+            pass
