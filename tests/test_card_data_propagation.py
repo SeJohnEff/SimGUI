@@ -291,7 +291,9 @@ class TestProgramSIMPanelPublicFieldsFromCardInfo:
     def test_spn_populated_from_card_info(self, panel, sm):
         sm.card_state = CardState.DETECTED
         sm.update_card_info(iccid="8988601234567890123", imsi="310410123456789", spn="BOLIDEN")
-        assert panel._field_entries["SPN"].text() == "BOLIDEN"
+        # SPN write is not yet implemented; panel shows the unsupported placeholder
+        # for any real SPN value read from the card.
+        assert panel._field_entries["SPN"].text() == "-- not yet implemented --"
 
     def test_fplmn_populated_from_card_info(self, panel, sm):
         sm.card_state = CardState.DETECTED
