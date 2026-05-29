@@ -8,10 +8,11 @@ Top-level imports: sys, json, os only.
 
 import json
 import os
+import subprocess
 import sys
 
 
-_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe"]
+_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields"]
 
 # --- session state ---
 _card_gen = 0
@@ -92,6 +93,56 @@ def _handle_probe(req_id, params):
     })
 
 
+def _handle_detect(req_id, params):
+    p = params or {}
+    session_id = p.get("session_id")
+    card_gen = p.get("card_gen")
+
+    if session_id != _session_id or card_gen != _card_gen:
+        _write({"id": req_id, "ok": False, "error": "STALE_SESSION"})
+        return
+
+    pysim_path = p.get("pysim_path", "")
+    if not pysim_path:
+        _write({"id": req_id, "ok": False, "error": "CLI_NOT_FOUND"})
+        return
+
+    cli = os.path.join(pysim_path, "pySim-read.py")
+    if not os.path.isfile(cli):
+        _write({"id": req_id, "ok": False, "error": "CLI_NOT_FOUND"})
+        return
+
+    timeout = p.get("timeout", 30)
+    reader_index = p.get("reader_index", 0)
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, cli, "-p", str(reader_index)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _write({"id": req_id, "ok": False, "error": "CARD_UNRESPONSIVE"})
+        return
+
+    from pysim_parser import parse_pysim_output
+    try:
+        fields = parse_pysim_output(proc.stdout)
+    except Exception:
+        _write({"id": req_id, "ok": False, "error": "PARSE_FAILED"})
+        return
+
+    card_type = fields.get("card_type_str", "")
+    has_iccid = bool(fields.get("ICCID", "").strip())
+    has_imsi = bool(fields.get("IMSI", "").strip())
+    blank = (card_type == "gialersim") or (not has_iccid and not has_imsi)
+
+    if proc.returncode != 0 and not card_type and not has_iccid and not has_imsi:
+        _write({"id": req_id, "ok": False, "error": "DETECT_FAILED"})
+        return
+
+    _write({"id": req_id, "ok": True, "blank": blank, "fields": fields})
+
+
 def _handle(line: str) -> bool:
     """Parse one request line and write one response. Returns False to stop."""
     try:
@@ -114,6 +165,8 @@ def _handle(line: str) -> bool:
         return False
     elif verb == "probe":
         _handle_probe(req_id, req.get("params"))
+    elif verb in ("detect", "read_fields"):
+        _handle_detect(req_id, req.get("params"))
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 

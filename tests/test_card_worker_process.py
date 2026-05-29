@@ -109,7 +109,7 @@ def test_capabilities_contains_four_verbs():
         resp, _ = _send(proc, "capabilities")
         assert resp["ok"] is True
         caps = resp["result"]
-        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe"}
+        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields"}
     finally:
         proc.terminate()
         proc.wait()
@@ -289,3 +289,127 @@ class TestHandleProbeUnit:
 
     def test_capabilities_include_probe(self):
         assert "probe" in card_worker_process._CAPABILITIES
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _handle_detect / read_fields (Phase 2D-B1)
+# ---------------------------------------------------------------------------
+
+SJA5_OUTPUT = (
+    "Autodetected card type: sysmoISIM-SJA5\n"
+    "ICCID: 8946000000000000001\n"
+    "IMSI: 240010000000001\n"
+    "ACC: 0001\n"
+)
+
+GIALERSIM_OUTPUT = (
+    "Autodetected card type: gialersim\n"
+    "ACC: ffff\n"
+)
+
+_BASE_PARAMS = {
+    "pysim_path": "/opt/pysim",
+    "reader_index": 0,
+    "timeout": 10,
+}
+
+
+def _reset_detect_state(session_id="abc123", card_gen=1):
+    card_worker_process._session_id = session_id
+    card_worker_process._card_gen = card_gen
+    card_worker_process._card_present = True
+
+
+def _run_detect(params, session_id="abc123", card_gen=1):
+    _reset_detect_state(session_id, card_gen)
+    captured = []
+    with patch.object(card_worker_process, "_write", side_effect=captured.append):
+        card_worker_process._handle_detect("req1", params)
+    return captured[0]
+
+
+class TestHandleDetectUnit:
+
+    def setup_method(self):
+        _reset_probe_state()
+
+    def test_sja5_output_ok_blank_false_fields_populated(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                resp = _run_detect(params)
+        assert resp["ok"] is True
+        assert resp["blank"] is False
+        assert resp["fields"]["ICCID"] == "8946000000000000001"
+        assert resp["fields"]["IMSI"] == "240010000000001"
+
+    def test_gialersim_output_ok_blank_true(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=GIALERSIM_OUTPUT, stderr="")
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                resp = _run_detect(params)
+        assert resp["ok"] is True
+        assert resp["blank"] is True
+
+    def test_wrong_session_id_returns_stale_session(self):
+        params = {**_BASE_PARAMS, "session_id": "wrong", "card_gen": 1}
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "STALE_SESSION"
+
+    def test_wrong_card_gen_returns_stale_session(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 99}
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "STALE_SESSION"
+
+    def test_missing_pysim_path_returns_cli_not_found(self):
+        params = {"session_id": "abc123", "card_gen": 1, "reader_index": 0}
+        resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "CLI_NOT_FOUND"
+
+    def test_missing_pysim_read_script_returns_cli_not_found(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        with patch("card_worker_process.os.path.isfile", return_value=False):
+            resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "CLI_NOT_FOUND"
+
+    def test_subprocess_timeout_returns_card_unresponsive(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        with patch("card_worker_process.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="x", timeout=10)):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "CARD_UNRESPONSIVE"
+
+    def test_nonzero_no_parseable_output_returns_detect_failed(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="error")
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "DETECT_FAILED"
+
+    def test_read_fields_mirrors_successful_detect(self):
+        _reset_detect_state("abc123", 1)
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        captured = []
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                with patch.object(card_worker_process, "_write", side_effect=captured.append):
+                    card_worker_process._handle_detect("req2", params)
+        resp = captured[0]
+        assert resp["ok"] is True
+        assert resp["fields"]["ICCID"] == "8946000000000000001"
+
+    def test_capabilities_include_detect_and_read_fields(self):
+        assert "detect" in card_worker_process._CAPABILITIES
+        assert "read_fields" in card_worker_process._CAPABILITIES
