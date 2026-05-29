@@ -58,10 +58,12 @@ class CardWatcher:
     """
 
     def __init__(self, card_manager, iccid_index=None, *,
-                 poll_interval: float = 1.5):
+                 poll_interval: float = 1.5,
+                 worker_client=None):
         self._cm = card_manager
         self._index = iccid_index
         self._poll_interval = poll_interval
+        self._worker_client = worker_client
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._paused = False
@@ -93,6 +95,8 @@ class CardWatcher:
         # Set True when _read_and_notify() fires on_error so the next poll
         # retries the read even if the ATR is unchanged (same-ATR re-seat).
         self._last_read_failed: bool = False
+        # Dedup key for worker probe path — opaque card_gen token from ProbeResult.
+        self._last_card_gen: Optional[str] = None
 
         # Callbacks (set by UI layer)
         self.on_card_detected: Optional[
@@ -220,6 +224,10 @@ class CardWatcher:
         detect_card() only if the fast probe is not available or
         when a new card needs to be identified.
         """
+        if self._worker_client is not None:
+            self._check_once_worker()
+            return
+
         # Try fast probe first
         if self._probe_available is not False:
             present, probe_msg = self._cm.probe_card_presence()
@@ -398,6 +406,53 @@ class CardWatcher:
                 self.on_card_unknown("")
             except Exception:
                 pass
+
+    def _check_once_worker(self):
+        """Poll iteration using worker probe path."""
+        from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
+
+        try:
+            result = self._worker_client.probe()
+        except WorkerTimeoutError as exc:
+            if self.on_error:
+                try:
+                    self.on_error(str(exc))
+                except Exception:
+                    pass
+            return
+        except (WorkerEOFError, WorkerCrashError) as exc:
+            if self.on_error:
+                try:
+                    self.on_error(str(exc))
+                except Exception:
+                    pass
+            return
+
+        if result.error == 'PROBE_TIMEOUT':
+            if self.on_error:
+                try:
+                    self.on_error(result.msg or 'PROBE_TIMEOUT')
+                except Exception:
+                    pass
+            return
+
+        if result.present:
+            new_gen = result.card_gen
+            old_gen = self._last_card_gen
+            if (self._card_present
+                    and new_gen is not None
+                    and new_gen == old_gen
+                    and not self._last_read_failed):
+                return
+            # New non-None card_gen means a different card session even if ATR is
+            # unchanged — clear _last_atr so _handle_probe_result triggers a fresh read.
+            if new_gen is not None and new_gen != old_gen:
+                self._last_atr = None
+            self._last_card_gen = new_gen
+            self._handle_probe_result(True, result.atr or "")
+        else:
+            self._last_card_gen = None
+            self._handle_probe_result(False, result.msg or 'No card in reader')
 
     def _check_once_slow(self):
         """Slow polling path — full pySim-read every cycle."""
