@@ -59,11 +59,13 @@ class CardWatcher:
 
     def __init__(self, card_manager, iccid_index=None, *,
                  poll_interval: float = 1.5,
-                 worker_client=None):
+                 worker_client=None,
+                 pysim_path=None):
         self._cm = card_manager
         self._index = iccid_index
         self._poll_interval = poll_interval
         self._worker_client = worker_client
+        self._pysim_path = pysim_path
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._paused = False
@@ -445,14 +447,86 @@ class CardWatcher:
                     and not self._last_read_failed):
                 return
             # New non-None card_gen means a different card session even if ATR is
-            # unchanged — clear _last_atr so _handle_probe_result triggers a fresh read.
+            # unchanged — clear _last_atr so a fresh read is triggered.
             if new_gen is not None and new_gen != old_gen:
                 self._last_atr = None
             self._last_card_gen = new_gen
-            self._handle_probe_result(True, result.atr or "")
+            atr = result.atr or ""
+            if self._card_present and atr == self._last_atr and not self._last_read_failed:
+                return
+            self._no_card_streak = 0
+            self._no_reader_poll_count = 0
+            self._card_present = True
+            self._last_atr = atr
+            if self.on_reading:
+                try:
+                    self.on_reading()
+                except Exception:
+                    pass
+            self._worker_read_and_notify(result.session_id, result.card_gen)
         else:
             self._last_card_gen = None
             self._handle_probe_result(False, result.msg or 'No card in reader')
+
+    def _worker_read_and_notify(self, session_id, card_gen):
+        """Run worker detect and fire the appropriate callback."""
+        from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
+
+        try:
+            result = self._worker_client.detect(
+                session_id=session_id,
+                card_gen=card_gen,
+                pysim_path=self._pysim_path,
+                reader_index=0,
+                timeout=30.0,
+            )
+        except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
+            self._last_read_failed = True
+            if self.on_error:
+                try:
+                    self.on_error(str(exc))
+                except Exception:
+                    pass
+            return
+
+        if result.error == 'STALE_SESSION':
+            self._last_card_gen = None
+            if self.on_error:
+                try:
+                    self.on_error(result.msg or 'STALE_SESSION')
+                except Exception:
+                    pass
+            return
+
+        if result.ok:
+            if result.blank:
+                self._last_read_failed = False
+                self._last_iccid = None
+                if self.on_card_unknown:
+                    try:
+                        self.on_card_unknown("")
+                    except Exception:
+                        pass
+            else:
+                iccid = result.fields.get("ICCID", "")
+                if iccid:
+                    self._last_read_failed = False
+                    self._last_iccid = iccid
+                    self._handle_new_card(iccid)
+                else:
+                    self._last_read_failed = True
+                    if self.on_error:
+                        try:
+                            self.on_error("No ICCID returned by worker detect")
+                        except Exception:
+                            pass
+        else:
+            self._last_read_failed = True
+            if self.on_error:
+                try:
+                    self.on_error(result.msg or "worker detect failed")
+                except Exception:
+                    pass
 
     def _check_once_slow(self):
         """Slow polling path — full pySim-read every cycle."""

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from managers.card_watcher import CardWatcher
 from card_worker_client import (
+    DetectResult,
     ProbeResult,
     WorkerCrashError,
     WorkerEOFError,
@@ -37,16 +38,27 @@ class FakeCardManager:
 
 
 class FakeWorker:
-    def __init__(self, result=None, raises=None):
+    def __init__(self, result=None, raises=None, detect_result=None):
         self.probe_calls = 0
+        self.detect_calls = 0
         self._result = result
         self._raises = raises
+        self._detect_result = detect_result
+        self._detect_raises = None
 
     def probe(self, **kwargs):
         self.probe_calls += 1
         if self._raises is not None:
             raise self._raises
         return self._result
+
+    def detect(self, **kwargs):
+        self.detect_calls += 1
+        if self._detect_raises is not None:
+            raise self._detect_raises
+        if self._detect_result is not None:
+            return self._detect_result
+        return DetectResult(ok=True, blank=True)
 
     def set_result(self, result):
         self._result = result
@@ -55,11 +67,17 @@ class FakeWorker:
         self._raises = exc
         self._result = None
 
+    def set_detect_result(self, result):
+        self._detect_result = result
 
-def make_watcher(worker=None, cm=None):
+    def set_detect_raises(self, exc):
+        self._detect_raises = exc
+
+
+def make_watcher(worker=None, cm=None, pysim_path=None):
     if cm is None:
         cm = FakeCardManager()
-    return CardWatcher(cm, worker_client=worker), cm
+    return CardWatcher(cm, worker_client=worker, pysim_path=pysim_path), cm
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +285,172 @@ def test_no_worker_uses_native_path():
     watcher._check_once()
 
     assert cm.probe_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 11: pysim_path forwarded to worker detect
+# ---------------------------------------------------------------------------
+
+def test_pysim_path_forwarded_to_detect():
+    calls = []
+
+    class TrackingWorker(FakeWorker):
+        def detect(self, **kwargs):
+            calls.append(kwargs.copy())
+            return DetectResult(ok=True, blank=True)
+
+    worker = TrackingWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid-1")
+    )
+    watcher, _ = make_watcher(worker=worker, pysim_path="/opt/pysim")
+    watcher._check_once()
+
+    assert len(calls) == 1
+    assert calls[0]["pysim_path"] == "/opt/pysim"
+    assert calls[0]["session_id"] == "sid-1"
+    assert calls[0]["card_gen"] == "g1"
+
+
+# ---------------------------------------------------------------------------
+# Test 12: detect returns ok=True, non-blank with ICCID → on_card_unknown (no index)
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_iccid_fires_handle_new_card():
+    iccid = "8946101234567890001"
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1"),
+        detect_result=DetectResult(ok=True, blank=False, fields={"ICCID": iccid}),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    unknown = []
+    watcher.on_card_unknown = lambda x: unknown.append(x)
+
+    watcher._check_once()
+
+    assert len(unknown) == 1
+    assert unknown[0] == iccid
+    assert watcher._last_iccid == iccid
+    assert watcher._last_read_failed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 13: detect returns ok=True, blank → on_card_unknown("")
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_blank_fires_on_card_unknown_empty():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1"),
+        detect_result=DetectResult(ok=True, blank=True),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    unknown = []
+    watcher.on_card_unknown = lambda x: unknown.append(x)
+
+    watcher._check_once()
+
+    assert unknown == [""]
+    assert watcher._last_iccid is None
+    assert watcher._last_read_failed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 14: detect returns ok=True, non-blank, no ICCID → on_error, _last_read_failed
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_no_iccid_calls_on_error():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1"),
+        detect_result=DetectResult(ok=True, blank=False, fields={}),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = lambda msg: errors.append(msg)
+
+    watcher._check_once()
+
+    assert len(errors) == 1
+    assert watcher._last_read_failed is True
+
+
+# ---------------------------------------------------------------------------
+# Test 15: detect returns ok=False (non-STALE) → on_error, _last_read_failed
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_failure_calls_on_error():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1"),
+        detect_result=DetectResult(ok=False, msg="pySim-read crashed"),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = lambda msg: errors.append(msg)
+
+    watcher._check_once()
+
+    assert len(errors) == 1
+    assert "pySim-read crashed" in errors[0]
+    assert watcher._last_read_failed is True
+
+
+# ---------------------------------------------------------------------------
+# Test 16: detect returns STALE_SESSION → _last_card_gen=None, on_error
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_stale_session_clears_card_gen():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1"),
+        detect_result=DetectResult(ok=False, error="STALE_SESSION", msg="stale"),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = lambda msg: errors.append(msg)
+
+    watcher._check_once()
+
+    assert watcher._last_card_gen is None
+    assert len(errors) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 17: WorkerTimeoutError in detect → _last_read_failed, on_error, no clear
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_timeout_sets_read_failed():
+    worker = FakeWorker(result=ProbeResult(present=True, atr="3B", card_gen="g1"))
+    worker.set_detect_raises(WorkerTimeoutError("detect", 30.0))
+    watcher, cm = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = lambda msg: errors.append(msg)
+
+    watcher._check_once()
+
+    assert len(errors) == 1
+    assert watcher._last_read_failed is True
+    assert watcher._worker_client is worker  # not cleared
+    assert cm.probe_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 18: WorkerCrashError in detect → _last_read_failed, no native fallback
+# ---------------------------------------------------------------------------
+
+def test_worker_detect_crash_no_native_fallback():
+    worker = FakeWorker(result=ProbeResult(present=True, atr="3B", card_gen="g1"))
+    worker.set_detect_raises(WorkerCrashError(1))
+    watcher, cm = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = lambda msg: errors.append(msg)
+
+    watcher._check_once()
+
+    assert len(errors) == 1
+    assert watcher._last_read_failed is True
+    assert watcher._worker_client is worker  # not cleared
+    assert cm.probe_calls == 0              # native path not called
