@@ -454,3 +454,64 @@ def test_worker_detect_crash_no_native_fallback():
     assert watcher._last_read_failed is True
     assert watcher._worker_client is worker  # not cleared
     assert cm.probe_calls == 0              # native path not called
+
+
+# ---------------------------------------------------------------------------
+# Test 19: on_worker_session_ready fires on non-blank detect success
+# ---------------------------------------------------------------------------
+
+def test_on_worker_session_ready_fires_on_non_blank_success():
+    iccid = "8946101234567890001"
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid-99"),
+        detect_result=DetectResult(ok=True, blank=False, fields={"ICCID": iccid}),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    sessions = []
+    watcher.on_worker_session_ready = lambda sid, gen: sessions.append((sid, gen))
+    watcher.on_card_unknown = lambda x: None
+
+    watcher._check_once()
+
+    assert sessions == [("sid-99", "g1")]
+
+
+# ---------------------------------------------------------------------------
+# Test 20: on_worker_session_ready fires on blank detect success
+# ---------------------------------------------------------------------------
+
+def test_on_worker_session_ready_fires_on_blank_success():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g2", session_id="sid-blank"),
+        detect_result=DetectResult(ok=True, blank=True),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    sessions = []
+    watcher.on_worker_session_ready = lambda sid, gen: sessions.append((sid, gen))
+    watcher.on_card_unknown = lambda x: None
+
+    watcher._check_once()
+
+    assert sessions == [("sid-blank", "g2")]
+
+
+# ---------------------------------------------------------------------------
+# Test 21: on_worker_session_ready does NOT fire on detect failure
+# ---------------------------------------------------------------------------
+
+def test_on_worker_session_ready_does_not_fire_on_detect_error():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g3", session_id="sid-fail"),
+        detect_result=DetectResult(ok=False, msg="pySim-read crashed"),
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    sessions = []
+    watcher.on_worker_session_ready = lambda sid, gen: sessions.append((sid, gen))
+    watcher.on_error = lambda msg: None
+
+    watcher._check_once()
+
+    assert sessions == []

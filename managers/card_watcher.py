@@ -108,6 +108,7 @@ class CardWatcher:
         self.on_reader_ready: Optional[Callable[[], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
         self.on_reading: Optional[Callable[[], None]] = None
+        self.on_worker_session_ready: Optional[Callable] = None
 
     @property
     def index(self):
@@ -501,6 +502,11 @@ class CardWatcher:
             return
 
         if result.ok:
+            if self.on_worker_session_ready is not None:
+                try:
+                    self.on_worker_session_ready(session_id, card_gen)
+                except Exception:
+                    pass
             if result.blank:
                 self._last_read_failed = False
                 self._last_iccid = None
