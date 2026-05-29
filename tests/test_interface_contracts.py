@@ -345,16 +345,54 @@ def test_no_unresolved_module_calls():
 # Test 3: Cross-module imports - every 'from X import Y' resolves
 # ---------------------------------------------------------------------------
 
+_OPTIONAL_GUARD_EXCEPTIONS = {"ImportError", "ModuleNotFoundError", "Exception"}
+
+
+def _optional_import_linenos(tree: ast.AST) -> set:
+    """Return line numbers of ImportFrom nodes inside optional-dependency try blocks.
+
+    A try block is considered an optional-dependency guard if any of its
+    except handlers catches ImportError, ModuleNotFoundError, or bare Exception.
+    """
+    optional_lines: set = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        is_guard = False
+        for handler in node.handlers:
+            if handler.type is None:
+                is_guard = True
+                break
+            if isinstance(handler.type, ast.Name) and handler.type.id in _OPTIONAL_GUARD_EXCEPTIONS:
+                is_guard = True
+                break
+            if isinstance(handler.type, ast.Tuple):
+                for elt in handler.type.elts:
+                    if isinstance(elt, ast.Name) and elt.id in _OPTIONAL_GUARD_EXCEPTIONS:
+                        is_guard = True
+                        break
+            if is_guard:
+                break
+        if is_guard:
+            for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+                if isinstance(child, ast.ImportFrom):
+                    optional_lines.add(child.lineno)
+    return optional_lines
+
+
 def _collect_import_statements():
-    """Return list of (file, module, names) for all from-imports."""
+    """Return list of (file, module, names) for all non-optional from-imports."""
     imports = []
     for path, _ in _MODULES:
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
+        optional_lines = _optional_import_linenos(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
+                if node.lineno in optional_lines:
+                    continue
                 names = [a.name for a in node.names]
                 imports.append((
                     str(path.relative_to(PROJECT_ROOT)),
