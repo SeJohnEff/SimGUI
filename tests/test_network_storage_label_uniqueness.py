@@ -268,6 +268,8 @@ class TestDialogLabelValidation:
         ns.test_connection.return_value = (True, "OK")
         with patch("dialogs.network_storage_dialog_qt.QMessageBox.information"):
             dlg._on_test()
+            if dlg._test_worker:
+                dlg._test_worker.wait()
         ns.test_connection.assert_called_once()
 
     def test_save_and_connect_runs_when_label_is_valid(self):
@@ -291,6 +293,8 @@ class TestDialogLabelValidation:
         ns.test_connection.return_value = (True, "OK")
         with patch("dialogs.network_storage_dialog_qt.QMessageBox.information"):
             dlg._on_test()
+            if dlg._test_worker:
+                dlg._test_worker.wait()
 
         ns.validate_label_unique.assert_called_once_with(
             "NAS SIM", exclude_label="NAS SIM")
