@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 _LOG = logging.getLogger(__name__)
@@ -51,6 +52,17 @@ class WorkerProtocolError(WorkerError):
     def __init__(self, raw: str) -> None:
         self.raw = raw
         super().__init__(f"Worker returned invalid JSON: {raw!r}")
+
+
+@dataclass
+class ProbeResult:
+    """Typed result from a worker probe() call."""
+    present: bool
+    atr: Optional[str] = None
+    card_gen: Optional[str] = None
+    session_id: Optional[str] = None
+    msg: Optional[str] = None
+    error: Optional[str] = None
 
 
 class PersistentWorkerClient:
@@ -171,6 +183,44 @@ class PersistentWorkerClient:
             raise WorkerProtocolError(raw)
 
         return response
+
+    def probe(
+        self,
+        reader_index: int = 0,
+        timeout: float = 2.0,
+        request_timeout: Optional[float] = None,
+    ) -> ProbeResult:
+        """Probe for a card on *reader_index*. Returns a typed ProbeResult."""
+        rt = request_timeout if request_timeout is not None else timeout + 1.0
+        resp = self.send(
+            "probe",
+            params={"reader_index": reader_index, "timeout": timeout},
+            timeout=rt,
+        )
+        result = resp.get("result") or {}
+        if resp.get("ok"):
+            if result.get("present"):
+                return ProbeResult(
+                    present=True,
+                    atr=result.get("atr"),
+                    card_gen=result.get("card_gen"),
+                    session_id=result.get("session_id"),
+                )
+            else:
+                return ProbeResult(
+                    present=False,
+                    msg=result.get("msg"),
+                    card_gen=result.get("card_gen"),
+                    session_id=result.get("session_id"),
+                )
+        else:
+            return ProbeResult(
+                present=False,
+                error=resp.get("error"),
+                msg=resp.get("msg"),
+                card_gen=result.get("card_gen") if result else None,
+                session_id=result.get("session_id") if result else None,
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers

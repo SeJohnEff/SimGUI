@@ -12,6 +12,7 @@ import pytest
 
 from card_worker_client import (
     PersistentWorkerClient,
+    ProbeResult,
     WorkerCrashError,
     WorkerEOFError,
     WorkerError,
@@ -239,6 +240,110 @@ def test_crash_raises_worker_crash_error():
         except Exception:
             pass
         os.unlink(crash_script)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B — probe() helper tests (no real hardware)
+# ---------------------------------------------------------------------------
+
+class _MockClient(PersistentWorkerClient):
+    """PersistentWorkerClient subclass that replaces send() with a controllable fake."""
+
+    def __init__(self):
+        super().__init__(worker_script="/dev/null")
+        self._send_calls = []
+        self._send_return = {}
+
+    def send(self, verb, params=None, timeout=10.0):
+        self._send_calls.append({"verb": verb, "params": params, "timeout": timeout})
+        return self._send_return
+
+
+def test_probe_sends_correct_verb_and_params():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {"present": False, "msg": "no card"}}
+    client.probe(reader_index=1, timeout=3.0)
+    assert len(client._send_calls) == 1
+    call = client._send_calls[0]
+    assert call["verb"] == "probe"
+    assert call["params"] == {"reader_index": 1, "timeout": 3.0}
+
+
+def test_probe_default_request_timeout_is_timeout_plus_one():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {"present": False, "msg": "no card"}}
+    client.probe(timeout=2.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(3.0)
+
+
+def test_probe_custom_request_timeout_overrides_default():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {"present": False, "msg": "no card"}}
+    client.probe(timeout=2.0, request_timeout=5.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(5.0)
+
+
+def test_probe_present_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {
+            "present": True,
+            "atr": "3B9F96801FC78031E073FE211B66D0004300900000",
+            "card_gen": "sysmoISIM-SJA5",
+            "session_id": "abc-123",
+        },
+    }
+    result = client.probe()
+    assert isinstance(result, ProbeResult)
+    assert result.present is True
+    assert result.atr == "3B9F96801FC78031E073FE211B66D0004300900000"
+    assert result.card_gen == "sysmoISIM-SJA5"
+    assert result.session_id == "abc-123"
+    assert result.error is None
+
+
+def test_probe_absent_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {"present": False, "msg": "no card inserted"},
+    }
+    result = client.probe()
+    assert isinstance(result, ProbeResult)
+    assert result.present is False
+    assert result.msg == "no card inserted"
+    assert result.error is None
+    assert result.atr is None
+
+
+def test_probe_timeout_response_parsed_as_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "PROBE_TIMEOUT",
+        "msg": "probe timed out waiting for card",
+    }
+    result = client.probe()
+    assert isinstance(result, ProbeResult)
+    assert result.present is False
+    assert result.error == "PROBE_TIMEOUT"
+    assert result.msg == "probe timed out waiting for card"
+
+
+def test_probe_ok_false_with_result_preserves_card_gen():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "READER_ERROR",
+        "msg": "reader not found",
+        "result": {"card_gen": "unknown", "session_id": "xyz"},
+    }
+    result = client.probe()
+    assert result.present is False
+    assert result.error == "READER_ERROR"
+    assert result.card_gen == "unknown"
+    assert result.session_id == "xyz"
 
 
 def test_stderr_does_not_block_caller():
