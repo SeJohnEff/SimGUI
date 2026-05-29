@@ -136,7 +136,7 @@ class TestProgramCard:
         cm._authenticated_adm1_hex = "3838383838383838"
         cm._original_card_data = {"ICCID": "89999000000000000001", "IMSI": "old_imsi"}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
-             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
+             patch.object(cm, '_run_pysim_shell', return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", {"IMSI": "new_imsi"})):
             ok, msg = cm.program_card({"IMSI": "new_imsi"})
@@ -162,13 +162,13 @@ class TestProgramCard:
         }
         data = {"IMSI": "new_imsi", "Ki": "A" * 32, "OPc": "B" * 32}
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
-             patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, "ok", "")) as mock_prog, \
+             patch.object(cm, '_run_pysim_shell',
+                          return_value=(True, "ok", "")) as mock_shell, \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", data)):
             ok, msg = cm.program_card(data)
         assert ok is True
-        mock_prog.assert_called_once()
+        mock_shell.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
