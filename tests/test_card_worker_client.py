@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from card_worker_client import (
+    AuthResult,
     DetectResult,
     PersistentWorkerClient,
     ProbeResult,
@@ -470,6 +471,124 @@ def test_read_fields_default_request_timeout_is_timeout_plus_one():
     client._send_return = {"ok": True, "result": {}}
     client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim", timeout=20.0)
     assert client._send_calls[0]["timeout"] == pytest.approx(21.0)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3C — authenticate() helper tests
+# ---------------------------------------------------------------------------
+
+def test_authenticate_sends_correct_verb_and_params():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {"deferred": False, "session_id": "s1", "card_gen": 2}}
+    client.authenticate(session_id="s1", card_gen=2, adm1_hex="3838383838383838", timeout=15.0)
+    assert len(client._send_calls) == 1
+    call = client._send_calls[0]
+    assert call["verb"] == "authenticate"
+    assert call["params"] == {
+        "session_id": "s1",
+        "card_gen": 2,
+        "adm1_hex": "3838383838383838",
+        "timeout": 15.0,
+    }
+
+
+def test_authenticate_default_request_timeout_is_timeout_plus_one():
+    client = _MockClient()
+    client._send_return = {"ok": True, "result": {}}
+    client.authenticate(session_id="s1", card_gen=1, adm1_hex="aa", timeout=15.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(16.0)
+
+
+def test_authenticate_success_response_parsed_correctly():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "result": {
+            "deferred": True,
+            "session_id": "sess-99",
+            "card_gen": 5,
+        },
+    }
+    result = client.authenticate(session_id="sess-99", card_gen=5, adm1_hex="deadbeef")
+    assert isinstance(result, AuthResult)
+    assert result.ok is True
+    assert result.deferred is True
+    assert result.session_id == "sess-99"
+    assert result.card_gen == 5
+    assert result.error is None
+
+
+def test_authenticate_auth_failed_maps_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "AUTH_FAILED",
+        "msg": "ADM1 verification failed",
+    }
+    result = client.authenticate(session_id="s1", card_gen=1, adm1_hex="badkey")
+    assert isinstance(result, AuthResult)
+    assert result.ok is False
+    assert result.error == "AUTH_FAILED"
+    assert result.msg == "ADM1 verification failed"
+
+
+def test_authenticate_card_blocked_maps_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "CARD_BLOCKED",
+        "msg": "ADM1 retry counter exhausted",
+    }
+    result = client.authenticate(session_id="s1", card_gen=1, adm1_hex="badkey")
+    assert result.ok is False
+    assert result.error == "CARD_BLOCKED"
+
+
+def test_authenticate_stale_session_maps_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "STALE_SESSION",
+        "msg": "card changed since probe",
+    }
+    result = client.authenticate(session_id="old", card_gen=0, adm1_hex="aa")
+    assert result.ok is False
+    assert result.error == "STALE_SESSION"
+
+
+class _MockClientRaises(PersistentWorkerClient):
+    """Variant that raises a given exception from send()."""
+
+    def __init__(self, exc):
+        super().__init__(worker_script="/dev/null")
+        self._exc = exc
+
+    def send(self, verb, params=None, timeout=10.0):
+        raise self._exc
+
+
+def test_authenticate_worker_timeout_maps_worker_dead():
+    exc = WorkerTimeoutError("authenticate", 15.0)
+    client = _MockClientRaises(exc)
+    result = client.authenticate(session_id="s1", card_gen=1, adm1_hex="aa")
+    assert result.ok is False
+    assert result.error == "WORKER_DEAD"
+    assert "authenticate" in result.msg
+
+
+def test_authenticate_worker_eof_maps_worker_dead():
+    client = _MockClientRaises(WorkerEOFError())
+    result = client.authenticate(session_id="s1", card_gen=1, adm1_hex="aa")
+    assert result.ok is False
+    assert result.error == "WORKER_DEAD"
+
+
+def test_authenticate_worker_crash_maps_worker_dead():
+    client = _MockClientRaises(WorkerCrashError(1))
+    result = client.authenticate(session_id="s1", card_gen=1, adm1_hex="aa")
+    assert result.ok is False
+    assert result.error == "WORKER_DEAD"
+    assert "1" in result.msg
 
 
 def test_stderr_does_not_block_caller():

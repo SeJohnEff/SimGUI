@@ -78,6 +78,17 @@ class DetectResult:
     msg: Optional[str] = None
 
 
+@dataclass
+class AuthResult:
+    """Typed result from a worker authenticate() call."""
+    ok: bool
+    deferred: bool = False
+    error: Optional[str] = None
+    msg: Optional[str] = None
+    session_id: Optional[str] = None
+    card_gen: Optional[int] = None
+
+
 class PersistentWorkerClient:
     """Manages a single card_worker_process.py subprocess."""
 
@@ -268,6 +279,43 @@ class PersistentWorkerClient:
                 card_gen=result.get("card_gen"),
             )
         return DetectResult(
+            ok=False,
+            error=resp.get("error"),
+            msg=resp.get("msg"),
+        )
+
+    def authenticate(
+        self,
+        session_id: str,
+        card_gen: int,
+        adm1_hex: str,
+        timeout: float = 15.0,
+        request_timeout: Optional[float] = None,
+    ) -> AuthResult:
+        """Authenticate with ADM1; returns a typed AuthResult."""
+        rt = request_timeout if request_timeout is not None else timeout + 1.0
+        try:
+            resp = self.send(
+                "authenticate",
+                params={
+                    "session_id": session_id,
+                    "card_gen": card_gen,
+                    "adm1_hex": adm1_hex,
+                    "timeout": timeout,
+                },
+                timeout=rt,
+            )
+        except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
+            return AuthResult(ok=False, error="WORKER_DEAD", msg=str(exc))
+        result = resp.get("result") or {}
+        if resp.get("ok"):
+            return AuthResult(
+                ok=True,
+                deferred=bool(result.get("deferred", False)),
+                session_id=result.get("session_id"),
+                card_gen=result.get("card_gen"),
+            )
+        return AuthResult(
             ok=False,
             error=resp.get("error"),
             msg=resp.get("msg"),
