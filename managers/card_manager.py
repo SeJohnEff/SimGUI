@@ -1182,6 +1182,52 @@ class CardManager:
         """Last known ADM1 remaining attempts (None if never checked)."""
         return self._adm1_remaining_attempts
 
+    def _authenticate_via_worker(self, adm1_hex: str) -> Tuple[bool, str]:
+        """Route authentication through the card worker subprocess."""
+        if not self._current_session_id or self._current_card_gen is None:
+            return False, (
+                "Worker session not ready — card may have been removed. Re-detect."
+            )
+        result = self._worker_client.authenticate(
+            session_id=self._current_session_id,
+            card_gen=self._current_card_gen,
+            adm1_hex=adm1_hex,
+        )
+        if result.ok:
+            self.authenticated = True
+            self._authenticated_adm1_hex = adm1_hex
+            if result.deferred:
+                return True, (
+                    "Authentication stored — ADM1 will be used during programming."
+                )
+            return True, "Authentication successful"
+
+        err = result.error or ""
+        if err == "AUTH_FAILED":
+            return False, (
+                "Authentication FAILED — wrong ADM1 key. "
+                "3 wrong attempts = permanent card lock!"
+            )
+        if err == "CARD_BLOCKED":
+            self.card_blocked = True
+            self._adm1_remaining_attempts = 0
+            return False, (
+                "Card is PERMANENTLY LOCKED — "
+                "ADM1 authentication blocked (0 attempts remaining). "
+                "This card cannot be programmed."
+            )
+        if err == "STALE_SESSION":
+            self._current_session_id = None
+            self._current_card_gen = None
+            return False, "Session expired — card may have changed. Re-detect."
+        if err == "TRANSPORT_ERROR":
+            return False, "Reader/transport error during authentication. Check card reader."
+        if err == "WORKER_DEAD":
+            return False, "Worker process died — restart the application."
+        if err == "NO_PROFILE":
+            return False, "No card profile available — re-detect the card."
+        return False, f"Worker authentication error: {result.msg or err}"
+
     def authenticate(self, adm1: str, force: bool = False,
                      expected_iccid: Optional[str] = None) -> Tuple[bool, str]:
         """Authenticate with ADM1 key.
@@ -1208,6 +1254,16 @@ class CardManager:
                 "This card cannot be programmed."
             )
 
+        err = validate_adm1(adm1)
+        if err:
+            return False, err
+
+        adm1_hex = self._adm1_to_hex(adm1)
+
+        # --- Worker path (before any PCSC operations) ---
+        if self._worker_client is not None:
+            return self._authenticate_via_worker(adm1_hex)
+
         # ICCID cross-verification safety check.
         # Skipped for blank/gialersim cards: the target ICCID in the CSV is
         # the one being *written* (not what the card already holds), and all
@@ -1231,10 +1287,6 @@ class CardManager:
                         f"Authentication aborted to prevent card lockout."
                     )
 
-        err = validate_adm1(adm1)
-        if err:
-            return False, err
-
         if self.cli_backend != CLIBackend.PYSIM:
             # Non-pySim backends not yet implemented
             logger.warning("authenticate(): non-pySim backend not implemented")
@@ -1256,10 +1308,6 @@ class CardManager:
                     f"Authentication aborted to protect the card. "
                     f"Use force=True to override (at your own risk)."
                 )
-
-        # Use pySim-shell WITHOUT -A (safe: no auto-auth at startup)
-        # Pipe verify_adm with the hex key interactively.
-        adm1_hex = self._adm1_to_hex(adm1)
 
         # --- Blank / gialersim card safety check ---
         # Skip VERIFY ADM1 and store the key for deferred auth via
