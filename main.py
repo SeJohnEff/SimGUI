@@ -275,8 +275,21 @@ class SimGUIApp(QMainWindow):
         self._iccid_index = IccidIndex()
         self._auto_artifact = AutoArtifactManager(self._ns_manager)
         self._standards_mgr = StandardsManager()
+        self._worker_client = None
+        if os.environ.get("SIMGUI_WORKER") == "1":
+            try:
+                from card_worker_client import PersistentWorkerClient, WorkerStartError
+                _wc = PersistentWorkerClient()
+                _wc.start()
+                self._worker_client = _wc
+                logging.info("PersistentWorkerClient started")
+            except Exception as exc:
+                logging.warning("Worker start failed, using native path: %s", exc)
+
         self._card_watcher = CardWatcher(
-            self._card_manager, self._iccid_index, poll_interval=1.5)
+            self._card_manager, self._iccid_index, poll_interval=1.5,
+            worker_client=self._worker_client,
+            pysim_path=self._card_manager.cli_path)
 
         # Shared state
         self.last_read_data: dict[str, str] = {}
@@ -794,6 +807,11 @@ class SimGUIApp(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._card_watcher.stop()
+        if self._worker_client is not None:
+            try:
+                self._worker_client.stop()
+            except Exception as exc:
+                logging.warning("Worker stop error: %s", exc)
         self._shutdown_worker()
         self._settings.set("window_geometry",
                            f"{self.width()}x{self.height()}")
