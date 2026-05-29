@@ -600,8 +600,8 @@ class TestMountFileExistsActualPath:
         ns = NetworkStorageManager()
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
         monkeypatch.setattr(subprocess, "run", self._fail_run())
-        monkeypatch.setattr(ns, "_macos_find_smb_mount",
-                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_macos_find_smb_mount_for_adoption",
+                            lambda prof: ("/Volumes/SIM", None))
         monkeypatch.setattr(ns, "_check_path_accessible",
                             lambda path, timeout=5: True)
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
@@ -621,8 +621,8 @@ class TestMountFileExistsActualPath:
         ns = NetworkStorageManager()
         monkeypatch.setattr(os.path, "ismount", lambda mp: False)
         monkeypatch.setattr(subprocess, "run", self._fail_run())
-        monkeypatch.setattr(ns, "_macos_find_smb_mount",
-                            lambda prof: "/Volumes/SIM")
+        monkeypatch.setattr(ns, "_macos_find_smb_mount_for_adoption",
+                            lambda prof: ("/Volumes/SIM", None))
         monkeypatch.setattr(ns, "_check_path_accessible",
                             lambda path, timeout=5: False)
         monkeypatch.setattr("managers.network_storage_manager._MACOS", True)
