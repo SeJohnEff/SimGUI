@@ -468,6 +468,9 @@ class CardManager:
         self._adm1_remaining_attempts: Optional[int] = None
         self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
         self._probe_thread: Optional[threading.Thread] = None  # in-flight PCSC probe guard
+        self._worker_client = None
+        self._current_session_id: Optional[str] = None
+        self._current_card_gen: Optional[int] = None
         logger.info(
             "CardManager init: backend=%s, cli_path=%s, venv_python=%s, bundled_python=%s",
             self.cli_backend.name, self.cli_path, self._venv_python, self._bundled_python,
@@ -482,6 +485,13 @@ class CardManager:
         restarted, reader reconnected, or pyscard context became stale).
         """
         reset_pyscard()
+
+    def set_worker_client(self, client) -> None:
+        self._worker_client = client
+
+    def set_worker_session(self, session_id, card_gen) -> None:
+        self._current_session_id = session_id
+        self._current_card_gen = card_gen
 
     def _validate_script_path(self, script: str) -> Optional[str]:
         """Resolve and validate a script path, preventing traversal."""
