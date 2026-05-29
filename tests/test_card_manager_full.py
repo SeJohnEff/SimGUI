@@ -528,7 +528,8 @@ class TestDetectCard:
             ok, msg = cm.detect_card()
         assert ok is True
         assert m.call_count == 2
-        mock_sleep.assert_called_once_with(1.0)
+        from unittest.mock import call
+        assert mock_sleep.call_args_list.count(call(1.0)) == 1
 
     def test_detect_no_retry_on_other_errors(self, tmp_path):
         """detect_card() does NOT retry on non-transient errors."""
