@@ -303,39 +303,34 @@ class TestProgramCardWithVerify:
         mock_verify.assert_not_called()
 
     def test_spn_not_verified_when_readback_empty(self):
-        """SPN requested but write fails and read-back returns no SPN → failure reported."""
+        """SPN-only delta is not programmed (SPN disabled); _write_spn_via_shell not called."""
         cm = self._make_nonempty_cm()
-        # SPN is absent from _original_card_data, so it is the only delta field.
+        # _original_card_data already matches IMSI/Ki/OPc; SPN is the only delta.
+        # Production strips SPN before programming, so no fields are written.
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
-             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
-             patch.object(cm, '_write_spn_via_shell', return_value=(False, "shell failed", "")), \
-             patch.object(cm, 'verify_after_program',
-                          return_value=(True, "Verification OK",
-                                        {"ICCID": "899998", "IMSI": "old_imsi"})):
+             patch.object(cm, '_write_spn_via_shell') as mock_spn:
             ok, msg = cm.program_card(
                 {"IMSI": "old_imsi", "SPN": "Teleauora UK",
                  "Ki": "cc" * 16, "OPc": "dd" * 16})
 
+        mock_spn.assert_not_called()
         assert ok is True
-        assert "SPN" in msg
-        assert "failed" in msg.lower()
+        assert any(phrase in msg.lower() for phrase in ("no changes", "already", "nothing"))
 
     def test_spn_verified_when_readback_matches(self):
-        """SPN shell write succeeds and read-back matches → 'SPN: verified' in message."""
+        """SPN-only delta is not programmed (SPN disabled); result is ok=True, no write called."""
         cm = self._make_nonempty_cm()
+        # _original_card_data already matches IMSI/Ki/OPc; SPN is the only delta.
+        # Production strips SPN before programming, so no fields are written.
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
-             patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
-             patch.object(cm, '_write_spn_via_shell',
-                          return_value=(True, "SPN written", "Teleauora UK")), \
-             patch.object(cm, 'verify_after_program',
-                          return_value=(True, "Verification OK",
-                                        {"ICCID": "899998", "IMSI": "old_imsi"})):
+             patch.object(cm, '_write_spn_via_shell') as mock_spn:
             ok, msg = cm.program_card(
                 {"IMSI": "old_imsi", "SPN": "Teleauora UK",
                  "Ki": "cc" * 16, "OPc": "dd" * 16})
 
+        mock_spn.assert_not_called()
         assert ok is True
-        assert "SPN: verified" in msg
+        assert any(phrase in msg.lower() for phrase in ("no changes", "already", "nothing"))
 
 
 # ---------------------------------------------------------------------------
