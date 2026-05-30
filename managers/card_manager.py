@@ -1649,6 +1649,8 @@ class CardManager:
         """
         fields = fields.copy()
         fields.pop('ADM1', None)
+        fields.pop('PIN1', None)
+        fields.pop('PUK1', None)
         spn_skipped = 'SPN' in fields
         fields.pop('SPN', None)
         summary = ', '.join(k for k in fields) or 'all fields'
