@@ -254,7 +254,7 @@ class TestProgramCardWithVerify:
 
         # pySim-prog reported success — trust it; verify failure yields warning
         assert ok is True
-        assert "re-insert" in msg.lower() or "could not confirm" in msg.lower()
+        assert "verification pending" in msg.lower() or "read the card again" in msg.lower()
 
     def test_program_write_fails_no_verify(self):
         """If pySim-prog write itself fails, verify is never called."""

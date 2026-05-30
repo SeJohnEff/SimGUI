@@ -1631,13 +1631,12 @@ class CardManager:
                     return True, f"Card programmed \u2014 {'; '.join(parts)}"
                 return True, (
                     "Card programmed\n"
-                    "(read-back could not confirm fields \u2014 re-insert to verify)"
+                    "(Verification pending \u2014 read the card again to confirm.)"
                 )
             logger.warning("pySim-prog OK but read-back failed: %s", v_msg)
             return True, (
                 f"Card programmed: {summary}\n"
-                "(read-back verification could not confirm "
-                "\u2014 re-insert card to verify)"
+                "(Verification pending \u2014 read the card again to confirm.)"
             )
 
         if 'not found' in stderr.lower():
@@ -1754,7 +1753,7 @@ class CardManager:
             logger.warning("Card programmed but verification failed: %s", v_msg)
             return True, (
                 f"Card programmed: {summary}\n"
-                "(read-back could not confirm \u2014 re-insert card to verify)"
+                "(Verification pending \u2014 read the card again to confirm.)"
             )
 
         combined = (stdout + '\n' + stderr).lower()
