@@ -178,6 +178,21 @@ class _ProbeResult:
         return _ProbeResult(available=False, present=False, message=reason)
 
 
+@dataclasses.dataclass
+class _VerificationReport:
+    """Internal classification of a post-write read-back result.
+
+    Not a domain state — used only inside CardManager to decide which
+    ProgramOutcome to surface.  Ki/OPc are structurally unreadable;
+    all other written fields are either verified, mismatched, or caused
+    an error that prevented verification.
+    """
+    verified_fields: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
+    failed_fields: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
+    unreadable_fields: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
+    verification_error: Optional[str] = None
+
+
 class CardType(Enum):
     UNKNOWN = auto()
     SJS1 = auto()
@@ -1781,6 +1796,51 @@ class CardManager:
 
     _VERIFY_RETRIES = 2
     _VERIFY_DELAY_S = 1.0  # seconds between retries
+
+    def _verify_written_fields(self, intended: Dict[str, str]) -> '_VerificationReport':
+        """Classify a set of written fields via read-back.
+
+        Ki and OPc are structurally unreadable — always placed in
+        unreadable_fields when present in *intended*.  All other fields
+        are verified via verify_after_program; results are binned into
+        verified_fields, failed_fields, or verification_error.
+        """
+        _UNREADABLE = {'Ki', 'OPc'}
+        unreadable = tuple(f for f in _UNREADABLE if f in intended)
+        readable_intended = {k: v for k, v in intended.items() if k not in _UNREADABLE}
+
+        if not readable_intended:
+            return _VerificationReport(unreadable_fields=unreadable)
+
+        ok, _msg, readback = self.verify_after_program(readable_intended)
+
+        if not ok and not readback:
+            return _VerificationReport(
+                unreadable_fields=unreadable,
+                verification_error=_msg,
+            )
+
+        verified: List[str] = []
+        failed: List[str] = []
+        for field, expected in readable_intended.items():
+            actual = readback.get(field, '').strip()
+            expected = expected.strip()
+            if not expected:
+                continue
+            if actual and actual == expected:
+                verified.append(field)
+            elif actual and actual != expected:
+                failed.append(field)
+            else:
+                failed.append(field)
+
+        error: Optional[str] = None if ok else _msg
+        return _VerificationReport(
+            verified_fields=tuple(verified),
+            failed_fields=tuple(failed),
+            unreadable_fields=unreadable,
+            verification_error=error,
+        )
 
     def verify_after_program(
             self, written_data: Dict[str, str],
