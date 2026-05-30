@@ -313,3 +313,77 @@ Blank gialersim cards can cause a transient "No card in reader" PCSC response
 immediately after pySim-read releases the reader. `CardWatcher` requires two
 consecutive "No card in reader" probes before firing `on_card_removed()`. This
 prevents spurious card-removal events for blank cards.
+
+---
+
+## Programming Outcome States (ProgramOutcome)
+
+`ProgramOutcome` is a separate, independent dimension from `CardState`. It tracks the
+result of a single programming attempt. It is set by `CardManager` at the end of each
+programming operation and is exposed via `StateManager`. It does NOT drive card presence
+or reader state.
+
+### State Table
+
+| State | Trigger / Meaning |
+| --- | --- |
+| `IDLE` | No programming attempt has been made this session, or the state was explicitly reset. |
+| `NO_CHANGES` | All fields in the CSV row matched the card's current values. No writes were performed. |
+| `ICCID_MISMATCH` | The ICCID read from the physical card does not match the ICCID in the CSV row. Operation was aborted before any write or ADM1 attempt. |
+| `ADM1_LOCKED` | The ADM1 retry counter on the card reached zero before this session. No VERIFY attempted. |
+| `ADM1_AUTH_FAILED` | A VERIFY command was sent and the card rejected it (wrong key). Counter decremented. |
+| `WRITE_FAILED` | ADM1 auth succeeded (or was skipped for blank) but at least one field write failed. |
+| `WRITE_OK_VERIFIED` | All written fields were read back and confirmed to match the intended values. |
+| `WRITE_OK_PENDING` | Writes completed without error, but read-back verification was not performed or was inconclusive (e.g., SPN-only change where SPN read-back is not supported). |
+
+### Required Distinctions
+
+**`ICCID_MISMATCH` vs `ADM1_AUTH_FAILED`**
+
+- `ICCID_MISMATCH`: the operation was aborted before any VERIFY or write. The ADM1 key was never used. The retry counter is unchanged.
+- `ADM1_AUTH_FAILED`: the ICCID matched (or the card is blank), a VERIFY was attempted, and the card rejected it. The retry counter was decremented.
+
+**`ADM1_AUTH_FAILED` vs `ADM1_LOCKED`**
+
+- `ADM1_LOCKED`: the retry counter was already zero when the operation was attempted. No VERIFY was sent. The card is already in a permanently blocked state.
+- `ADM1_AUTH_FAILED`: the retry counter was >0; a VERIFY was sent; the card rejected the key. The counter is now decremented by one.
+
+**`WRITE_OK_VERIFIED` vs `WRITE_OK_PENDING`**
+
+- `WRITE_OK_VERIFIED`: each written field was read back from the card and the value confirmed equal to the intended value. This is the only "clean success" state.
+- `WRITE_OK_PENDING`: writes completed without a pySim-prog error, but at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified.
+
+**No `WRITE_OK_PARTIAL`**
+
+Any partial write failure (some fields written, some not) is `WRITE_FAILED`. There is no `WRITE_OK_PARTIAL` state. A success state (`WRITE_OK_VERIFIED` or `WRITE_OK_PENDING`) means all intended writes completed without error; a failure state means at least one did not.
+
+### Outcome Metadata
+
+Each `ProgramOutcome` may carry a metadata dict with four field-set lists:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `verified_fields` | `list[str]` | Fields written and confirmed by read-back (contributes to WRITE_OK_VERIFIED) |
+| `written_only_fields` | `list[str]` | Fields written but not verified (contributes to WRITE_OK_PENDING) |
+| `skipped_fields` | `list[str]` | Fields where CSV value matched the card — no write needed |
+| `failed_fields` | `list[str]` | Fields where the write was attempted but failed |
+
+For non-write outcomes (`IDLE`, `NO_CHANGES`, `ICCID_MISMATCH`, `ADM1_LOCKED`,
+`ADM1_AUTH_FAILED`) all four lists are empty.
+
+### UI and Artifact Rules
+
+| Outcome | UI colour | Artifact export allowed |
+| --- | --- | --- |
+| `WRITE_OK_VERIFIED` | Green | Yes |
+| `WRITE_OK_PENDING` | Amber | No |
+| `NO_CHANGES` | Neutral | No |
+| `WRITE_FAILED` | Red | No |
+| `ADM1_AUTH_FAILED` | Red | No |
+| `ADM1_LOCKED` | Red | No |
+| `ICCID_MISMATCH` | Red | No |
+| `IDLE` | — (hidden) | No |
+
+Artifacts (per-card export files) may only be produced when `WRITE_OK_VERIFIED` is the
+final outcome. Any other outcome, including `WRITE_OK_PENDING`, must suppress artifact
+generation.
