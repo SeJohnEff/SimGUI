@@ -454,7 +454,7 @@ class TestProgramCardRouting:
         cm = _auth_manager(tmp_path, original_data={})
         with patch.object(cm, '_program_via_pysim_prog',
                           return_value=(True, 'OK')) as mock_prog:
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {'IMSI': '123', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
                 original_data=None)
         mock_prog.assert_called_once()
@@ -466,7 +466,7 @@ class TestProgramCardRouting:
                            original_data={'ICCID': '999', 'IMSI': 'old'})
         with patch.object(cm, '_program_nonempty_card',
                           return_value=(True, 'OK')) as mock_shell:
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {'ICCID': '999', 'IMSI': 'new'},
                 original_data={'ICCID': '999', 'IMSI': 'old'})
         mock_shell.assert_called_once()
@@ -474,7 +474,7 @@ class TestProgramCardRouting:
 
     def test_no_changes_returns_early(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={'IMSI': '123'})
-        ok, msg = cm.program_card(
+        ok, msg, _result = cm.program_card(
             {'IMSI': '123'},
             original_data={'IMSI': '123'})
         assert ok is True
@@ -522,7 +522,7 @@ class TestProgramViaPysimProg:
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')):
             with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {'ICCID': '123'})):
+                              return_value=(True, 'OK', {'ICCID': '123', 'IMSI': '456'})):
                 ok, msg = cm._program_via_pysim_prog(fields)
         assert ok is True
         assert 'verified' in msg.lower()
@@ -591,8 +591,8 @@ class TestProgramCardIntegration:
                           return_value=(True, 'Done', '')) as mock_prog:
             with patch.object(cm, 'verify_after_program',
                               return_value=(True, 'OK',
-                                            {'ICCID': card_data['ICCID']})):
-                ok, msg = cm.program_card(card_data, original_data=None)
+                                            {'ICCID': card_data['ICCID'], 'IMSI': card_data['IMSI']})):
+                ok, msg, _result = cm.program_card(card_data, original_data=None)
 
         assert ok is True
         mock_prog.assert_called_once()
@@ -616,7 +616,7 @@ class TestProgramCardIntegration:
 
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3):
             with patch.object(cm, '_program_nonempty_card', side_effect=capture):
-                ok, msg = cm.program_card(card_data, original_data=orig)
+                ok, msg, _result = cm.program_card(card_data, original_data=orig)
 
         assert ok is True
         changed = captured.get('changed', {})
@@ -631,8 +631,8 @@ class TestProgramCardIntegration:
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')):
             with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, _ = cm.program_card(card_data, original_data=None)
+                              return_value=(True, 'OK', {'IMSI': '123'})):
+                ok, _, _result = cm.program_card(card_data, original_data=None)
         assert ok is True
 
 
@@ -740,7 +740,7 @@ class TestSJA5ProgrammingPath:
             return True, 'OK'
 
         with patch.object(cm, '_program_nonempty_card', side_effect=capture):
-            ok, msg = cm.program_card(card_data, original_data=orig)
+            ok, msg, _result = cm.program_card(card_data, original_data=orig)
 
         assert ok is True
         assert 'SPN' not in captured.get('changed', {})
@@ -860,7 +860,7 @@ class TestProgramNonemptyCard:
 
     def test_failed_verification_blocks_clean_success(self, tmp_path):
         """Verification failure returns ok=True with pending wording — not a clean success."""
-        from widgets.program_sim_panel import ProgramSIMPanel
+        from state_manager import ProgramOutcome
         cm = self._cm(tmp_path)
         orig = dict(cm._original_card_data)
         changed = {'IMSI': '240070000000099'}
@@ -872,7 +872,7 @@ class TestProgramNonemptyCard:
 
         assert ok is True
         assert 'verification pending' in msg.lower() or 'read the card again' in msg.lower()
-        assert ProgramSIMPanel._is_clean_success(ok, msg) is False
+        assert cm.get_last_program_result().outcome != ProgramOutcome.WRITE_OK_VERIFIED
 
     def test_no_change_when_imsi_and_fplmn_equal(self, tmp_path):
         """No commands generated when IMSI and FPLMN equal target — no-op."""

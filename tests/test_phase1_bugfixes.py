@@ -228,7 +228,7 @@ class TestSafetyOverrideCarryForward(unittest.TestCase):
         cm._authenticated_adm1_hex = '3838383838383838'
         cm._safety_override_acknowledged = True
         mock_changed.return_value = {}  # no changes
-        ok, msg = cm.program_card({'IMSI': '001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)
         mock_retry.assert_not_called()
 
@@ -240,7 +240,7 @@ class TestSafetyOverrideCarryForward(unittest.TestCase):
         cm._authenticated_adm1_hex = '3838383838383838'
         cm._safety_override_acknowledged = False
         mock_retry.return_value = 1  # low
-        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001010000000001'})
         self.assertFalse(ok)
         self.assertIn('DANGER', msg)
         mock_retry.assert_called_once()
@@ -374,7 +374,7 @@ class TestBatchFlowNoRetryBurn(unittest.TestCase):
         self.assertTrue(cm._safety_override_acknowledged)
 
         # Step 3: program_card (no changes, but exercises the path)
-        ok, _ = cm.program_card({'IMSI': '001'})
+        ok, _, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)
 
         # check_adm1_retry_counter should NOT have been called

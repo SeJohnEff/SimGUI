@@ -392,3 +392,136 @@ class TestGetLastProgramResult:
         result = mgr.get_last_program_result()
         with pytest.raises(Exception):
             result.outcome = ProgramOutcome.WRITE_FAILED
+
+
+def _make_program_card_manager():
+    """Builds a manager ready to invoke program_card() with all gates open."""
+    mgr = _make_manager()
+    mgr.authenticated = True
+    mgr.card_blocked = False
+    mgr._safety_override_acknowledged = True
+    mgr._original_card_data = {"ICCID": "8924010000000001234", "IMSI": "240010123456789"}
+    mgr._authenticated_adm1_hex = "3838383838383838"
+    return mgr
+
+
+class TestProgramCardWrapper:
+    """Tests for CardManager.program_card() wrapper guardrails and delegation."""
+
+    def test_returns_three_tuple(self):
+        mgr = _make_program_card_manager()
+        mgr.card_blocked = True
+        result = mgr.program_card({"IMSI": "240010123456789"})
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+
+    def test_third_value_matches_get_last_program_result(self):
+        mgr = _make_program_card_manager()
+        mgr.card_blocked = True
+        _, _, returned = mgr.program_card({"IMSI": "240010123456789"})
+        assert returned is mgr.get_last_program_result()
+
+    def test_card_blocked_maps_to_adm1_locked(self):
+        mgr = _make_program_card_manager()
+        mgr.card_blocked = True
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.ADM1_LOCKED
+
+    def test_not_authenticated_maps_to_adm1_auth_failed(self):
+        mgr = _make_program_card_manager()
+        mgr.authenticated = False
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.ADM1_AUTH_FAILED
+
+    def test_backend_not_pysim_maps_to_write_failed(self):
+        mgr = _make_program_card_manager()
+        # Use any non-PYSIM enum member if available; else use a sentinel.
+        from managers.card_manager import CLIBackend as _CB
+        non_pysim = next((b for b in _CB if b != _CB.PYSIM), None)
+        if non_pysim is None:
+            # No alternative backend defined — assign sentinel value.
+            mgr.cli_backend = object()
+        else:
+            mgr.cli_backend = non_pysim
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.WRITE_FAILED
+
+    def test_no_adm1_hex_maps_to_adm1_auth_failed(self):
+        mgr = _make_program_card_manager()
+        mgr._authenticated_adm1_hex = None
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.ADM1_AUTH_FAILED
+
+    def test_retry_counter_zero_maps_to_adm1_locked(self):
+        mgr = _make_program_card_manager()
+        mgr._safety_override_acknowledged = False
+        mgr.check_adm1_retry_counter = MagicMock(return_value=0)
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.ADM1_LOCKED
+        assert mgr.card_blocked is True
+
+    def test_retry_counter_below_two_maps_to_adm1_auth_failed(self):
+        mgr = _make_program_card_manager()
+        mgr._safety_override_acknowledged = False
+        mgr.check_adm1_retry_counter = MagicMock(return_value=1)
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        assert ok is False
+        assert result.outcome == ProgramOutcome.ADM1_AUTH_FAILED
+
+    def test_no_changes_at_program_card_maps_to_no_changes(self):
+        mgr = _make_program_card_manager()
+        # Same data as original_card_data → no diff → NO_CHANGES.
+        ok, msg, result = mgr.program_card(
+            {"ICCID": "8924010000000001234", "IMSI": "240010123456789"}
+        )
+        assert ok is True
+        assert result.outcome == ProgramOutcome.NO_CHANGES
+
+    def test_delegates_to_program_via_pysim_prog_for_empty_card(self):
+        mgr = _make_program_card_manager()
+        # Make _is_empty_card return True by clearing the original snapshot.
+        mgr._original_card_data = {}
+
+        sentinel = ProgramResult(
+            outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="sentinel-prog")
+
+        def _fake_prog(fields):
+            mgr._last_program_result = sentinel
+            return True, "sentinel-prog"
+
+        mgr._program_via_pysim_prog = MagicMock(side_effect=_fake_prog)
+        mgr._program_nonempty_card = MagicMock()
+
+        ok, msg, result = mgr.program_card({"IMSI": "240010123456789"})
+        mgr._program_via_pysim_prog.assert_called_once()
+        mgr._program_nonempty_card.assert_not_called()
+        assert ok is True
+        assert msg == "sentinel-prog"
+        assert result is sentinel
+
+    def test_delegates_to_program_nonempty_card_for_non_empty(self):
+        mgr = _make_program_card_manager()
+
+        sentinel = ProgramResult(
+            outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="sentinel-nonempty")
+
+        def _fake_nonempty(card_data, changed):
+            mgr._last_program_result = sentinel
+            return True, "sentinel-nonempty"
+
+        mgr._program_nonempty_card = MagicMock(side_effect=_fake_nonempty)
+        mgr._program_via_pysim_prog = MagicMock()
+
+        ok, msg, result = mgr.program_card(
+            {"ICCID": "8924010000000001234", "IMSI": "999999999999999"}
+        )
+        mgr._program_nonempty_card.assert_called_once()
+        mgr._program_via_pysim_prog.assert_not_called()
+        assert ok is True
+        assert msg == "sentinel-nonempty"
+        assert result is sentinel

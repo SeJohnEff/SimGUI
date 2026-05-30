@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_manager import CardManager, CLIBackend  # noqa: E402
 from managers.card_watcher import CardWatcher  # noqa: E402
+from state_manager import ProgramOutcome  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +233,7 @@ class TestProgramCardWithVerify:
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "Verification OK",
                                         {"ICCID": "899998", "IMSI": "99988"})):
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {"IMSI": "99988", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
         assert ok is True
@@ -249,12 +250,14 @@ class TestProgramCardWithVerify:
                           return_value=(False,
                                         "Verification FAILED \u2014 IMSI: wrote X, read Y",
                                         {"IMSI": "Y"})):
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {"IMSI": "X", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
-        # pySim-prog reported success — trust it; verify failure yields warning
-        assert ok is True
-        assert "verification pending" in msg.lower() or "read the card again" in msg.lower()
+        # pySim-prog reported success but verify found mismatch → verification failed outcome
+        assert ok is False
+        assert _result.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert "verification mismatch" in msg.lower()
+        assert "IMSI" in msg
 
     def test_program_write_fails_no_verify(self):
         """If pySim-prog write itself fails, verify is never called."""
@@ -265,7 +268,7 @@ class TestProgramCardWithVerify:
              patch.object(cm, '_run_pysim_prog',
                           return_value=(False, "", "sw mismatch 6982")), \
              patch.object(cm, 'verify_after_program') as mock_verify:
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {"IMSI": "99988", "Ki": "aa" * 16, "OPc": "bb" * 16})
 
         assert ok is False
@@ -282,7 +285,7 @@ class TestProgramCardWithVerify:
              mock_program_write_success(cm), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", readback)):
-            ok, msg = cm.program_card({"IMSI": "999880000200001"})
+            ok, msg, _result = cm.program_card({"IMSI": "999880000200001"})
 
         assert ok is True
         assert cm.card_info["ICCID"] == "899998800000000002"
@@ -296,7 +299,7 @@ class TestProgramCardWithVerify:
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
              patch.object(cm, 'verify_after_program') as mock_verify:
-            ok, msg = cm.program_card({"IMSI": "12345"})
+            ok, msg, _result = cm.program_card({"IMSI": "12345"})
 
         assert ok is True
         assert "already matches" in msg.lower()
@@ -309,7 +312,7 @@ class TestProgramCardWithVerify:
         # Production strips SPN before programming, so no fields are written.
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_write_spn_via_shell') as mock_spn:
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {"IMSI": "old_imsi", "SPN": "Teleauora UK",
                  "Ki": "cc" * 16, "OPc": "dd" * 16})
 
@@ -324,7 +327,7 @@ class TestProgramCardWithVerify:
         # Production strips SPN before programming, so no fields are written.
         with patch.object(cm, 'check_adm1_retry_counter', return_value=3), \
              patch.object(cm, '_write_spn_via_shell') as mock_spn:
-            ok, msg = cm.program_card(
+            ok, msg, _result = cm.program_card(
                 {"IMSI": "old_imsi", "SPN": "Teleauora UK",
                  "Ki": "cc" * 16, "OPc": "dd" * 16})
 

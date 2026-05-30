@@ -213,7 +213,7 @@ class BatchManager:
             return CardResult(index, iccid, False, f"Auth failed: {msg}")
 
         # 4. Program
-        ok, msg = self._cm.program_card(card_data)
+        ok, msg, _result = self._cm.program_card(card_data)
         if not ok:
             return CardResult(index, iccid, False, f"Program failed: {msg}")
 

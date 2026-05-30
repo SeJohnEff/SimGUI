@@ -1540,7 +1540,7 @@ class CardManager:
 
     def program_card(self, card_data: Dict[str, str],
                      original_data: Optional[Dict[str, str]] = None
-                     ) -> Tuple[bool, str]:
+                     ) -> Tuple[bool, str, ProgramResult]:
         """Program a card with the given parameters.
 
         For **non-empty cards** (SJA5/SJA2 — already have ICCID/IMSI),
@@ -1556,16 +1556,28 @@ class CardManager:
                 If None, uses self._original_card_data from the last detect.
         """
         if self.card_blocked:
-            return False, (
+            msg = (
                 "Card is PERMANENTLY LOCKED \u2014 cannot program. "
                 "Remove this card and insert a different one."
             )
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.ADM1_LOCKED, message=msg)
+            return False, msg, self._last_program_result
         if not self.authenticated:
-            return False, "Not authenticated"
+            msg = "Not authenticated"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.ADM1_AUTH_FAILED, message=msg)
+            return False, msg, self._last_program_result
         if self.cli_backend != CLIBackend.PYSIM:
-            return False, "Programming not supported for this CLI backend"
+            msg = "Programming not supported for this CLI backend"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED, message=msg)
+            return False, msg, self._last_program_result
         if not self._authenticated_adm1_hex:
-            return False, "No ADM1 key stored \u2014 re-authenticate first"
+            msg = "No ADM1 key stored \u2014 re-authenticate first"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.ADM1_AUTH_FAILED, message=msg)
+            return False, msg, self._last_program_result
 
         # --- Pre-flight: verify ADM1 retry counter is safe ----------------
         # Skip this check if the user already forced past the safety
@@ -1575,16 +1587,22 @@ class CardManager:
             if remaining is not None:
                 if remaining == 0:
                     self.card_blocked = True
-                    return False, (
+                    msg = (
                         "Card is PERMANENTLY LOCKED \u2014 "
                         "ADM1 retry counter is 0. Cannot program."
                     )
+                    self._last_program_result = ProgramResult(
+                        outcome=ProgramOutcome.ADM1_LOCKED, message=msg)
+                    return False, msg, self._last_program_result
                 if remaining < 2:
-                    return False, (
+                    msg = (
                         f"DANGER: Only {remaining} ADM1 attempt(s) remaining. "
                         f"Programming aborted to protect the card. "
                         f"Re-authenticate first to confirm the key is correct."
                     )
+                    self._last_program_result = ProgramResult(
+                        outcome=ProgramOutcome.ADM1_AUTH_FAILED, message=msg)
+                    return False, msg, self._last_program_result
 
         orig = original_data if original_data is not None else self._original_card_data
         empty_card = self._is_empty_card(original_data)
@@ -1608,13 +1626,18 @@ class CardManager:
         changed.pop('SPN', None)
 
         if not changed:
-            return True, "No changes to program \u2014 card data already matches"
+            msg = "No changes to program \u2014 card data already matches"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.NO_CHANGES, message=msg)
+            return True, msg, self._last_program_result
 
         # Brief pause after retry-counter check to let the reader settle
         time.sleep(0.3)
         if empty_card:
-            return self._program_via_pysim_prog(changed)
-        return self._program_nonempty_card(card_data, changed)
+            ok, msg = self._program_via_pysim_prog(changed)
+        else:
+            ok, msg = self._program_nonempty_card(card_data, changed)
+        return ok, msg, self._last_program_result
 
     def _program_via_pysim_prog(self, fields: Dict[str, str]
                                  ) -> Tuple[bool, str]:

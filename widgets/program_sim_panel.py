@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Optional
 
+from state_manager import ProgramOutcome
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget,
@@ -593,21 +595,20 @@ class ProgramSIMPanel(QWidget):
                 self._set_action_status(msg, "error")
                 return
 
-            ok, msg = self._cm.program_card(
+            ok, msg, result = self._cm.program_card(
                 card_data, original_data=self._original_form_data or None)
         finally:
             if self._card_watcher:
                 self._card_watcher.resume()
 
         current_iccid = self._field_entries["ICCID"].text().strip()
+        if result.outcome == ProgramOutcome.NO_CHANGES:
+            self._set_sticky_result(
+                current_iccid,
+                "No changes to program — card already matches CSV data")
+            return
         if ok:
-            if "No changes to program" in msg:
-                # No-op: card already matches — sticky, no popup, no artifact.
-                self._set_sticky_result(
-                    current_iccid,
-                    "No changes to program — card already matches CSV data")
-                return
-            clean = self._is_clean_success(ok, msg)
+            clean = result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
             if clean and callable(getattr(self, 'on_card_programmed_callback', None)):
                 saved_paths = self.on_card_programmed_callback(card_data)
                 if saved_paths:
@@ -615,19 +616,3 @@ class ProgramSIMPanel(QWidget):
             self._set_sticky_result(current_iccid, msg, "success" if clean else "warning")
         else:
             self._set_action_status(msg, "error")
-
-    @staticmethod
-    def _is_clean_success(ok: bool, msg: str) -> bool:
-        """True only when programming fully succeeded with no partial failures.
-
-        Guards artifact saving — any field that failed to write or could not
-        be verified must not trigger the auto-artifact path.
-        """
-        msg_lower = msg.lower()
-        return (
-            ok
-            and "write failed" not in msg_lower
-            and "not verified" not in msg_lower
-            and "verification pending" not in msg_lower
-            and "read the card again" not in msg_lower
-        )
