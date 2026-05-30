@@ -202,3 +202,141 @@ class TestProgramViaPysimProg:
         )
         # verify_after_program called exactly once (inside _verify_written_fields)
         assert mgr.verify_after_program.call_count == 1
+
+
+class TestProgramNonemptyCard:
+    """Tests for _program_nonempty_card (delta programming path) ProgramResult mapping."""
+
+    def _delta(self, mgr, changed, shell_ok=True, shell_stdout="", shell_stderr="",
+               readback_ok=True, readback_data=None):
+        readback_data = readback_data or {}
+        mgr._run_pysim_shell = MagicMock(return_value=(shell_ok, shell_stdout, shell_stderr))
+        mgr._pysim_write_imsi = MagicMock(return_value=["cmd_imsi"])
+        mgr._pysim_write_fplmn = MagicMock(return_value=["cmd_fplmn"])
+        mgr._clean_pysim_error = MagicMock(return_value="error detail")
+        mgr.check_adm1_retry_counter = MagicMock(return_value=3)
+        mgr.verify_after_program = MagicMock(
+            return_value=(readback_ok, "OK" if readback_ok else "read error", readback_data)
+        )
+        return mgr._program_nonempty_card({}, changed)
+
+    def test_no_programmable_fields_no_changes(self):
+        mgr = _make_manager()
+        mgr._run_pysim_shell = MagicMock()
+        ok, msg = mgr._program_nonempty_card({}, {})
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.NO_CHANGES
+        mgr._run_pysim_shell.assert_not_called()
+
+    def test_ki_opc_only_in_changed_is_no_changes(self):
+        mgr = _make_manager()
+        mgr._run_pysim_shell = MagicMock()
+        ok, msg = mgr._program_nonempty_card({}, {"Ki": "aabb", "OPc": "ccdd"})
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.NO_CHANGES
+        mgr._run_pysim_shell.assert_not_called()
+
+    def test_verified_write_ok_verified_ok_true(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+        assert "IMSI" in mgr._last_program_result.verified_fields
+        assert "verified" in msg
+
+    def test_verification_error_maps_to_pending_ok_true(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_ok=False, readback_data={},
+        )
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_PENDING
+
+    def test_readback_mismatch_maps_to_verification_failed_ok_false(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "999999999999999"},
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert "verification mismatch" in msg
+        assert "IMSI" in msg
+
+    def test_auth_failure_shell_output_maps_to_write_failed(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            shell_ok=False, shell_stdout="failed to verify adm1",
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_FAILED
+        assert "ABORTED" in msg or "ADM1" in msg
+
+    def test_tries_left_shell_output_maps_to_write_failed(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            shell_ok=False, shell_stdout="3 tries left",
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_FAILED
+
+    def test_sw_mismatch_maps_to_write_failed(self):
+        mgr = _make_manager()
+        ok, msg = self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            shell_ok=False, shell_stderr="sw mismatch: expected 9000",
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_FAILED
+
+    def test_ki_opc_not_passed_to_verifier(self):
+        mgr = _make_manager()
+        self._delta(
+            mgr, {"IMSI": "240010123456789", "Ki": "aabb", "OPc": "ccdd"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        call_args = mgr.verify_after_program.call_args[0][0]
+        assert "Ki" not in call_args
+        assert "OPc" not in call_args
+
+    def test_ki_opc_absent_from_program_result_tuples(self):
+        mgr = _make_manager()
+        self._delta(
+            mgr, {"IMSI": "240010123456789", "Ki": "aabb", "OPc": "ccdd"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        r = mgr._last_program_result
+        all_fields = r.verified_fields + r.written_only_fields + r.skipped_fields + r.failed_fields
+        assert "Ki" not in all_fields
+        assert "OPc" not in all_fields
+
+    def test_card_info_updated_on_verified_success(self):
+        mgr = _make_manager()
+        self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert mgr.card_info.get("IMSI") == "240010123456789"
+
+    def test_card_info_not_updated_on_mismatch(self):
+        mgr = _make_manager()
+        mgr.card_info = {"IMSI": "original"}
+        self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "999999999999999"},
+        )
+        assert mgr.card_info.get("IMSI") == "original"
+
+    def test_verify_after_program_not_called_directly(self):
+        mgr = _make_manager()
+        self._delta(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert mgr.verify_after_program.call_count == 1

@@ -1797,7 +1797,12 @@ class CardManager:
             fields_written.append('FPLMN')
 
         if not commands:
-            return True, "No programmable fields changed"
+            msg = "No programmable fields changed"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.NO_CHANGES,
+                message=msg,
+            )
+            return True, msg
 
         cmd_str = '\n'.join(commands)
         logger.info("Programming non-empty card via pySim-shell: fields=%s", fields_written)
@@ -1808,19 +1813,49 @@ class CardManager:
 
         if ok:
             summary = ', '.join(fields_written)
-            # Verify only the fields that were actually written
             verify_data = {f: changed[f] for f in fields_written}
-            v_ok, v_msg, v_data = self.verify_after_program(verify_data)
-            if v_ok:
-                if v_data:
-                    for k, v in v_data.items():
-                        self.card_info[k] = v
-                return True, f"Card programmed and verified: {summary}"
-            logger.warning("Card programmed but verification failed: %s", v_msg)
-            return True, (
-                f"Card programmed: {summary}\n"
-                "(Verification pending \u2014 read the card again to confirm.)"
+            report = self._verify_written_fields(verify_data)
+
+            if report.failed_fields:
+                msg = (
+                    f"Programming succeeded but verification mismatch on: "
+                    f"{', '.join(report.failed_fields)}"
+                )
+                self._last_program_result = ProgramResult(
+                    outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED,
+                    message=msg,
+                    verified_fields=tuple(report.verified_fields),
+                    failed_fields=tuple(report.failed_fields),
+                    written_only_fields=(),
+                    skipped_fields=(),
+                )
+                return False, msg
+
+            if report.verification_error is not None:
+                msg = (
+                    f"Card programmed: {summary}\n"
+                    "(Verification pending — read the card again to confirm.)"
+                )
+                self._last_program_result = ProgramResult(
+                    outcome=ProgramOutcome.WRITE_OK_PENDING,
+                    message=msg,
+                    written_only_fields=(),
+                    skipped_fields=(),
+                )
+                return True, msg
+
+            if report.readback_data:
+                for k, v in report.readback_data.items():
+                    self.card_info[k] = v
+            msg = f"Card programmed and verified: {summary}"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+                message=msg,
+                verified_fields=tuple(report.verified_fields),
+                written_only_fields=(),
+                skipped_fields=(),
             )
+            return True, msg
 
         combined = (stdout + '\n' + stderr).lower()
         # ADM1 auth failure detected in pySim-shell output (even with exit 0).
@@ -1834,16 +1869,35 @@ class CardManager:
                 remaining_msg = f" ({remaining} attempt(s) remaining)"
                 if remaining == 0:
                     self.card_blocked = True
-            return False, (
+            msg = (
                 f"Programming ABORTED — ADM1 authentication failed.{remaining_msg} "
                 f"3 wrong attempts = permanent card lock!"
             )
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED,
+                message=msg,
+                failed_fields=tuple(fields_written),
+            )
+            return False, msg
+
         if 'sw mismatch' in combined:
             error_detail = self._clean_pysim_error(stderr) if stderr else "write error"
-            return False, f"Programming failed (write error): {error_detail}"
+            msg = f"Programming failed (write error): {error_detail}"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED,
+                message=msg,
+                failed_fields=tuple(fields_written),
+            )
+            return False, msg
 
         error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
-        return False, f"Programming failed: {error_msg}"
+        msg = f"Programming failed: {error_msg}"
+        self._last_program_result = ProgramResult(
+            outcome=ProgramOutcome.WRITE_FAILED,
+            message=msg,
+            failed_fields=tuple(fields_written),
+        )
+        return False, msg
 
     _VERIFY_RETRIES = 2
     _VERIFY_DELAY_S = 1.0  # seconds between retries
