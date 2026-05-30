@@ -335,6 +335,7 @@ or reader state.
 | `WRITE_FAILED` | ADM1 auth succeeded (or was skipped for blank) but at least one field write failed. |
 | `WRITE_OK_VERIFIED` | All written fields were read back and confirmed to match the intended values. |
 | `WRITE_OK_PENDING` | Writes completed without error, but read-back verification was not performed or was inconclusive (e.g., SPN-only change where SPN read-back is not supported). |
+| `WRITE_OK_VERIFICATION_FAILED` | Write command reported success; read-back verification ran; at least one readable intended field value mismatches the intended value. |
 
 ### Required Distinctions
 
@@ -348,10 +349,18 @@ or reader state.
 - `ADM1_LOCKED`: the retry counter was already zero when the operation was attempted. No VERIFY was sent. The card is already in a permanently blocked state.
 - `ADM1_AUTH_FAILED`: the retry counter was >0; a VERIFY was sent; the card rejected the key. The counter is now decremented by one.
 
-**`WRITE_OK_VERIFIED` vs `WRITE_OK_PENDING`**
+**`WRITE_OK_VERIFIED` vs `WRITE_OK_VERIFICATION_FAILED` vs `WRITE_OK_PENDING`**
 
-- `WRITE_OK_VERIFIED`: each written field was read back from the card and the value confirmed equal to the intended value. This is the only "clean success" state.
-- `WRITE_OK_PENDING`: writes completed without a pySim-prog error, but at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified.
+These three outcomes share the same write-phase result (writer/CLI reported success) and differ only in what read-back verification found:
+
+- `WRITE_OK_VERIFIED`: verification ran; every readable intended field matched the intended value. This is the only "clean success" state.
+- `WRITE_OK_VERIFICATION_FAILED`: verification ran; at least one readable intended field value mismatches the intended value. The write command did not error, but the card data does not match what was requested. `failed_fields` is populated. `ok=False`, `clean_success=False`, `artifact_allowed=False`.
+- `WRITE_OK_PENDING`: verification could not run or was inconclusive — at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified.
+
+**`WRITE_FAILED` vs `WRITE_OK_VERIFICATION_FAILED`**
+
+- `WRITE_FAILED`: the failure occurred during the write phase — the writer/CLI/APDU reported an error. No read-back was attempted or needed.
+- `WRITE_OK_VERIFICATION_FAILED`: the write phase completed without error; the failure was detected during the subsequent read-back phase.
 
 **No `WRITE_OK_PARTIAL`**
 
@@ -377,6 +386,7 @@ For non-write outcomes (`IDLE`, `NO_CHANGES`, `ICCID_MISMATCH`, `ADM1_LOCKED`,
 | --- | --- | --- |
 | `WRITE_OK_VERIFIED` | Green | Yes |
 | `WRITE_OK_PENDING` | Amber | No |
+| `WRITE_OK_VERIFICATION_FAILED` | Red | No |
 | `NO_CHANGES` | Neutral | No |
 | `WRITE_FAILED` | Red | No |
 | `ADM1_AUTH_FAILED` | Red | No |

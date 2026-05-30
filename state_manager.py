@@ -73,6 +73,7 @@ class ProgramOutcome(Enum):
     WRITE_FAILED = auto()
     WRITE_OK_VERIFIED = auto()
     WRITE_OK_PENDING = auto()
+    WRITE_OK_VERIFICATION_FAILED = auto()
 
 
 @dataclass(frozen=True)
