@@ -212,8 +212,9 @@ class TestSPNStrippedBeforeProgramCall(unittest.TestCase):
             return True, "ok"
 
         def fake_program_card(card_data, original_data=None):
+            from state_manager import ProgramOutcome, ProgramResult
             received_card_data.update(card_data)
-            return True, "Card programmed — verified: IMSI"
+            return True, "Card programmed — verified: IMSI", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Card programmed — verified: IMSI")
 
         panel._cm.authenticate = fake_authenticate
         panel._cm.program_card = fake_program_card
@@ -244,13 +245,18 @@ class TestCardManagerDropsSPN(unittest.TestCase):
         passed_fields = {}
 
         def fake_program_via(fields):
+            from state_manager import ProgramResult, ProgramOutcome
             passed_fields.update(fields)
+            cm._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+                message="Card programmed — verified: IMSI, ACC"
+            )
             return True, "Card programmed — verified: IMSI, ACC"
 
         cm._program_via_pysim_prog = fake_program_via
         cm.check_adm1_retry_counter = MagicMock(return_value=5)
 
-        ok, msg = cm.program_card(card_data)
+        ok, msg, _result = cm.program_card(card_data)
 
         self.assertTrue(ok)
         self.assertNotIn("SPN", passed_fields,
@@ -267,7 +273,7 @@ class TestCardManagerDropsSPN(unittest.TestCase):
 
         cm._run_pysim_prog = fake_run_pysim_prog
         cm.verify_after_program = MagicMock(return_value=(
-            True, "OK", {"IMSI": "240010000000002", "ICCID": "8946001234567890123"}))
+            True, "OK", {"IMSI": "240010000000002", "ICCID": "8946001234567890123", "ACC": "0800"}))
 
         fields = {"IMSI": "240010000000002", "SPN": "ShouldNotReach", "ACC": "0800"}
         ok, msg = cm._program_via_pysim_prog(fields)
@@ -290,7 +296,7 @@ class TestCardManagerDropsSPN(unittest.TestCase):
             "IMSI": "240010000000001",
             "SPN": "NewOperatorName",
         }
-        ok, msg = cm.program_card(card_data)
+        ok, msg, _result = cm.program_card(card_data)
 
         self.assertTrue(ok)
         self.assertIn("No changes", msg)

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from managers.card_manager import CardManager, CardType, CLIBackend
+from state_manager import ProgramOutcome
 
 
 class TestCardManagerInit:
@@ -65,7 +66,7 @@ class TestCardManagerOperations:
         assert card_manager.read_card_data() is None
 
     def test_program_card_unauthenticated(self, card_manager):
-        ok, msg = card_manager.program_card({})
+        ok, msg, _result = card_manager.program_card({})
         assert ok is False
 
     def test_disconnect(self, card_manager):
@@ -467,7 +468,7 @@ class TestWriteSpnViaShell:
         ok, msg = cm._program_via_pysim_prog(
             {'SPN': 'MyNetwork', 'IMSI': '001010123456789'})
         assert ok is True
-        assert ProgramSIMPanel._is_clean_success(ok, msg) is True
+        assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFIED
 
 
 class TestEncodeSpnRaw:

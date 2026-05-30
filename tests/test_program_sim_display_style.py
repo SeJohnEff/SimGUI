@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from widgets.program_sim_panel import ProgramSIMPanel
+from state_manager import ProgramOutcome, ProgramResult
 
 
 # ---------------------------------------------------------------------------
@@ -36,9 +37,15 @@ def panel(qapp):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_program(panel, ok, msg):
-    """Set program_card return value, capture _set_action_status calls."""
-    panel._cm.program_card.return_value = (ok, msg)
+def _run_program(panel, ok, msg, outcome=None):
+    """Set program_card return value, capture _set_action_status calls.
+
+    outcome: explicit ProgramOutcome. If None, defaults to WRITE_OK_VERIFIED if ok else WRITE_FAILED.
+    """
+    if outcome is None:
+        outcome = ProgramOutcome.WRITE_OK_VERIFIED if ok else ProgramOutcome.WRITE_FAILED
+    result = ProgramResult(outcome=outcome, message=msg)
+    panel._cm.program_card.return_value = (ok, msg, result)
     calls = []
     panel._set_action_status = lambda m, s="normal": calls.append((m, s))
     panel._on_program()
@@ -59,7 +66,7 @@ class TestProgramResultDisplayStyle:
 
     def test_partial_failure_shows_warning_style(self, panel):
         msg = "Card programmed — verified: ICCID, IMSI; SPN: write failed, not verified"
-        calls = _run_program(panel, True, msg)
+        calls = _run_program(panel, True, msg, outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED)
         assert calls, "expected _set_action_status to be called"
         assert calls[-1][1] == "warning"
 

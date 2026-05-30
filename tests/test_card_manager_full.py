@@ -115,7 +115,7 @@ class TestProgramCard:
         """program_card() returns failure when not authenticated (hardware)."""
         cm = CardManager()
         cm.authenticated = False
-        ok, msg = cm.program_card({"IMSI": "123"})
+        ok, msg, _result = cm.program_card({"IMSI": "123"})
         assert ok is False
         assert "Not authenticated" in msg
 
@@ -123,7 +123,7 @@ class TestProgramCard:
         """program_card() fails without CLI backend even when authenticated."""
         cm = CardManager()
         cm.authenticated = True
-        ok, msg = cm.program_card({"IMSI": "123"})
+        ok, msg, _result = cm.program_card({"IMSI": "123"})
         assert ok is False
         assert 'not supported' in msg.lower() or 'no adm1' in msg.lower()
 
@@ -139,14 +139,14 @@ class TestProgramCard:
              patch.object(cm, '_run_pysim_shell', return_value=(True, "ok", "")), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", {"IMSI": "new_imsi"})):
-            ok, msg = cm.program_card({"IMSI": "new_imsi"})
+            ok, msg, _result = cm.program_card({"IMSI": "new_imsi"})
         assert ok is True
 
     def test_program_unauthenticated_lowercase_key(self):
         """program_card() fails when not authenticated (lowercase field key)."""
         cm = CardManager()
         cm.authenticated = False
-        ok, msg = cm.program_card({"imsi": "x"})
+        ok, msg, _result = cm.program_card({"imsi": "x"})
         assert ok is False
 
     def test_program_multiple_changed_fields(self):
@@ -166,7 +166,7 @@ class TestProgramCard:
                           return_value=(True, "ok", "")) as mock_shell, \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", data)):
-            ok, msg = cm.program_card(data)
+            ok, msg, _result = cm.program_card(data)
         assert ok is True
         mock_shell.assert_called_once()
 

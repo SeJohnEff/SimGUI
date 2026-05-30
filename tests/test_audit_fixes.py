@@ -19,6 +19,7 @@ Issues addressed:
 import csv
 import io
 import os
+import sys
 import tempfile
 import textwrap
 import threading
@@ -26,6 +27,10 @@ import time
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from state_manager import ProgramOutcome, ProgramResult  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -112,7 +117,7 @@ class TestBatchProcessOnePaths:
         cm.detect_card.return_value = (True, "detected")
         cm.read_iccid.return_value = None
         cm.authenticate.return_value = (True, "authenticated")
-        cm.program_card.return_value = (False, "flash write error")
+        cm.program_card.return_value = (False, "flash write error", ProgramResult(outcome=ProgramOutcome.WRITE_FAILED, message="flash write error"))
         cm.verify_card.return_value = (True, [])
 
         bm = BatchManager(cm)
@@ -137,7 +142,7 @@ class TestBatchProcessOnePaths:
         cm.detect_card.return_value = (True, "detected")
         cm.read_iccid.return_value = None
         cm.authenticate.return_value = (True, "authenticated")
-        cm.program_card.return_value = (True, "programmed")
+        cm.program_card.return_value = (True, "programmed", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="programmed"))
         cm.verify_card.return_value = (False, ["IMSI: expected 001, got 999"])
 
         bm = BatchManager(cm)
@@ -157,7 +162,7 @@ class TestBatchProcessOnePaths:
         cm.detect_card.return_value = (True, "detected")
         cm.read_iccid.return_value = None
         cm.authenticate.return_value = (True, "authenticated")
-        cm.program_card.return_value = (True, "programmed")
+        cm.program_card.return_value = (True, "programmed", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="programmed"))
         cm.verify_card.return_value = (False, [])  # empty list
 
         bm = BatchManager(cm)
@@ -839,7 +844,7 @@ class TestIntegrationVerification:
         cm.detect_card.return_value = (True, "detected")
         cm.read_iccid.return_value = None
         cm.authenticate.return_value = (True, "ok")
-        cm.program_card.return_value = (True, "ok")
+        cm.program_card.return_value = (True, "ok", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="ok"))
         cm.verify_card.return_value = (False, ["IMSI mismatch: got 111, expected 222",
                                                "Ki mismatch: got AAA, expected BBB"])
 

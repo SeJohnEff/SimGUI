@@ -185,7 +185,7 @@ class TestSkippedFieldWarnings:
 
         with patch.object(cm, '_run_pysim_prog', side_effect=capture):
             with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
+                              return_value=(True, 'OK', {'IMSI': '999880000200001'})):
                 ok, _ = cm._program_via_pysim_prog(
                     {'IMSI': '999880000200001', 'PIN1': '1234', 'PUK1': '12345678'})
 
@@ -197,7 +197,7 @@ class TestSkippedFieldWarnings:
         """ADM1 is stripped before being forwarded to pySim-prog."""
         cm = _auth_manager(tmp_path, card_type=CardType.SJA5)
 
-        ok, msg = cm.program_card(
+        ok, msg, _result = cm.program_card(
             {'IMSI': '123', 'ADM1': '88888888'},
             original_data={})
 
@@ -396,8 +396,13 @@ class TestExtraFieldsAfterPysimProg:
         with patch.object(cm, '_run_pysim_prog',
                           return_value=(True, 'Done', '')) as mock_prog:
             with patch.object(cm, 'verify_after_program',
-                              return_value=(True, 'OK', {})):
-                ok, msg = cm.program_card(card_data, original_data=None)
+                              return_value=(True, 'OK', {
+                                  'ICCID': card_data['ICCID'],
+                                  'IMSI': card_data['IMSI'],
+                                  'ACC': card_data['ACC'],
+                                  'FPLMN': card_data['FPLMN'],
+                              })):
+                ok, msg, _result = cm.program_card(card_data, original_data=None)
 
         assert ok is True
         mock_prog.assert_called_once()

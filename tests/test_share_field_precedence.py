@@ -230,8 +230,9 @@ class TestOnProgramMergesExtras:
         captured = {}
 
         def fake_program_card(card_data, original_data=None):
+            from state_manager import ProgramOutcome, ProgramResult
             captured.update(card_data)
-            return True, "OK"
+            return True, "OK", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="OK")
 
         stub._cm.authenticate.return_value = (True, "OK")
         stub._cm.program_card.side_effect = fake_program_card

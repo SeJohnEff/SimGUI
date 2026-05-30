@@ -1,19 +1,24 @@
 """Tests for managers.batch_manager module."""
 
+import os
+import sys
 import threading
 import time
 
 import pytest
 from unittest.mock import MagicMock
 
-from managers.batch_manager import BatchManager, BatchState, CardResult
-from managers.card_manager import CardManager
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from managers.batch_manager import BatchManager, BatchState, CardResult  # noqa: E402
+from managers.card_manager import CardManager  # noqa: E402
+from state_manager import ProgramOutcome, ProgramResult  # noqa: E402
 
 
 def _slow_program(*_args, **_kwargs):
     """Introduce a small delay so abort/pause tests can fire before batch completes."""
     time.sleep(0.005)
-    return (True, "Programmed")
+    return (True, "Programmed", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Programmed"))
 
 
 @pytest.fixture

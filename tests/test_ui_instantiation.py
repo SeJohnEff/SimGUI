@@ -26,6 +26,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 _PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
 
+from state_manager import ProgramOutcome, ProgramResult  # noqa: E402
+
 pytestmark = pytest.mark.skip(reason="tkinter mocking incompatible with PyQt6 migration")
 
 
@@ -771,7 +773,7 @@ class TestProgramSIMPanelInstantiation:
         for key, _, _ in mod._FORM_FIELDS:
             panel._field_vars[key].set("testvalue")
         cm.authenticate.return_value = (True, "Authenticated")
-        cm.program_card.return_value = (True, "Programmed")
+        cm.program_card.return_value = (True, "Programmed", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Programmed"))
         panel._on_program()
         cm.program_card.assert_called_once()
 
@@ -781,7 +783,7 @@ class TestProgramSIMPanelInstantiation:
         panel._step = 1
         panel._field_vars["ADM1"].set("testvalue")
         cm.authenticate.return_value = (True, "Authenticated")
-        cm.program_card.return_value = (False, "Program failed")
+        cm.program_card.return_value = (False, "Program failed", ProgramResult(outcome=ProgramOutcome.WRITE_FAILED, message="Program failed"))
         panel._on_program()
 
     def test_load_csv_file_no_data(self):

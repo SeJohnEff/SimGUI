@@ -123,7 +123,7 @@ class TestBlockedCardDetection(unittest.TestCase):
         cm.card_blocked = True
         cm.authenticated = True
         cm._authenticated_adm1_hex = '3838383838383838'
-        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001010000000001'})
         self.assertFalse(ok)
         self.assertIn('PERMANENTLY LOCKED', msg)
 
@@ -526,7 +526,7 @@ class TestProgramCardBlockedGuard(unittest.TestCase):
 
     def test_program_card_refuses_blocked(self):
         cm = self._make_card_manager()
-        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001010000000001'})
         self.assertFalse(ok)
         self.assertIn('PERMANENTLY LOCKED', msg)
 
@@ -536,7 +536,7 @@ class TestProgramCardBlockedGuard(unittest.TestCase):
         cm.card_blocked = False
         # Will fail later because no actual card, but should pass the blocked check
         with patch.object(cm, '_compute_changed_fields', return_value={}):
-            ok, msg = cm.program_card({'IMSI': '001'})
+            ok, msg, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)
         self.assertIn('No changes', msg)
 
@@ -569,7 +569,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
     def test_refuses_when_counter_is_zero(self, mock_retry):
         cm = self._make_card_manager()
         mock_retry.return_value = 0
-        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001010000000001'})
         self.assertFalse(ok)
         self.assertIn('PERMANENTLY LOCKED', msg)
         self.assertTrue(cm.card_blocked)
@@ -578,7 +578,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
     def test_refuses_when_counter_is_one(self, mock_retry):
         cm = self._make_card_manager()
         mock_retry.return_value = 1
-        ok, msg = cm.program_card({'IMSI': '001010000000001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001010000000001'})
         self.assertFalse(ok)
         self.assertIn('DANGER', msg)
         self.assertIn('1', msg)
@@ -589,7 +589,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         cm = self._make_card_manager()
         mock_retry.return_value = 2
         mock_changed.return_value = {}  # No changes
-        ok, msg = cm.program_card({'IMSI': '001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)  # Passes safety check, no changes to write
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -598,7 +598,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         cm = self._make_card_manager()
         mock_retry.return_value = 3
         mock_changed.return_value = {}  # No changes
-        ok, msg = cm.program_card({'IMSI': '001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)  # Passes safety check
 
     @patch('managers.card_manager.CardManager.check_adm1_retry_counter')
@@ -608,7 +608,7 @@ class TestProgramCardRetryCounterSafety(unittest.TestCase):
         cm = self._make_card_manager()
         mock_retry.return_value = None
         mock_changed.return_value = {}  # No changes
-        ok, msg = cm.program_card({'IMSI': '001'})
+        ok, msg, _result = cm.program_card({'IMSI': '001'})
         self.assertTrue(ok)  # None means we can't check, so allow
 
 
@@ -1076,7 +1076,7 @@ class TestWrongADMPySimOutput(unittest.TestCase):
         self.assertFalse(ok)
         self.assertFalse(cm.authenticated)
 
-        ok_prog, msg_prog = cm.program_card(
+        ok_prog, msg_prog, _result_prog = cm.program_card(
             {'IMSI': '001010000000099', 'FPLMN': '24001'})
         self.assertFalse(ok_prog)
         self.assertIn('authenticated', msg_prog.lower())
@@ -1109,7 +1109,7 @@ class TestWrongADMPySimOutput(unittest.TestCase):
         mock_safe.return_value = (False, self.FAILED_VERIFY_STDOUT, '')
 
         cm.authenticate('88888888')
-        ok, _ = cm.program_card({'IMSI': '001010000000099'})
+        ok, _, _result = cm.program_card({'IMSI': '001010000000099'})
 
         self.assertFalse(ok, "Must not return success after ADM authentication failure")
 

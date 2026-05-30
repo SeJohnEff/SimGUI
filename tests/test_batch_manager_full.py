@@ -11,14 +11,19 @@ Covers:
 - CardResult dataclass
 """
 
+import os
+import sys
 import threading
 import time
 
 import pytest
 from unittest.mock import MagicMock
 
-from managers.batch_manager import BatchManager, BatchState, CardResult
-from managers.card_manager import CardManager
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from managers.batch_manager import BatchManager, BatchState, CardResult  # noqa: E402
+from managers.card_manager import CardManager  # noqa: E402
+from state_manager import ProgramOutcome, ProgramResult  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,7 +36,7 @@ def _mock_manager():
     cm.detect_card.return_value = (True, "Card detected")
     cm.read_iccid.return_value = None  # no ICCID cross-check by default
     cm.authenticate.return_value = (True, "Authenticated")
-    cm.program_card.return_value = (True, "Programmed successfully")
+    cm.program_card.return_value = (True, "Programmed successfully", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Programmed successfully"))
     cm.verify_card.return_value = (True, [])
     return cm
 

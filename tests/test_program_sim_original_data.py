@@ -97,8 +97,9 @@ class TestOriginalFormDataNotSetFromTargetData:
         calls = []
 
         def _fake_program(card_data, original_data=None):
+            from state_manager import ProgramOutcome, ProgramResult
             calls.append(original_data)
-            return True, "ok"
+            return True, "ok", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="ok")
 
         cm.program_card = _fake_program
         cm.authenticate = MagicMock(return_value=(True, "ok"))
@@ -155,7 +156,7 @@ class TestSJA5DeltaWithImsiChange:
         cm._program_nonempty_card = _fake_program_nonempty
 
         # original_data=None → CardManager uses _original_card_data
-        ok, msg = cm.program_card(card_data, original_data=None)
+        ok, msg, _result = cm.program_card(card_data, original_data=None)
 
         assert "changed" in captured, "_program_nonempty_card was not called"
         assert "IMSI" in captured["changed"], (

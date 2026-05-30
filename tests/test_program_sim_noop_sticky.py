@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from state_manager import CardState, CardInfo, StateManager
+from state_manager import CardState, CardInfo, StateManager, ProgramOutcome, ProgramResult
 from widgets.program_sim_panel import ProgramSIMPanel
 
 NOOP_MSG_FROM_MANAGER = "No changes to program — card data already matches"
@@ -45,7 +45,7 @@ def _put_card_in_panel(panel: ProgramSIMPanel, sm: StateManager, iccid: str = "8
 def _simulate_noop(panel: ProgramSIMPanel, cm: MagicMock, iccid: str):
     """Wire card manager to return no-op and call _on_program."""
     cm.authenticate.return_value = (True, "OK")
-    cm.program_card.return_value = (True, NOOP_MSG_FROM_MANAGER)
+    cm.program_card.return_value = (True, NOOP_MSG_FROM_MANAGER, ProgramResult(outcome=ProgramOutcome.NO_CHANGES, message=NOOP_MSG_FROM_MANAGER))
     panel._step = 1
     panel._field_entries["ICCID"].setText(iccid)
     panel._field_entries["ADM1"].setText("88888888")
@@ -217,7 +217,7 @@ class TestStickyCleared_DifferentIccid:
 class TestSuccessSticky:
     def _simulate_success(self, panel, cm, iccid):
         cm.authenticate.return_value = (True, "OK")
-        cm.program_card.return_value = (True, "Programming complete")
+        cm.program_card.return_value = (True, "Programming complete", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Programming complete"))
         panel._step = 1
         panel._field_entries["ICCID"].setText(iccid)
         panel._field_entries["ADM1"].setText("88888888")
@@ -260,7 +260,7 @@ class TestOnCardDetectedStickyGuard:
         panel, cm = _make_panel(sm)
         _put_card_in_panel(panel, sm, self._ICCID)
         cm.authenticate.return_value = (True, "OK")
-        cm.program_card.return_value = (True, "Programming complete")
+        cm.program_card.return_value = (True, "Programming complete", ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED, message="Programming complete"))
         panel._step = 1
         panel._on_program()
         success_text = _action_text(panel)
