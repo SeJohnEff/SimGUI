@@ -353,9 +353,9 @@ or reader state.
 
 These three outcomes share the same write-phase result (writer/CLI reported success) and differ only in what read-back verification found:
 
-- `WRITE_OK_VERIFIED`: verification ran; every readable intended field matched the intended value. This is the only "clean success" state.
-- `WRITE_OK_VERIFICATION_FAILED`: verification ran; at least one readable intended field value mismatches the intended value. The write command did not error, but the card data does not match what was requested. `failed_fields` is populated. `ok=False`, `clean_success=False`, `artifact_allowed=False`.
-- `WRITE_OK_PENDING`: verification could not run or was inconclusive — at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified.
+- `WRITE_OK_VERIFIED`: verification ran; every readable intended field matched the intended value. This is the only "clean success" state. Artifact generation is allowed. UI shows green success.
+- `WRITE_OK_VERIFICATION_FAILED`: verification ran; at least one readable intended field value mismatches the intended value. The write command did not error, but the card data does not match what was requested. `failed_fields` is populated. No artifact is generated. UI shows red failure.
+- `WRITE_OK_PENDING`: verification could not run or was inconclusive — at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified. No artifact is generated. UI shows amber warning.
 
 **`WRITE_FAILED` vs `WRITE_OK_VERIFICATION_FAILED`**
 

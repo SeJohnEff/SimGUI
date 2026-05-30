@@ -100,10 +100,12 @@ Manages share mount points — both discovery and connection. Provides:
 
 ### AutoArtifactManager
 
-Writes per-card programming records to network shares. After each successful `program_card()` in a batch:
+Writes per-card programming records to network shares. After each `program_card()` with outcome `ProgramOutcome.WRITE_OK_VERIFIED` (clean success with full verification):
 - Builds a CSV row from the card data (ICCID, IMSI, Ki, OPc, ADM1, ACC, SPN, FPLMN, PIN/PUK, timestamp)
 - Writes `{ICCID}_{YYYYMMDD_HHMMSS}.csv` to `auto-artifact/` on every connected share
 - `was_already_programmed(iccid)` checks for existing artifacts (duplicate detection)
+
+No artifacts are produced for `WRITE_OK_PENDING`, `WRITE_OK_VERIFICATION_FAILED`, `WRITE_FAILED`, or any other non-verified outcome.
 
 ### CardWatcher
 
@@ -157,6 +159,37 @@ SimGUI uses a signal-based architecture for cross-component communication. `Stat
 **Pattern:** Manager does work → MainWindow updates StateManager → Signal fires → Widgets react. Widgets NEVER call managers directly. They read StateManager properties and react to signals. Widgets never import each other — they subscribe to StateManager signals.
 
 Only `MainWindow` (the controller) writes to StateManager. This ensures a single point of state mutation and prevents tangled dependencies between UI components.
+
+---
+
+## Programming result contract (CardManager.program_card)
+
+`CardManager.program_card()` returns a 3-tuple:
+
+```python
+(ok: bool, msg: str, result: ProgramResult) = cm.program_card(card_data)
+```
+
+The **`ProgramResult` object is the canonical source of truth** for programming outcomes. Do not infer state from the message text or the `ok` boolean.
+
+**Key rules:**
+
+1. **`ok` boolean** — High-level success flag (`True` = write phase completed without CLI error; `False` = write or ADM1 failure). Do not use this to determine artifact eligibility or clean success.
+
+2. **`msg` string** — Human-readable status message for UI display. Do **not** parse this string to infer state (e.g., checking for "verified", "written", "pending"). Use only for display.
+
+3. **`result.outcome`** — `ProgramOutcome` enum (IDLE, NO_CHANGES, ICCID_MISMATCH, ADM1_LOCKED, ADM1_AUTH_FAILED, WRITE_FAILED, WRITE_OK_VERIFIED, WRITE_OK_PENDING, WRITE_OK_VERIFICATION_FAILED). This is the **authoritative result state**.
+
+**Artifact eligibility:**
+
+Only `ProgramOutcome.WRITE_OK_VERIFIED` is eligible for artifact generation. `WRITE_OK_PENDING` (incomplete verification) and all failure outcomes produce no artifacts.
+
+**StateManager emission:**
+
+- `program_result_changed` signal emits the `ProgramResult` for all outcomes
+- `card_programmed` signal emits only when outcome is `WRITE_OK_VERIFIED`
+
+See `docs/reference/state-machine.md` (ProgramOutcome section) for the full outcome glossary.
 
 ---
 
