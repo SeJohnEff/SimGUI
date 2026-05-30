@@ -12,7 +12,23 @@ import subprocess
 import sys
 
 
-_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"]
+_BASE_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"]
+
+
+def _inprocess_enabled() -> bool:
+    """Phase 1 spike: in-process pySim path is opt-in via env var."""
+    return os.environ.get("SIMGUI_WORKER_INPROCESS") == "1"
+
+
+def _capabilities() -> list:
+    caps = list(_BASE_CAPABILITIES)
+    if _inprocess_enabled():
+        caps.append("program_full")
+    return caps
+
+
+# Backwards-compatible alias for callers/tests that read the list directly.
+_CAPABILITIES = _BASE_CAPABILITIES
 
 # --- session state ---
 _card_gen = 0
@@ -257,6 +273,36 @@ def _handle_authenticate(req_id, params):
     _write({"id": req_id, "ok": False, "error": error, "msg": msg})
 
 
+def _handle_program_full(req_id, params):
+    """In-process full-provisioning prototype. Gated by SIMGUI_WORKER_INPROCESS=1."""
+    if not _inprocess_enabled():
+        _write({"id": req_id, "ok": False, "error": "INPROCESS_DISABLED"})
+        return
+
+    p = params or {}
+    fields = p.get("fields")
+    adm1_hex = p.get("adm1_hex")
+    if not isinstance(fields, dict) or not isinstance(adm1_hex, str) or not adm1_hex:
+        _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST"})
+        return
+
+    reader_index = p.get("reader_index", 0)
+
+    try:
+        import card_worker_inproc as _inproc
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
+        return
+
+    try:
+        ok, stdout, stderr = _inproc.program_full(fields, adm1_hex, reader_index)
+    except _inproc.PysimImportError as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
+        return
+
+    _write({"id": req_id, "ok": bool(ok), "stdout": stdout, "stderr": stderr})
+
+
 def _handle(line: str) -> bool:
     """Parse one request line and write one response. Returns False to stop."""
     try:
@@ -273,7 +319,7 @@ def _handle(line: str) -> bool:
     elif verb == "status":
         _write({"id": req_id, "ok": True, "result": {"status": "idle", "pid": os.getpid()}})
     elif verb == "capabilities":
-        _write({"id": req_id, "ok": True, "result": _CAPABILITIES})
+        _write({"id": req_id, "ok": True, "result": _capabilities()})
     elif verb == "shutdown":
         _write({"id": req_id, "ok": True})
         return False
@@ -283,6 +329,8 @@ def _handle(line: str) -> bool:
         _handle_detect(req_id, req.get("params"))
     elif verb == "authenticate":
         _handle_authenticate(req_id, req.get("params"))
+    elif verb == "program_full":
+        _handle_program_full(req_id, req.get("params"))
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 
