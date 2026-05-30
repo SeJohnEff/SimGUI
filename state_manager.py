@@ -59,6 +59,33 @@ class CardState(Enum):
     NOT_POWERED = auto()   # Card physically present but not powered; re-seat required
 
 
+class ProgramOutcome(Enum):
+    """Result of a single programming attempt.
+
+    Canonical vocabulary defined in docs/reference/state-machine.md
+    (Programming Outcome States). Independent of CardState.
+    """
+    IDLE = auto()
+    NO_CHANGES = auto()
+    ICCID_MISMATCH = auto()
+    ADM1_LOCKED = auto()
+    ADM1_AUTH_FAILED = auto()
+    WRITE_FAILED = auto()
+    WRITE_OK_VERIFIED = auto()
+    WRITE_OK_PENDING = auto()
+
+
+@dataclass(frozen=True)
+class ProgramResult:
+    """Immutable result of a single programming attempt."""
+    outcome: ProgramOutcome = ProgramOutcome.IDLE
+    message: str = ""
+    verified_fields: tuple[str, ...] = ()
+    written_only_fields: tuple[str, ...] = ()
+    skipped_fields: tuple[str, ...] = ()
+    failed_fields: tuple[str, ...] = ()
+
+
 # ---------------------------------------------------------------------------
 # Lightweight data containers
 # ---------------------------------------------------------------------------

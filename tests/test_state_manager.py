@@ -24,9 +24,13 @@ import pytest
 # QCoreApplication is sufficient for signal/slot testing (no GUI needed)
 from PyQt6.QtCore import QCoreApplication
 
+import dataclasses
+
 from state_manager import (
     CardInfo,
     CardState,
+    ProgramOutcome,
+    ProgramResult,
     ShareStatus,
     StateManager,
 )
@@ -536,3 +540,84 @@ class TestWorkflowSequence:
         sm.card_state = CardState.DETECTED
         sm.update_card_info(iccid="89460000", source_file="/mnt/nas/fiskarheden/cards.csv")
         assert sm.card_info.source_file == "/mnt/nas/fiskarheden/cards.csv"
+
+
+# ---------------------------------------------------------------------------
+# ProgramOutcome / ProgramResult schema (Phase 1 — schema only)
+# ---------------------------------------------------------------------------
+
+CANONICAL_PROGRAM_OUTCOMES = {
+    "IDLE",
+    "NO_CHANGES",
+    "ICCID_MISMATCH",
+    "ADM1_LOCKED",
+    "ADM1_AUTH_FAILED",
+    "WRITE_FAILED",
+    "WRITE_OK_VERIFIED",
+    "WRITE_OK_PENDING",
+}
+
+
+def test_program_outcome_members_match_canonical_set():
+    """ProgramOutcome must contain exactly the names defined in
+    docs/reference/state-machine.md — no more, no less."""
+    actual = {m.name for m in ProgramOutcome}
+    assert actual == CANONICAL_PROGRAM_OUTCOMES
+
+
+def test_program_result_defaults():
+    r = ProgramResult()
+    assert r.outcome is ProgramOutcome.IDLE
+    assert r.message == ""
+    assert r.verified_fields == ()
+    assert r.written_only_fields == ()
+    assert r.skipped_fields == ()
+    assert r.failed_fields == ()
+
+
+def test_program_result_is_frozen():
+    r = ProgramResult()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        r.outcome = ProgramOutcome.WRITE_OK_VERIFIED  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        r.message = "nope"  # type: ignore[misc]
+
+
+def test_program_result_field_tuples_preserve_order():
+    r = ProgramResult(
+        outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+        verified_fields=("IMSI", "Ki", "OPc"),
+        written_only_fields=("SPN",),
+        skipped_fields=("ACC", "FPLMN"),
+        failed_fields=(),
+    )
+    assert r.verified_fields == ("IMSI", "Ki", "OPc")
+    assert r.written_only_fields == ("SPN",)
+    assert r.skipped_fields == ("ACC", "FPLMN")
+    assert r.failed_fields == ()
+
+
+def test_program_result_asdict_schema_keys():
+    r = ProgramResult()
+    keys = set(dataclasses.asdict(r).keys())
+    assert keys == {
+        "outcome",
+        "message",
+        "verified_fields",
+        "written_only_fields",
+        "skipped_fields",
+        "failed_fields",
+    }
+
+
+def test_non_write_outcome_has_empty_field_tuples():
+    """Non-write outcomes (e.g. ICCID_MISMATCH) carry empty field tuples per
+    docs/reference/state-machine.md."""
+    r = ProgramResult(
+        outcome=ProgramOutcome.ICCID_MISMATCH,
+        message="ICCID on card does not match CSV row",
+    )
+    assert r.verified_fields == ()
+    assert r.written_only_fields == ()
+    assert r.skipped_fields == ()
+    assert r.failed_fields == ()
