@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 from managers.card_manager import CardManager, CardType, CLIBackend
 
 
+from state_manager import ProgramOutcome, ProgramResult
+
+
 def _make_manager():
     mgr = CardManager.__new__(CardManager)
     mgr.cli_backend = CLIBackend.PYSIM
@@ -13,6 +16,8 @@ def _make_manager():
     mgr._pcsc_reader_index = 0
     mgr._VERIFY_RETRIES = 1
     mgr._VERIFY_DELAY_S = 0
+    mgr._last_program_result = ProgramResult()
+    mgr._authenticated_adm1_hex = None
     return mgr
 
 
@@ -80,3 +85,120 @@ class TestVerifyWrittenFields:
         assert "Ki" in report.unreadable_fields
         assert "OPc" in report.unreadable_fields
         assert "ICCID" in report.verified_fields
+
+
+class TestProgramViaPysimProg:
+    """Tests for _program_via_pysim_prog outcome mapping."""
+
+    def _prog(self, mgr, fields, run_ok=True, run_stderr="",
+              readback_ok=True, readback_data=None):
+        """Patch _run_pysim_prog and verify_after_program, call the method."""
+        readback_data = readback_data or {}
+        mgr._run_pysim_prog = MagicMock(return_value=(run_ok, "", run_stderr))
+        mgr.verify_after_program = MagicMock(
+            return_value=(readback_ok, "OK" if readback_ok else "read error", readback_data)
+        )
+        return mgr._program_via_pysim_prog(fields)
+
+    def test_verified_outcome_and_ok_true(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+        assert "verified" in msg
+
+    def test_ki_opc_in_written_only_fields(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"Ki": "aabb", "OPc": "ccdd", "IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert ok is True
+        r = mgr._last_program_result
+        assert "Ki" in r.written_only_fields
+        assert "OPc" in r.written_only_fields
+
+    def test_ki_opc_only_maps_to_pending(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(mgr, {"Ki": "aabb", "OPc": "ccdd"})
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_PENDING
+        assert "Verification pending" in msg
+
+    def test_mismatch_write_ok_verification_failed_and_ok_false(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "999999999999999"},
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert "verification mismatch" in msg
+        assert "IMSI" in msg
+
+    def test_readback_error_maps_to_pending_ok_true(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_ok=False, readback_data={},
+        )
+        assert ok is True
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_OK_PENDING
+
+    def test_spn_in_skipped_fields(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789", "SPN": "TestNet"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        assert ok is True
+        assert "SPN" in mgr._last_program_result.skipped_fields
+
+    def test_write_failure_write_failed_and_ok_false(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            run_ok=False, run_stderr="some error",
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_FAILED
+
+    def test_tool_not_found_still_write_failed(self):
+        mgr = _make_manager()
+        ok, msg = self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            run_ok=False, run_stderr="pySim-prog.py not found",
+        )
+        assert ok is False
+        assert mgr._last_program_result.outcome == ProgramOutcome.WRITE_FAILED
+        assert "not found" in msg
+
+    def test_card_info_updated_on_verified(self):
+        mgr = _make_manager()
+        self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789", "ICCID": "8924010000000001234"},
+        )
+        assert mgr.card_info.get("IMSI") == "240010123456789"
+        assert mgr.card_info.get("ICCID") == "8924010000000001234"
+
+    def test_card_info_not_updated_on_mismatch(self):
+        mgr = _make_manager()
+        mgr.card_info = {"IMSI": "original"}
+        self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "999999999999999"},
+        )
+        assert mgr.card_info.get("IMSI") == "original"
+
+    def test_no_double_verify_after_program_on_verified(self):
+        mgr = _make_manager()
+        self._prog(
+            mgr, {"IMSI": "240010123456789"},
+            readback_data={"IMSI": "240010123456789"},
+        )
+        # verify_after_program called exactly once (inside _verify_written_fields)
+        assert mgr.verify_after_program.call_count == 1

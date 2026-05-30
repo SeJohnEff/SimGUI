@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 from utils.validation import validate_adm1
 from pysim_parser import parse_pysim_output as _parse_pysim_output_fn
+from state_manager import ProgramOutcome, ProgramResult
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class _VerificationReport:
     failed_fields: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
     unreadable_fields: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
     verification_error: Optional[str] = None
+    readback_data: Dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 class CardType(Enum):
@@ -486,6 +488,7 @@ class CardManager:
         self._worker_client = None
         self._current_session_id: Optional[str] = None
         self._current_card_gen: Optional[int] = None
+        self._last_program_result: ProgramResult = ProgramResult()
         logger.info(
             "CardManager init: backend=%s, cli_path=%s, venv_python=%s, bundled_python=%s",
             self.cli_backend.name, self.cli_path, self._venv_python, self._bundled_python,
@@ -1615,6 +1618,7 @@ class CardManager:
         """
         fields = fields.copy()
         fields.pop('ADM1', None)
+        spn_skipped = 'SPN' in fields
         fields.pop('SPN', None)
         summary = ', '.join(k for k in fields) or 'all fields'
         logger.info("Programming card via pySim-prog: %s", summary)
@@ -1622,43 +1626,90 @@ class CardManager:
         ok, stdout, stderr = self._run_pysim_prog(
             fields, self._authenticated_adm1_hex, timeout=60)
 
-        if ok:
-            v_ok, v_msg, v_data = self.verify_after_program(fields)
-            if v_ok:
-                if v_data:
-                    for k, v in v_data.items():
-                        self.card_info[k] = v
-                # "verified" = confirmed by fresh pySim-read output only.
-                # Key material (Ki, OPc) cannot be read back \u2014 report separately.
-                _key_material = frozenset({'Ki', 'OPc'})
-                verified = [
-                    k for k in fields
-                    if k not in _key_material
-                    and v_data.get(k, '').strip() == fields[k].strip()
-                ]
-                written_only = [k for k in fields if k in _key_material]
-                parts = []
-                if verified:
-                    parts.append(f"verified: {', '.join(verified)}")
-                if written_only:
-                    parts.append(f"written: {', '.join(written_only)}")
-                if parts:
-                    return True, f"Card programmed \u2014 {'; '.join(parts)}"
-                return True, (
-                    "Card programmed\n"
-                    "(Verification pending \u2014 read the card again to confirm.)"
-                )
-            logger.warning("pySim-prog OK but read-back failed: %s", v_msg)
-            return True, (
+        if not ok:
+            if 'not found' in stderr.lower():
+                msg = "pySim-prog.py not found \u2014 cannot program card"
+            else:
+                error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
+                msg = f"Programming failed: {error_msg}"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED,
+                message=msg,
+                failed_fields=tuple(fields.keys()),
+                skipped_fields=("SPN",) if spn_skipped else (),
+            )
+            return False, msg
+
+        report = self._verify_written_fields(fields)
+
+        skipped = ("SPN",) if spn_skipped else ()
+
+        if report.failed_fields:
+            msg = (
+                f"Programming succeeded but verification mismatch on: "
+                f"{', '.join(report.failed_fields)}"
+            )
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED,
+                message=msg,
+                verified_fields=tuple(report.verified_fields),
+                written_only_fields=tuple(report.unreadable_fields),
+                skipped_fields=skipped,
+                failed_fields=tuple(report.failed_fields),
+            )
+            return False, msg
+
+        if report.verification_error is not None:
+            msg = (
                 f"Card programmed: {summary}\n"
                 "(Verification pending \u2014 read the card again to confirm.)"
             )
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_PENDING,
+                message=msg,
+                written_only_fields=tuple(report.unreadable_fields),
+                skipped_fields=skipped,
+            )
+            return True, msg
 
-        if 'not found' in stderr.lower():
-            return False, "pySim-prog.py not found \u2014 cannot program card"
+        # Ki/OPc-only write: nothing was verified by read-back \u2014 pending
+        if not report.verified_fields and report.unreadable_fields:
+            msg = (
+                f"Card programmed: {summary}\n"
+                "(Verification pending \u2014 read the card again to confirm.)"
+            )
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_PENDING,
+                message=msg,
+                written_only_fields=tuple(report.unreadable_fields),
+                skipped_fields=skipped,
+            )
+            return True, msg
 
-        error_msg = self._clean_pysim_error(stderr) if stderr else "Programming failed"
-        return False, f"Programming failed: {error_msg}"
+        # WRITE_OK_VERIFIED \u2014 merge card_info from read-back captured in report
+        if report.readback_data:
+            for k, v in report.readback_data.items():
+                self.card_info[k] = v
+
+        parts = []
+        if report.verified_fields:
+            parts.append(f"verified: {', '.join(report.verified_fields)}")
+        if report.unreadable_fields:
+            parts.append(f"written: {', '.join(report.unreadable_fields)}")
+        msg = (
+            f"Card programmed \u2014 {'; '.join(parts)}"
+            if parts
+            else "Card programmed\n(Verification pending \u2014 read the card again to confirm.)"
+        )
+        self._last_program_result = ProgramResult(
+            outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+            message=msg,
+            verified_fields=tuple(report.verified_fields),
+            written_only_fields=tuple(report.unreadable_fields),
+            skipped_fields=skipped,
+            failed_fields=(),
+        )
+        return True, msg
 
     # ------------------------------------------------------------------
     # pySim-shell write command builders (non-empty / SJA5 cards)
@@ -1840,6 +1891,7 @@ class CardManager:
             failed_fields=tuple(failed),
             unreadable_fields=unreadable,
             verification_error=error,
+            readback_data=readback if ok else {},
         )
 
     def verify_after_program(
