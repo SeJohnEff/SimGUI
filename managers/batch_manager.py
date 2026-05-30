@@ -11,6 +11,7 @@ from enum import Enum, auto
 from typing import Callable, Dict, List, Optional
 
 from managers.card_manager import CardManager
+from state_manager import ProgramOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +26,22 @@ class BatchState(Enum):
 
 
 class CardResult:
-    """Outcome for a single card in the batch."""
+    """Outcome for a single card in the batch.
 
-    __slots__ = ("index", "iccid", "success", "message")
+    ``success`` is the legacy bool (True = no hard failure).
+    ``outcome`` is the canonical ProgramOutcome — use it to distinguish
+    WRITE_OK_VERIFIED from NO_CHANGES, WRITE_OK_PENDING, etc.
+    """
 
-    def __init__(self, index: int, iccid: str, success: bool, message: str):
+    __slots__ = ("index", "iccid", "success", "message", "outcome")
+
+    def __init__(self, index: int, iccid: str, success: bool, message: str,
+                 outcome: ProgramOutcome = ProgramOutcome.IDLE):
         self.index = index
         self.iccid = iccid
         self.success = success
         self.message = message
+        self.outcome = outcome
 
 
 class BatchManager:
@@ -133,6 +141,25 @@ class BatchManager:
     def fail_count(self) -> int:
         return sum(1 for r in self.results if not r.success)
 
+    # Outcome-aware counts — use these instead of success_count for
+    # distinguishing verified writes from no-ops and pending writes.
+    @property
+    def verified_count(self) -> int:
+        return sum(1 for r in self.results if r.outcome == ProgramOutcome.WRITE_OK_VERIFIED)
+
+    @property
+    def no_change_count(self) -> int:
+        return sum(1 for r in self.results if r.outcome == ProgramOutcome.NO_CHANGES)
+
+    @property
+    def pending_count(self) -> int:
+        return sum(1 for r in self.results if r.outcome == ProgramOutcome.WRITE_OK_PENDING)
+
+    @property
+    def verification_failed_count(self) -> int:
+        return sum(1 for r in self.results
+                   if r.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED)
+
     # ---- internal thread -----------------------------------------------
 
     def _run(self) -> None:
@@ -201,7 +228,8 @@ class BatchManager:
         if card_iccid and card_iccid != iccid:
             return CardResult(
                 index, iccid, False,
-                f"ICCID mismatch: expected {iccid}, got {card_iccid}")
+                f"ICCID mismatch: expected {iccid}, got {card_iccid}",
+                outcome=ProgramOutcome.ICCID_MISMATCH)
 
         # 3. Authenticate
         # In batch mode we trust the CSV-provided ADM1 key — force past
@@ -210,17 +238,20 @@ class BatchManager:
         ok, msg = self._cm.authenticate(
             adm1, force=True, expected_iccid=iccid)
         if not ok:
-            return CardResult(index, iccid, False, f"Auth failed: {msg}")
+            return CardResult(index, iccid, False, f"Auth failed: {msg}",
+                              outcome=ProgramOutcome.ADM1_AUTH_FAILED)
 
         # 4. Program
-        ok, msg, _result = self._cm.program_card(card_data)
+        ok, msg, prog_result = self._cm.program_card(card_data)
         if not ok:
-            return CardResult(index, iccid, False, f"Program failed: {msg}")
+            return CardResult(index, iccid, False, f"Program failed: {msg}",
+                              outcome=prog_result.outcome)
 
         # 5. Verify
         ok, mismatches = self._cm.verify_card(card_data)
         if not ok:
             detail = "; ".join(mismatches) if mismatches else "verification failed"
-            return CardResult(index, iccid, False, f"Verify failed: {detail}")
+            return CardResult(index, iccid, False, f"Verify failed: {detail}",
+                              outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED)
 
-        return CardResult(index, iccid, True, "Programmed successfully")
+        return CardResult(index, iccid, True, msg, outcome=prog_result.outcome)

@@ -94,6 +94,157 @@ class TestCardResult:
         with pytest.raises(AttributeError):
             r.extra_field = "bad"
 
+    def test_default_outcome_is_idle(self):
+        """CardResult without explicit outcome defaults to IDLE."""
+        r = CardResult(0, "89123", True, "OK")
+        assert r.outcome == ProgramOutcome.IDLE
+
+    def test_explicit_outcome_stored(self):
+        """CardResult stores an explicitly supplied outcome."""
+        r = CardResult(0, "89123", True, "OK",
+                       outcome=ProgramOutcome.WRITE_OK_VERIFIED)
+        assert r.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+
+
+# ---------------------------------------------------------------------------
+# Outcome propagation through _process_one
+# ---------------------------------------------------------------------------
+
+class TestOutcomePropagation:
+    """_process_one propagates ProgramOutcome into CardResult.outcome."""
+
+    def _run_single(self, cm) -> CardResult:
+        bm = BatchManager(cm)
+        _run_to_completion(bm, _make_batch(1))
+        return bm.results[0]
+
+    def test_write_ok_verified_propagated(self):
+        """Successful program → WRITE_OK_VERIFIED outcome."""
+        cm = _mock_manager()
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+        assert r.success is True
+
+    def test_no_changes_propagated(self):
+        """NO_CHANGES from program_card → outcome=NO_CHANGES, success=True."""
+        cm = _mock_manager()
+        cm.program_card.return_value = (
+            True, "No changes",
+            ProgramResult(outcome=ProgramOutcome.NO_CHANGES, message="No changes"))
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.NO_CHANGES
+        assert r.success is True
+
+    def test_write_ok_pending_propagated(self):
+        """WRITE_OK_PENDING from program_card → outcome=WRITE_OK_PENDING, success=True."""
+        cm = _mock_manager()
+        cm.program_card.return_value = (
+            True, "Written",
+            ProgramResult(outcome=ProgramOutcome.WRITE_OK_PENDING, message="Written"))
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.WRITE_OK_PENDING
+        assert r.success is True
+
+    def test_write_ok_verification_failed_from_program(self):
+        """WRITE_OK_VERIFICATION_FAILED from program_card → success=False, outcome propagated."""
+        cm = _mock_manager()
+        cm.program_card.return_value = (
+            False, "Verification failed",
+            ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED))
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert r.success is False
+
+    def test_post_program_verify_card_failure(self):
+        """verify_card failure after programming → WRITE_OK_VERIFICATION_FAILED."""
+        cm = _mock_manager()
+        cm.verify_card.return_value = (False, ["IMSI mismatch"])
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert r.success is False
+
+    def test_detect_failure_outcome_is_idle(self):
+        """Detect failure → outcome=IDLE (no programming attempted)."""
+        cm = _mock_manager()
+        cm.detect_card.return_value = (False, "No card")
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.IDLE
+        assert r.success is False
+
+    def test_iccid_mismatch_outcome(self):
+        """ICCID mismatch → outcome=ICCID_MISMATCH."""
+        cm = _mock_manager()
+        cm.read_iccid.return_value = "9999999999999999999"  # wrong ICCID
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.ICCID_MISMATCH
+        assert r.success is False
+
+    def test_auth_failure_outcome(self):
+        """Auth failure → outcome=ADM1_AUTH_FAILED."""
+        cm = _mock_manager()
+        cm.authenticate.return_value = (False, "Wrong key")
+        r = self._run_single(cm)
+        assert r.outcome == ProgramOutcome.ADM1_AUTH_FAILED
+        assert r.success is False
+
+
+# ---------------------------------------------------------------------------
+# Outcome-aware count properties
+# ---------------------------------------------------------------------------
+
+class TestOutcomeCounts:
+    """Outcome-aware summary counts on BatchManager."""
+
+    def test_verified_count(self):
+        """verified_count counts only WRITE_OK_VERIFIED results."""
+        bm = BatchManager(_mock_manager())
+        bm.results = [
+            CardResult(0, "A", True, "ok", outcome=ProgramOutcome.WRITE_OK_VERIFIED),
+            CardResult(1, "B", True, "ok", outcome=ProgramOutcome.NO_CHANGES),
+            CardResult(2, "C", True, "ok", outcome=ProgramOutcome.WRITE_OK_PENDING),
+        ]
+        assert bm.verified_count == 1
+
+    def test_no_change_count(self):
+        """no_change_count counts NO_CHANGES outcomes; not in verified_count."""
+        bm = BatchManager(_mock_manager())
+        bm.results = [
+            CardResult(0, "A", True, "ok", outcome=ProgramOutcome.WRITE_OK_VERIFIED),
+            CardResult(1, "B", True, "ok", outcome=ProgramOutcome.NO_CHANGES),
+        ]
+        assert bm.no_change_count == 1
+        assert bm.verified_count == 1
+
+    def test_pending_count(self):
+        """pending_count counts WRITE_OK_PENDING results."""
+        bm = BatchManager(_mock_manager())
+        bm.results = [
+            CardResult(0, "A", True, "ok", outcome=ProgramOutcome.WRITE_OK_PENDING),
+            CardResult(1, "B", True, "ok", outcome=ProgramOutcome.WRITE_OK_VERIFIED),
+        ]
+        assert bm.pending_count == 1
+
+    def test_verification_failed_count(self):
+        """verification_failed_count counts WRITE_OK_VERIFICATION_FAILED."""
+        bm = BatchManager(_mock_manager())
+        bm.results = [
+            CardResult(0, "A", False, "err",
+                       outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED),
+            CardResult(1, "B", True, "ok", outcome=ProgramOutcome.WRITE_OK_VERIFIED),
+        ]
+        assert bm.verification_failed_count == 1
+
+    def test_legacy_success_fail_count_unchanged(self):
+        """success_count / fail_count still reflect the success bool."""
+        bm = BatchManager(_mock_manager())
+        bm.results = [
+            CardResult(0, "A", True, "ok", outcome=ProgramOutcome.WRITE_OK_VERIFIED),
+            CardResult(1, "B", True, "ok", outcome=ProgramOutcome.NO_CHANGES),
+            CardResult(2, "C", False, "err", outcome=ProgramOutcome.ADM1_AUTH_FAILED),
+        ]
+        assert bm.success_count == 2
+        assert bm.fail_count == 1
+
 
 # ---------------------------------------------------------------------------
 # BatchManager initial state
