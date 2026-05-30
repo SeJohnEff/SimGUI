@@ -321,6 +321,31 @@ class PersistentWorkerClient:
             msg=resp.get("msg"),
         )
 
+    def capabilities(self, timeout: float = 2.0) -> list:
+        """Return the worker's capability list."""
+        resp = self.send("capabilities", timeout=timeout)
+        result = resp.get("result")
+        if not isinstance(result, list):
+            raise WorkerProtocolError(str(resp))
+        return result
+
+    def program_full(
+        self,
+        fields: Dict[str, Any],
+        adm1_hex: str,
+        reader_index: int = 0,
+        timeout: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Send program_full request; returns raw response dict with ok/stdout/stderr/worker_error."""
+        resp = self.send(
+            "program_full",
+            params={"fields": fields, "adm1_hex": adm1_hex, "reader_index": reader_index},
+            timeout=timeout + 1.0,
+        )
+        if "ok" not in resp and "error" not in resp:
+            raise WorkerProtocolError(str(resp))
+        return resp
+
     def read_fields(
         self,
         session_id: str,

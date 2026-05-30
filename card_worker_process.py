@@ -276,14 +276,14 @@ def _handle_authenticate(req_id, params):
 def _handle_program_full(req_id, params):
     """In-process full-provisioning prototype. Gated by SIMGUI_WORKER_INPROCESS=1."""
     if not _inprocess_enabled():
-        _write({"id": req_id, "ok": False, "error": "INPROCESS_DISABLED"})
+        _write({"id": req_id, "ok": False, "error": "INPROCESS_DISABLED", "worker_error": True})
         return
 
     p = params or {}
     fields = p.get("fields")
     adm1_hex = p.get("adm1_hex")
     if not isinstance(fields, dict) or not isinstance(adm1_hex, str) or not adm1_hex:
-        _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST"})
+        _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST", "worker_error": True})
         return
 
     reader_index = p.get("reader_index", 0)
@@ -291,16 +291,16 @@ def _handle_program_full(req_id, params):
     try:
         import card_worker_inproc as _inproc
     except Exception as exc:
-        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc), "worker_error": True})
         return
 
     try:
         ok, stdout, stderr = _inproc.program_full(fields, adm1_hex, reader_index)
     except _inproc.PysimImportError as exc:
-        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc), "worker_error": True})
         return
 
-    _write({"id": req_id, "ok": bool(ok), "stdout": stdout, "stderr": stderr})
+    _write({"id": req_id, "ok": bool(ok), "stdout": stdout, "stderr": stderr, "worker_error": False})
 
 
 def _handle(line: str) -> bool:

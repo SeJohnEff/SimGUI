@@ -79,7 +79,7 @@ def test_handler_disabled_by_default(monkeypatch):
     _send({"id": 1, "verb": "program_full",
            "params": {"fields": {"IMSI": "001010000000001"}, "adm1_hex": "3838383838383838"}})
 
-    assert responses == [{"id": 1, "ok": False, "error": "INPROCESS_DISABLED"}]
+    assert responses == [{"id": 1, "ok": False, "error": "INPROCESS_DISABLED", "worker_error": True}]
 
 
 def test_handler_routes_when_flag_set(monkeypatch):
@@ -145,7 +145,7 @@ def test_handler_invalid_request(monkeypatch):
 
     _send({"id": 5, "verb": "program_full", "params": {"fields": {"IMSI": "x"}}})
 
-    assert responses[0] == {"id": 5, "ok": False, "error": "INVALID_REQUEST"}
+    assert responses[0] == {"id": 5, "ok": False, "error": "INVALID_REQUEST", "worker_error": True}
 
 
 def test_handler_pysim_import_failed(monkeypatch):

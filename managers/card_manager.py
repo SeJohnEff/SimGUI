@@ -486,6 +486,7 @@ class CardManager:
         self._safety_override_acknowledged: bool = False  # Set by authenticate(force=True)
         self._probe_thread: Optional[threading.Thread] = None  # in-flight PCSC probe guard
         self._worker_client = None
+        self._cached_worker_capabilities: Optional[List[str]] = None
         self._current_session_id: Optional[str] = None
         self._current_card_gen: Optional[int] = None
         self._last_program_result: ProgramResult = ProgramResult()
@@ -506,10 +507,55 @@ class CardManager:
 
     def set_worker_client(self, client) -> None:
         self._worker_client = client
+        self._cached_worker_capabilities = None
 
     def set_worker_session(self, session_id, card_gen) -> None:
         self._current_session_id = session_id
         self._current_card_gen = card_gen
+
+    def _get_worker_capabilities(self) -> List[str]:
+        if getattr(self, "_cached_worker_capabilities", None) is not None:
+            return self._cached_worker_capabilities
+        client = getattr(self, "_worker_client", None)
+        if client is None:
+            return []
+        try:
+            caps = client.capabilities()
+        except Exception as exc:
+            logger.warning("Worker capabilities() failed: %s", exc)
+            return []
+        self._cached_worker_capabilities = caps
+        return caps
+
+    def _try_worker_program_full(
+        self, fields: Dict[str, str]
+    ) -> Optional[Tuple[bool, str, str]]:
+        client = getattr(self, "_worker_client", None)
+        if client is None:
+            return None
+        if not client.is_alive():
+            return None
+        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            return None
+        if "program_full" not in self._get_worker_capabilities():
+            return None
+        try:
+            resp = client.program_full(
+                fields,
+                self._authenticated_adm1_hex,
+                reader_index=self._pcsc_reader_index,
+                timeout=60.0,
+            )
+        except Exception as exc:
+            logger.warning("Worker program_full transport error: %s", exc)
+            return None
+        if resp.get("worker_error"):
+            logger.warning("Worker returned worker_error=True: %s", resp.get("error"))
+            return None
+        ok = bool(resp.get("ok"))
+        stdout = resp.get("stdout", "")
+        stderr = resp.get("stderr", "")
+        return (ok, stdout, stderr)
 
     def get_last_program_result(self) -> ProgramResult:
         """Return the result of the most recent programming attempt.
@@ -1656,8 +1702,12 @@ class CardManager:
         summary = ', '.join(k for k in fields) or 'all fields'
         logger.info("Programming card via pySim-prog: %s", summary)
 
-        ok, stdout, stderr = self._run_pysim_prog(
-            fields, self._authenticated_adm1_hex, timeout=60)
+        worker_result = self._try_worker_program_full(fields)
+        if worker_result is None:
+            ok, stdout, stderr = self._run_pysim_prog(
+                fields, self._authenticated_adm1_hex, timeout=60)
+        else:
+            ok, stdout, stderr = worker_result
 
         if not ok:
             if 'not found' in stderr.lower():
