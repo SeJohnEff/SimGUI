@@ -9,6 +9,7 @@ Covers:
 
 import os
 import sys
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -38,6 +39,14 @@ PYSIM_READ_OUTPUT_NO_ICCID = """\
 IMSI: 999880000200001
 ACC: 0001
 """
+
+
+@contextmanager
+def mock_program_write_success(cm):
+    """Patch both write backends so the write phase always reports success."""
+    with patch.object(cm, '_run_pysim_prog', return_value=(True, "ok", "")), \
+         patch.object(cm, '_run_pysim_shell', return_value=(True, "ok", "")):
+        yield
 
 
 def _make_hw_card_manager(cli_path="/opt/pysim"):
@@ -219,8 +228,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, "ok", "")), \
+             mock_program_write_success(cm), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "Verification OK",
                                         {"ICCID": "899998", "IMSI": "99988"})):
@@ -236,8 +244,7 @@ class TestProgramCardWithVerify:
 
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, "ok", "")), \
+             mock_program_write_success(cm), \
              patch.object(cm, 'verify_after_program',
                           return_value=(False,
                                         "Verification FAILED \u2014 IMSI: wrote X, read Y",
@@ -272,8 +279,7 @@ class TestProgramCardWithVerify:
         readback = {"ICCID": "899998800000000002", "IMSI": "999880000200001"}
         with patch.object(cm, 'check_adm1_retry_counter',
                           return_value=3), \
-             patch.object(cm, '_run_pysim_prog',
-                          return_value=(True, "ok", "")), \
+             mock_program_write_success(cm), \
              patch.object(cm, 'verify_after_program',
                           return_value=(True, "OK", readback)):
             ok, msg = cm.program_card({"IMSI": "999880000200001"})
