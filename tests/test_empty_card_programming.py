@@ -536,7 +536,7 @@ class TestProgramViaPysimProg:
                               return_value=(False, 'read failed', {})):
                 ok, msg = cm._program_via_pysim_prog({'IMSI': '456'})
         assert ok is True
-        assert 're-insert' in msg.lower() or 'could not confirm' in msg.lower()
+        assert 'verification pending' in msg.lower() or 'read the card again' in msg.lower()
 
     def test_prog_failure_returns_error(self, tmp_path):
         cm = _auth_manager(tmp_path, original_data={})
@@ -859,7 +859,7 @@ class TestProgramNonemptyCard:
         assert 'OPc' not in verify_arg
 
     def test_failed_verification_blocks_clean_success(self, tmp_path):
-        """Verification failure returns ok=False with 'not verified' — blocks artifact."""
+        """Verification failure returns ok=True with pending wording — not a clean success."""
         from widgets.program_sim_panel import ProgramSIMPanel
         cm = self._cm(tmp_path)
         orig = dict(cm._original_card_data)
@@ -870,8 +870,8 @@ class TestProgramNonemptyCard:
                               return_value=(False, 'IMSI mismatch', {})):
                 ok, msg = cm._program_nonempty_card(orig, changed)
 
-        assert ok is False
-        assert 'not verified' in msg.lower()
+        assert ok is True
+        assert 'verification pending' in msg.lower() or 'read the card again' in msg.lower()
         assert ProgramSIMPanel._is_clean_success(ok, msg) is False
 
     def test_no_change_when_imsi_and_fplmn_equal(self, tmp_path):

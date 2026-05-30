@@ -623,4 +623,11 @@ class ProgramSIMPanel(QWidget):
         Guards artifact saving — any field that failed to write or could not
         be verified must not trigger the auto-artifact path.
         """
-        return ok and "write failed" not in msg and "not verified" not in msg
+        msg_lower = msg.lower()
+        return (
+            ok
+            and "write failed" not in msg_lower
+            and "not verified" not in msg_lower
+            and "verification pending" not in msg_lower
+            and "read the card again" not in msg_lower
+        )
