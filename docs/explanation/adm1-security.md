@@ -16,21 +16,9 @@ For sysmocom cards:
 
 ---
 
-## Why ADM1 is not entered manually
+## ADM1 sources and session binding
 
-In SimGUI, you never type an ADM1 key into a dialog. The ADM1 comes from the loaded CSV or EML data file, sourced from the vendor delivery. This is intentional for several reasons:
-
-### Reduces transcription errors
-
-ADM1 keys are 8 or 16 opaque characters with no inherent meaning. Manual transcription from a CSV or paper printout introduces opportunities for digit transposition, extra spaces, and OCR errors. A wrong ADM1 presented to the card costs an authentication attempt.
-
-### Keeps the flow scriptable and auditable
-
-Because ADM1 lives in the data file alongside ICCID, IMSI, and the rest of the card profile, a programming session can be logged completely: "card with ICCID X was programmed using data row Y from file Z." There is no manual input to lose from the audit trail.
-
-### Matches the batch workflow
-
-Batch programming programs 10–50+ cards per session without operator intervention between cards. An operator who would need to manually locate and type the correct ADM1 for each card would introduce bottlenecks and error opportunities. Loading the full data set upfront and matching by ICCID eliminates this.
+ADM1 may come from the loaded CSV or EML data file, manual UI entry, or other supported sources. Regardless of source, ADM1 use in SimGUI is session-bound and always guarded by ICCID cross-verification before any VERIFY attempt that could consume authentication retries. This design prevents one of the most costly mistakes possible in SIM card operations: presenting the wrong ADM1 to a card.
 
 ---
 
@@ -88,9 +76,9 @@ Some systems implement checks like this as warnings that can be bypassed with a 
 
 ## Remaining attempt tracking
 
-SimGUI displays remaining ADM1 authentication attempts when the information is available from the CLI tool (`get_remaining_attempts()`). The count is read from the card after each authentication attempt.
+SimGUI reads the remaining ADM1 authentication attempts from the card after each authentication attempt (via `get_remaining_attempts()` when available from the CLI tool). The attempt count is an active safety gate: when the count reaches or falls below the safe threshold, SimGUI may hard-abort a programming attempt to prevent permanent card lockout.
 
-The displayed count is informational. SimGUI does not block authentication based on the remaining count (though it can warn at low values). The ICCID cross-check is the primary guard — it prevents wrong-card authentication, which is the dominant cause of accidental lockout.
+The ICCID cross-check is the primary guard — it prevents wrong-card authentication, which is the dominant cause of accidental lockout. The remaining attempt count is a secondary but active safety layer that halts operations before the card can be permanently locked.
 
 ---
 
