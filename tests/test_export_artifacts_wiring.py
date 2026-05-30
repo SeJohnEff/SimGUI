@@ -109,27 +109,75 @@ class TestExportArtifactsHandler:
 
     def test_on_card_programmed_stores_card_data(self):
         """_on_card_programmed stores card_data in _last_programmed_card."""
+        from state_manager import ProgramResult, ProgramOutcome
         stub = self._make_app_stub()
         stub.state_manager = MagicMock()
+        stub._auto_artifact = MagicMock()
+        stub._auto_artifact.save_card_artifact.return_value = []
         card_data = {"ICCID": "8946001234567890123", "IMSI": "240010123456789"}
+        result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED)
 
-        stub._on_card_programmed(card_data)
+        stub._on_card_programmed(card_data, result)
 
         assert stub._last_programmed_card == card_data
 
     def test_on_card_programmed_emits_signal_and_saves(self):
-        """_on_card_programmed emits signal, saves artifact, returns paths."""
+        """_on_card_programmed emits signal, saves artifact, returns paths for WRITE_OK_VERIFIED."""
+        from state_manager import ProgramResult, ProgramOutcome
         stub = self._make_app_stub()
         stub.state_manager = MagicMock()
         stub._auto_artifact = MagicMock()
         stub._auto_artifact.save_card_artifact.return_value = ["/home/user/auto-artifact/test.csv"]
         card_data = {"ICCID": "8946001234567890123", "IMSI": "240010123456789"}
+        prog_result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED)
 
-        result = stub._on_card_programmed(card_data)
+        result = stub._on_card_programmed(card_data, prog_result)
 
-        stub.state_manager.notify_card_programmed.assert_called_once_with(card_data)
+        stub.state_manager.notify_card_programmed.assert_called_once_with(card_data, prog_result)
         stub._auto_artifact.save_card_artifact.assert_called_once_with(card_data)
         assert result == ["/home/user/auto-artifact/test.csv"]
+
+    def test_on_card_programmed_no_artifact_for_write_ok_pending(self):
+        """_on_card_programmed does not save artifact for WRITE_OK_PENDING."""
+        from state_manager import ProgramResult, ProgramOutcome
+        stub = self._make_app_stub()
+        stub.state_manager = MagicMock()
+        stub._auto_artifact = MagicMock()
+        card_data = {"ICCID": "8946001234567890123"}
+        prog_result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_PENDING)
+
+        result = stub._on_card_programmed(card_data, prog_result)
+
+        stub._auto_artifact.save_card_artifact.assert_not_called()
+        assert result == []
+
+    def test_on_card_programmed_no_artifact_for_no_changes(self):
+        """_on_card_programmed does not save artifact for NO_CHANGES."""
+        from state_manager import ProgramResult, ProgramOutcome
+        stub = self._make_app_stub()
+        stub.state_manager = MagicMock()
+        stub._auto_artifact = MagicMock()
+        card_data = {"ICCID": "8946001234567890123"}
+        prog_result = ProgramResult(outcome=ProgramOutcome.NO_CHANGES)
+
+        result = stub._on_card_programmed(card_data, prog_result)
+
+        stub._auto_artifact.save_card_artifact.assert_not_called()
+        assert result == []
+
+    def test_on_card_programmed_no_artifact_for_verification_failed(self):
+        """_on_card_programmed does not save artifact for WRITE_OK_VERIFICATION_FAILED."""
+        from state_manager import ProgramResult, ProgramOutcome
+        stub = self._make_app_stub()
+        stub.state_manager = MagicMock()
+        stub._auto_artifact = MagicMock()
+        card_data = {"ICCID": "8946001234567890123"}
+        prog_result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED)
+
+        result = stub._on_card_programmed(card_data, prog_result)
+
+        stub._auto_artifact.save_card_artifact.assert_not_called()
+        assert result == []
 
     def test_export_writes_csv_with_iccid(self, tmp_path):
         """_on_export_artifacts writes a CSV containing ICCID when card exists."""

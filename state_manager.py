@@ -195,6 +195,7 @@ class StateManager(QObject):
     error_occurred = pyqtSignal(str)
     toast_requested = pyqtSignal(str, str, int)    # msg, level, duration
     card_programmed = pyqtSignal(dict)
+    program_result_changed = pyqtSignal(object)  # ProgramResult
     iccid_index_updated = pyqtSignal()
 
     def __init__(self, parent: Optional[QObject]= None) -> None:
@@ -339,9 +340,15 @@ class StateManager(QObject):
         self.error_occurred.emit(message)
         logger.warning("StateManager error: %s", message)
 
-    def notify_card_programmed(self, card_data: dict) -> None:
-        """Emit the card_programmed signal for auto-artifact saving."""
-        self.card_programmed.emit(card_data)
+    def notify_card_programmed(self, card_data: dict, result: "ProgramResult") -> None:
+        """Emit programming signals.
+
+        program_result_changed fires for every outcome.
+        card_programmed fires only for WRITE_OK_VERIFIED.
+        """
+        self.program_result_changed.emit(result)
+        if result.outcome == ProgramOutcome.WRITE_OK_VERIFIED:
+            self.card_programmed.emit(card_data)
 
     def notify_index_updated(self) -> None:
         """Emit the iccid_index_updated signal after a rescan."""

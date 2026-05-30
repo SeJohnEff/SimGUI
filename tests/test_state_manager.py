@@ -380,9 +380,36 @@ class TestConvenienceSignals:
         spy = SignalSpy()
         sm.card_programmed.connect(spy.slot)
         data = {"ICCID": "89460000", "IMSI": "24001"}
-        sm.notify_card_programmed(data)
+        result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED)
+        sm.notify_card_programmed(data, result)
         assert spy.count == 1
         assert spy.last == (data,)
+
+    def test_program_result_changed_emitted_for_all_outcomes(self, sm):
+        spy = SignalSpy()
+        sm.program_result_changed.connect(spy.slot)
+        data = {"ICCID": "89460000"}
+        for outcome in (
+            ProgramOutcome.WRITE_OK_VERIFIED,
+            ProgramOutcome.WRITE_OK_PENDING,
+            ProgramOutcome.NO_CHANGES,
+        ):
+            sm.notify_card_programmed(data, ProgramResult(outcome=outcome))
+        assert spy.count == 3
+
+    def test_card_programmed_only_for_write_ok_verified(self, sm):
+        card_spy = SignalSpy()
+        sm.card_programmed.connect(card_spy.slot)
+        data = {"ICCID": "89460000"}
+        sm.notify_card_programmed(data, ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED))
+        assert card_spy.count == 1
+        for outcome in (
+            ProgramOutcome.WRITE_OK_PENDING,
+            ProgramOutcome.NO_CHANGES,
+            ProgramOutcome.WRITE_OK_VERIFICATION_FAILED,
+        ):
+            sm.notify_card_programmed(data, ProgramResult(outcome=outcome))
+        assert card_spy.count == 1  # no additional emissions
 
     def test_notify_index_updated(self, sm):
         spy = SignalSpy()
@@ -515,7 +542,7 @@ class TestWorkflowSequence:
         # 3. Card programmed
         sm.status_text = "Programming..."
         data = {"ICCID": "8946000001", "IMSI": "240010001"}
-        sm.notify_card_programmed(data)
+        sm.notify_card_programmed(data, ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED))
         sm.status_text = "Done"
 
         # 4. Card removed

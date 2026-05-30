@@ -39,7 +39,7 @@ from managers.network_storage_manager import NetworkStorageManager
 from managers.settings_manager import SettingsManager
 from managers.standards_manager import StandardsManager
 from qt_theme import QtTheme
-from state_manager import StateManager, CardState, CardInfo
+from state_manager import StateManager, CardState, CardInfo, ProgramResult, ProgramOutcome
 from utils import get_browse_initial_dir
 from version import __version__
 from dialogs.network_storage_dialog_qt import NetworkStorageDialogQt
@@ -756,10 +756,15 @@ class SimGUIApp(QMainWindow):
             self.state_manager.status_text = (
                 f"Card data loaded from {src}: {iccid}")
 
-    def _on_card_programmed(self, card_data: dict) -> list:
+    def _on_card_programmed(self, card_data: dict,
+                            result: Optional[ProgramResult] = None) -> list:
         """Store last programmed card, save artifact, and return saved paths."""
+        if result is None:
+            result = ProgramResult(outcome=ProgramOutcome.WRITE_OK_VERIFIED)
         self._last_programmed_card = card_data
-        self.state_manager.notify_card_programmed(card_data)
+        self.state_manager.notify_card_programmed(card_data, result)
+        if result.outcome != ProgramOutcome.WRITE_OK_VERIFIED:
+            return []
         return self._auto_artifact.save_card_artifact(card_data)
 
     def _on_export_artifacts(self):

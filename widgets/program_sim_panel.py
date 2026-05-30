@@ -610,7 +610,7 @@ class ProgramSIMPanel(QWidget):
         if ok:
             clean = result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
             if clean and callable(getattr(self, 'on_card_programmed_callback', None)):
-                saved_paths = self.on_card_programmed_callback(card_data)
+                saved_paths = self.on_card_programmed_callback(card_data, result)
                 if saved_paths:
                     msg += f"\nArtifact saved: {saved_paths[0]}"
             self._set_sticky_result(current_iccid, msg, "success" if clean else "warning")
