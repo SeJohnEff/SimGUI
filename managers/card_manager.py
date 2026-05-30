@@ -511,6 +511,14 @@ class CardManager:
         self._current_session_id = session_id
         self._current_card_gen = card_gen
 
+    def get_last_program_result(self) -> ProgramResult:
+        """Return the result of the most recent programming attempt.
+
+        Returns ProgramResult with outcome=IDLE if no programming has been attempted yet.
+        The returned object is immutable (frozen dataclass).
+        """
+        return self._last_program_result
+
     def _validate_script_path(self, script: str) -> Optional[str]:
         """Resolve and validate a script path, preventing traversal."""
         if self.cli_path is None:

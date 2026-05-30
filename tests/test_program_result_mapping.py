@@ -340,3 +340,55 @@ class TestProgramNonemptyCard:
             readback_data={"IMSI": "240010123456789"},
         )
         assert mgr.verify_after_program.call_count == 1
+
+
+class TestGetLastProgramResult:
+    """Tests for CardManager.get_last_program_result() accessor."""
+
+    def test_new_manager_returns_idle(self):
+        mgr = _make_manager()
+        result = mgr.get_last_program_result()
+        assert result.outcome == ProgramOutcome.IDLE
+        assert result.message == ""
+
+    def test_accessor_returns_latest_after_pysim_prog_verified(self):
+        mgr = _make_manager()
+        mgr._run_pysim_prog = MagicMock(return_value=(True, "", ""))
+        mgr.verify_after_program = MagicMock(
+            return_value=(True, "OK", {"IMSI": "240010123456789"})
+        )
+        mgr._program_via_pysim_prog({"IMSI": "240010123456789"})
+        result = mgr.get_last_program_result()
+        assert result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+        assert "IMSI" in result.verified_fields
+
+    def test_accessor_returns_latest_after_pysim_prog_failure(self):
+        mgr = _make_manager()
+        mgr._run_pysim_prog = MagicMock(return_value=(False, "", "some error"))
+        mgr._program_via_pysim_prog({"IMSI": "240010123456789"})
+        result = mgr.get_last_program_result()
+        assert result.outcome == ProgramOutcome.WRITE_FAILED
+
+    def test_accessor_returns_latest_after_delta_write_verified(self):
+        mgr = _make_manager()
+        mgr._run_pysim_shell = MagicMock(return_value=(True, "", ""))
+        mgr._pysim_write_imsi = MagicMock(return_value=["cmd"])
+        mgr._pysim_write_fplmn = MagicMock(return_value=[])
+        mgr.verify_after_program = MagicMock(
+            return_value=(True, "OK", {"IMSI": "240010123456789"})
+        )
+        mgr._program_nonempty_card({}, {"IMSI": "240010123456789"})
+        result = mgr.get_last_program_result()
+        assert result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+
+    def test_accessor_returns_latest_after_delta_no_changes(self):
+        mgr = _make_manager()
+        mgr._program_nonempty_card({}, {})
+        result = mgr.get_last_program_result()
+        assert result.outcome == ProgramOutcome.NO_CHANGES
+
+    def test_returned_result_is_immutable(self):
+        mgr = _make_manager()
+        result = mgr.get_last_program_result()
+        with pytest.raises(Exception):
+            result.outcome = ProgramOutcome.WRITE_FAILED
