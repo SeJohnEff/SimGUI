@@ -24,6 +24,7 @@ def _capabilities() -> list:
     caps = list(_BASE_CAPABILITIES)
     if _inprocess_enabled():
         caps.append("program_full")
+        caps.append("detect_inprocess")
     return caps
 
 
@@ -316,6 +317,46 @@ def _handle_authenticate(req_id, params):
     _write({"id": req_id, "ok": False, "error": error, "msg": msg})
 
 
+def _handle_detect_inprocess(req_id, params):
+    """In-process card detect — no subprocess. Gated by SIMGUI_WORKER_INPROCESS=1."""
+    if not _inprocess_enabled():
+        _write({"id": req_id, "ok": False, "error": "INPROCESS_DISABLED", "worker_error": True})
+        return
+
+    p = params or {}
+    reader_index = p.get("reader_index", 0)
+
+    try:
+        import card_worker_inproc as _inproc
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED",
+                "msg": str(exc), "worker_error": True})
+        return
+
+    try:
+        resp = _inproc.detect_inprocess(reader_index)
+    except _inproc.PysimImportError as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED",
+                "msg": str(exc), "worker_error": True})
+        return
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": "DETECT_FAILED",
+                "msg": str(exc), "worker_error": False})
+        return
+
+    _write({
+        "id": req_id,
+        "ok": bool(resp.get("ok")),
+        "blank": bool(resp.get("blank")),
+        "card_type": resp.get("card_type", ""),
+        "fields": resp.get("fields", {}),
+        "stdout": resp.get("stdout", ""),
+        "stderr": resp.get("stderr", ""),
+        "worker_error": bool(resp.get("worker_error")),
+        "error": resp.get("error"),
+    })
+
+
 def _handle_program_full(req_id, params):
     """In-process full-provisioning prototype. Gated by SIMGUI_WORKER_INPROCESS=1."""
     if not _inprocess_enabled():
@@ -387,6 +428,8 @@ def _handle(line: str) -> bool:
             _write({"id": req_id, "ok": True, "result": {"inprocess": False}})
     elif verb == "program_full":
         _handle_program_full(req_id, req.get("params"))
+    elif verb == "detect_inprocess":
+        _handle_detect_inprocess(req_id, req.get("params"))
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 

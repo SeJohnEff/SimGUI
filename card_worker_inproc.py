@@ -1,11 +1,11 @@
 """
-In-process pySim programming prototype for the persistent worker.
+In-process pySim programming and detect for the persistent worker.
 
-Phase 1 spike: feature-flagged, isolated from the main JSON dispatch loop.
 Lazy-imports pySim so normal CI (which may not have pySim installed) is unaffected.
 
-Public entry point:
+Public entry points:
     program_full(fields, adm1_hex, reader_index=0) -> (ok: bool, stdout: str, stderr: str)
+    detect_inprocess(reader_index=0) -> dict  (detect schema, no subprocess)
 
 Long-lived state (transport `sl`, command layer `scc`) is held on a module-level
 session object so that the PCSC handle survives across requests — this is the
@@ -153,3 +153,94 @@ def program_full(
         return True, f"programmed fields={sorted(safe_fields.keys())}", ""
     except Exception as exc:
         return False, "", f"{type(exc).__name__}: {exc}"
+
+
+def detect_inprocess(reader_index: int = 0) -> dict:
+    """Detect card and read public fields in-process (no subprocess).
+
+    Uses the long-lived sl/scc session. Returns a dict matching the
+    detect/read_fields protocol schema so CardManager needs no schema changes.
+
+    Never reads Ki, OPc, ADM1, PIN, PUK — public EFs only.
+    Unreadable fields are omitted or set to "".
+    """
+    result: Dict[str, Any] = {
+        "ok": False,
+        "blank": False,
+        "card_type": "",
+        "fields": {},
+        "stdout": "",
+        "stderr": "",
+        "worker_error": False,
+        "error": None,
+    }
+
+    # PysimImportError is allowed to propagate — caller maps it to PYSIM_IMPORT_FAILED.
+    rt = _load_pysim()
+
+    try:
+        _ensure_session(rt, reader_index)
+        scc = _session["scc"]
+        card = rt.card_detect("auto", scc)
+        if card is None:
+            result["error"] = "NO_CARD"
+            return result
+
+        card_type_str = getattr(card, "name", "") or ""
+        result["card_type"] = card_type_str
+
+        fields: Dict[str, str] = {}
+
+        # ICCID
+        try:
+            iccid_val, sw = card.read_iccid()
+            if sw == "9000" and iccid_val:
+                fields["ICCID"] = iccid_val
+        except Exception:
+            pass
+
+        # IMSI
+        try:
+            imsi_val, sw = card.read_imsi()
+            if sw == "9000" and imsi_val:
+                fields["IMSI"] = imsi_val
+        except Exception:
+            pass
+
+        # SPN
+        try:
+            spn_result, sw = card.read_spn()
+            if sw == "9000" and spn_result:
+                fields["SPN"] = spn_result[0] if isinstance(spn_result, (list, tuple)) else str(spn_result)
+        except Exception:
+            pass
+
+        # ACC — read_binary returns raw hex; store as-is for CardManager
+        try:
+            acc_raw, sw = card.read_binary("ACC")
+            if sw == "9000" and acc_raw:
+                fields["ACC"] = acc_raw
+        except Exception:
+            pass
+
+        # FPLMN — UsimCard.read_fplmn returns (formatted_str, sw)
+        try:
+            fplmn_val, sw = card.read_fplmn()
+            if sw == "9000" and fplmn_val:
+                fields["FPLMN"] = fplmn_val
+        except Exception:
+            pass
+
+        blank = (card_type_str == "gialersim") or (
+            not fields.get("ICCID") and not fields.get("IMSI")
+        )
+
+        result["ok"] = True
+        result["blank"] = blank
+        result["fields"] = fields
+        return result
+
+    except Exception as exc:
+        result["error"] = "DETECT_FAILED"
+        result["stderr"] = f"{type(exc).__name__}: {exc}"
+        return result

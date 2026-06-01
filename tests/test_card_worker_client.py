@@ -509,6 +509,81 @@ def test_detect_missing_ok_raises_protocol_error():
 
 
 # ---------------------------------------------------------------------------
+# Phase C.2a — detect_inprocess() client method tests
+# ---------------------------------------------------------------------------
+
+def test_detect_inprocess_sends_correct_verb():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True, "blank": False, "card_type": "sysmoisim-sja5",
+        "fields": {"ICCID": "8946220000000000001", "IMSI": "244220000000001"},
+    }
+    client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim",
+                            reader_index=0, timeout=30.0)
+    assert len(client._send_calls) == 1
+    call = client._send_calls[0]
+    assert call["verb"] == "detect_inprocess"
+    assert call["params"]["reader_index"] == 0
+    assert call["params"]["session_id"] == "s1"
+    assert call["params"]["card_gen"] == 1
+
+
+def test_detect_inprocess_ok_response_parsed_to_detect_result():
+    from card_worker_client import DetectResult
+    client = _MockClient()
+    client._send_return = {
+        "ok": True, "blank": False, "card_type": "sysmoisim-sja5",
+        "fields": {"ICCID": "8946220000000000001", "IMSI": "244220000000001"},
+    }
+    result = client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is True
+    assert result.blank is False
+    assert result.card_type == "sysmoisim-sja5"
+    assert result.fields["ICCID"] == "8946220000000000001"
+
+
+def test_detect_inprocess_blank_response_parsed_correctly():
+    from card_worker_client import DetectResult
+    client = _MockClient()
+    client._send_return = {
+        "ok": True, "blank": True, "card_type": "gialersim", "fields": {},
+    }
+    result = client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is True
+    assert result.blank is True
+    assert result.card_type == "gialersim"
+
+
+def test_detect_inprocess_failure_response_parsed_correctly():
+    from card_worker_client import DetectResult
+    client = _MockClient()
+    client._send_return = {"ok": False, "error": "NO_CARD", "msg": "No card in reader"}
+    result = client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+    assert isinstance(result, DetectResult)
+    assert result.ok is False
+    assert result.error == "NO_CARD"
+    assert result.msg == "No card in reader"
+
+
+def test_detect_inprocess_missing_ok_raises_protocol_error():
+    from card_worker_client import WorkerProtocolError
+    client = _MockClient()
+    client._send_return = {"result": "unexpected"}
+    with pytest.raises(WorkerProtocolError):
+        client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+
+
+def test_detect_inprocess_default_request_timeout_is_timeout_plus_one():
+    client = _MockClient()
+    client._send_return = {"ok": False, "error": "NO_CARD"}
+    client.detect_inprocess(session_id="s1", card_gen=1, pysim_path="/opt/pysim",
+                            timeout=20.0)
+    assert client._send_calls[0]["timeout"] == pytest.approx(21.0)
+
+
+# ---------------------------------------------------------------------------
 # Phase 3C — authenticate() helper tests
 # ---------------------------------------------------------------------------
 

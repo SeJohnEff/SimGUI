@@ -324,6 +324,43 @@ class PersistentWorkerClient:
             msg=resp.get("msg"),
         )
 
+    def detect_inprocess(
+        self,
+        session_id: str,
+        card_gen: int,
+        pysim_path: str,
+        reader_index: int = 0,
+        timeout: float = 30.0,
+        request_timeout: Optional[float] = None,
+    ) -> DetectResult:
+        """Detect card in-process (no subprocess); returns a typed DetectResult."""
+        rt = request_timeout if request_timeout is not None else timeout + 1.0
+        resp = self.send(
+            "detect_inprocess",
+            params={
+                "session_id": session_id,
+                "card_gen": card_gen,
+                "pysim_path": pysim_path,
+                "reader_index": reader_index,
+                "timeout": timeout,
+            },
+            timeout=rt,
+        )
+        if "ok" not in resp:
+            raise WorkerProtocolError(str(resp))
+        if resp.get("ok"):
+            return DetectResult(
+                ok=True,
+                card_type=resp.get("card_type"),
+                blank=bool(resp.get("blank", False)),
+                fields=resp.get("fields") or {},
+            )
+        return DetectResult(
+            ok=False,
+            error=resp.get("error"),
+            msg=resp.get("msg"),
+        )
+
     def authenticate(
         self,
         session_id: str,

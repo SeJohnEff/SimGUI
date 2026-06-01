@@ -267,3 +267,157 @@ def test_reset_not_called_for_stable_same_card(monkeypatch):
 
     assert reset_calls == [], "reset_session must NOT be called for stable same-card probe"
     assert responses[0]["present"] is True
+
+
+# ---------------------------------------------------------------------------
+# detect_inprocess handler tests
+# ---------------------------------------------------------------------------
+
+def _install_fake_pysim_detect(monkeypatch, iccid=None, imsi=None, spn=None,
+                                acc=None, fplmn=None, card_name="sysmoisim-sja5",
+                                card_detect_returns_none=False):
+    """Inject a fake pySim runtime with read methods for detect_inprocess tests."""
+    class _FakeCard:
+        name = card_name
+
+        def read_iccid(self):
+            if iccid is None:
+                return (None, "6a82")
+            return (iccid, "9000")
+
+        def read_imsi(self):
+            if imsi is None:
+                return (None, "6a82")
+            return (imsi, "9000")
+
+        def read_spn(self):
+            if spn is None:
+                return (None, "6a82")
+            return ((spn, True, False), "9000")
+
+        def read_binary(self, ef):
+            if ef == "ACC":
+                if acc is None:
+                    return (None, "6a82")
+                return (acc, "9000")
+            return (None, "6a82")
+
+        def read_fplmn(self):
+            if fplmn is None:
+                return (None, "6a82")
+            return (fplmn, "9000")
+
+    class _Runtime:
+        @staticmethod
+        def init_reader(opts):
+            return object()
+
+        @staticmethod
+        def SimCardCommands(transport):
+            return object()
+
+        @staticmethod
+        def card_detect(type_, scc):
+            if card_detect_returns_none:
+                return None
+            return _FakeCard()
+
+    monkeypatch.setattr(card_worker_inproc, "_pysim_runtime", _Runtime(), raising=False)
+
+
+class TestDetectInprocessHandler:
+
+    def test_handler_disabled_without_env(self, monkeypatch):
+        """detect_inprocess verb returns INPROCESS_DISABLED when env var unset."""
+        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 99, "verb": "detect_inprocess", "params": {"reader_index": 0}})
+        assert len(responses) == 1
+        r = responses[0]
+        assert r["ok"] is False
+        assert r["error"] == "INPROCESS_DISABLED"
+        assert r["worker_error"] is True
+
+    def test_handler_success_returns_stable_schema(self, monkeypatch):
+        """detect_inprocess success returns all top-level schema keys."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        _install_fake_pysim_detect(
+            monkeypatch,
+            iccid="8946220000000000001",
+            imsi="244220000000001",
+            spn="TestNet",
+            card_name="sysmoisim-sja5",
+        )
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 10, "verb": "detect_inprocess", "params": {"reader_index": 0}})
+        assert len(responses) == 1
+        r = responses[0]
+        assert r["ok"] is True
+        assert r["blank"] is False
+        assert r["card_type"] == "sysmoisim-sja5"
+        assert r["fields"]["ICCID"] == "8946220000000000001"
+        assert r["fields"]["IMSI"] == "244220000000001"
+        assert r["fields"]["SPN"] == "TestNet"
+        assert "stdout" in r
+        assert "stderr" in r
+        assert r["worker_error"] is False
+
+    def test_handler_blank_gialersim_returns_blank_true(self, monkeypatch):
+        """Blank gialersim card (no ICCID/IMSI) sets blank=True."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        _install_fake_pysim_detect(monkeypatch, card_name="gialersim")
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 11, "verb": "detect_inprocess", "params": {"reader_index": 0}})
+        assert len(responses) == 1
+        r = responses[0]
+        assert r["ok"] is True
+        assert r["blank"] is True
+        assert r["card_type"] == "gialersim"
+
+    def test_handler_card_detect_none_returns_no_card(self, monkeypatch):
+        """card_detect returning None yields ok=False, error=NO_CARD."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        _install_fake_pysim_detect(monkeypatch, card_detect_returns_none=True)
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 12, "verb": "detect_inprocess", "params": {"reader_index": 0}})
+        assert len(responses) == 1
+        r = responses[0]
+        assert r["ok"] is False
+        assert r["error"] == "NO_CARD"
+        assert r["worker_error"] is False
+
+    def test_handler_pysim_import_error_maps_to_import_failed(self, monkeypatch):
+        """PysimImportError from detect_inprocess maps to PYSIM_IMPORT_FAILED."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        monkeypatch.setattr(
+            card_worker_inproc, "_pysim_runtime",
+            None, raising=False
+        )
+        # Make _load_pysim raise PysimImportError
+        monkeypatch.setattr(
+            card_worker_inproc, "_load_pysim",
+            lambda: (_ for _ in ()).throw(card_worker_inproc.PysimImportError("no pySim")),
+        )
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 13, "verb": "detect_inprocess", "params": {"reader_index": 0}})
+        assert len(responses) == 1
+        r = responses[0]
+        assert r["ok"] is False
+        assert r["error"] == "PYSIM_IMPORT_FAILED"
+        assert r["worker_error"] is True
+
+    def test_capabilities_include_detect_inprocess_when_enabled(self, monkeypatch):
+        """detect_inprocess appears in capabilities only when SIMGUI_WORKER_INPROCESS=1."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 20, "verb": "capabilities"})
+        caps = responses[0]["result"]
+        assert "detect_inprocess" in caps
+
+    def test_capabilities_exclude_detect_inprocess_when_disabled(self, monkeypatch):
+        """detect_inprocess absent from capabilities when env var unset."""
+        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        responses = _capture_responses(monkeypatch)
+        _send({"id": 21, "verb": "capabilities"})
+        caps = responses[0]["result"]
+        assert "detect_inprocess" not in caps

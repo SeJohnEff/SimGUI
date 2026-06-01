@@ -573,10 +573,13 @@ class CardManager:
         if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
             return None
         caps = self._get_worker_capabilities()
-        if "detect" not in caps and "read_fields" not in caps:
+        # Prefer true in-process detect; fall back to subprocess-backed detect verbs.
+        if "detect_inprocess" not in caps and "detect" not in caps and "read_fields" not in caps:
             return None
+        # Use detect_inprocess when available (no subprocess); else existing detect.
+        verb_fn = client.detect_inprocess if "detect_inprocess" in caps else client.detect
         try:
-            return client.detect(
+            return verb_fn(
                 session_id=self._current_session_id,
                 card_gen=self._current_card_gen,
                 pysim_path=self.cli_path,
