@@ -344,6 +344,19 @@ def _handle(line: str) -> bool:
         _handle_detect(req_id, req.get("params"))
     elif verb == "authenticate":
         _handle_authenticate(req_id, req.get("params"))
+    elif verb == "preload":
+        if _inprocess_enabled():
+            try:
+                import card_worker_inproc as _inproc
+                ok, err = _inproc.preload()
+                if ok:
+                    _write({"id": req_id, "ok": True, "result": {"inprocess": True}})
+                else:
+                    _write({"id": req_id, "ok": False, "error": "PRELOAD_FAILED", "msg": err})
+            except Exception as exc:
+                _write({"id": req_id, "ok": False, "error": "PRELOAD_FAILED", "msg": str(exc)})
+        else:
+            _write({"id": req_id, "ok": True, "result": {"inprocess": False}})
     elif verb == "program_full":
         _handle_program_full(req_id, req.get("params"))
     else:

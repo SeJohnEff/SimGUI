@@ -47,6 +47,18 @@ class _Opts:
     osmocon_sock = None
 
 
+def preload() -> Tuple[bool, str]:
+    """Import pySim symbols without opening a card or mutating session state.
+
+    Returns (ok, error_message). Called by the worker process on the "preload" verb.
+    """
+    try:
+        _load_pysim()
+        return True, ""
+    except PysimImportError as exc:
+        return False, str(exc)
+
+
 def _load_pysim() -> Any:
     """Lazy-import pySim; cached on the module.
 

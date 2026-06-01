@@ -619,3 +619,65 @@ def test_stderr_does_not_block_caller():
         except Exception:
             pass
         os.unlink(noisy_script)
+
+
+# ---------------------------------------------------------------------------
+# Phase B.3 — preload() tests
+# ---------------------------------------------------------------------------
+
+from card_worker_client import WorkerState
+
+
+def _make_client_with_fake(response_lines):
+    """Return a started client backed by a fake process."""
+    proc = _make_fake(ready_banner=True, response_lines=response_lines)
+    client = PersistentWorkerClient(worker_script=SCRIPT)
+    client._process = proc
+    client._state = WorkerState.READY
+    client._stderr_thread = threading.Thread(target=lambda: None, daemon=True)
+    client._stderr_thread.start()
+    return client
+
+
+def test_preload_success_state_remains_ready():
+    """preload() returning ok=true keeps state at READY."""
+    resp = json.dumps({"id": "x", "ok": True, "result": {"inprocess": False}})
+    client = _make_client_with_fake([resp])
+    result = client.preload(timeout=2.0)
+    assert result is True
+    assert client.state == WorkerState.READY
+    assert client.last_error is None
+
+
+def test_preload_failure_transitions_to_error():
+    """preload() returning ok=false transitions state to ERROR and sets last_error."""
+    resp = json.dumps({"id": "x", "ok": False, "error": "PRELOAD_FAILED", "msg": "no pySim"})
+    client = _make_client_with_fake([resp])
+    result = client.preload(timeout=2.0)
+    assert result is False
+    assert client.state == WorkerState.ERROR
+    assert client.last_error == "no pySim"
+
+
+def test_preload_worker_error_transitions_to_error():
+    """preload() raising WorkerError (e.g. EOF) transitions state to ERROR."""
+    client = PersistentWorkerClient(worker_script=SCRIPT)
+    client._state = WorkerState.READY
+    # No process — send() will raise WorkerStartError
+    result = client.preload(timeout=1.0)
+    assert result is False
+    assert client.state == WorkerState.ERROR
+    assert client.last_error is not None
+
+
+def test_worker_mode_enabled_uses_simgui_worker(monkeypatch):
+    """_worker_mode_enabled() returns True only when SIMGUI_WORKER=1."""
+    import sys
+    import importlib
+    import main as _main
+    monkeypatch.setenv("SIMGUI_WORKER", "1")
+    assert _main._worker_mode_enabled() is True
+    monkeypatch.setenv("SIMGUI_WORKER", "0")
+    assert _main._worker_mode_enabled() is False
+    monkeypatch.delenv("SIMGUI_WORKER", raising=False)
+    assert _main._worker_mode_enabled() is False

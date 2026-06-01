@@ -370,6 +370,29 @@ class PersistentWorkerClient:
             raise WorkerProtocolError(str(resp))
         return result
 
+    def preload(self, timeout: float = 15.0) -> bool:
+        """Trigger pySim preload in the worker process.
+
+        On success: state remains READY.
+        On failure: state transitions to ERROR with last_error set.
+        Returns True if preload succeeded, False otherwise.
+        start() sets state to READY after the banner; preload() finalises it by
+        confirming the worker can load pySim. If preload fails the client stays
+        usable for subprocess-backed operations (is_ready() returns False).
+        """
+        try:
+            resp = self.send("preload", timeout=timeout)
+        except WorkerError as exc:
+            self._state = WorkerState.ERROR
+            self._last_error = str(exc)
+            return False
+        if resp.get("ok"):
+            # READY already set by start(); no state change needed.
+            return True
+        self._state = WorkerState.ERROR
+        self._last_error = resp.get("msg") or resp.get("error") or "preload failed"
+        return False
+
     def program_full(
         self,
         fields: Dict[str, Any],

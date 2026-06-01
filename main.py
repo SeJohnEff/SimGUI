@@ -56,6 +56,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _worker_mode_enabled() -> bool:
+    """Return True when the persistent worker subprocess is requested at startup."""
+    return os.environ.get("SIMGUI_WORKER") == "1"
+
+
 # ---------------------------------------------------------------------------
 # Background Worker (Qt-style async)
 # ---------------------------------------------------------------------------
@@ -276,15 +281,20 @@ class SimGUIApp(QMainWindow):
         self._auto_artifact = AutoArtifactManager(self._ns_manager)
         self._standards_mgr = StandardsManager()
         self._worker_client = None
-        if os.environ.get("SIMGUI_WORKER") == "1":
+        if _worker_mode_enabled():
             try:
-                from card_worker_client import PersistentWorkerClient, WorkerStartError
+                from card_worker_client import PersistentWorkerClient
                 _wc = PersistentWorkerClient()
                 _wc.start()
+                _wc.preload()
+                if _wc.is_ready():
+                    logger.info("PersistentWorkerClient started and preloaded")
+                else:
+                    logger.warning("Worker preload failed (%s); using subprocess fallback",
+                                   _wc.last_error)
                 self._worker_client = _wc
-                logging.info("PersistentWorkerClient started")
             except Exception as exc:
-                logging.warning("Worker start failed, using native path: %s", exc)
+                logger.warning("Worker start failed, using subprocess fallback: %s", exc)
         self._card_manager.set_worker_client(self._worker_client)
 
         self._card_watcher = CardWatcher(
