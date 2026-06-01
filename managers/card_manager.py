@@ -532,13 +532,20 @@ class CardManager:
     ) -> Optional[Tuple[bool, str, str]]:
         client = getattr(self, "_worker_client", None)
         if client is None:
+            logger.info("WORKER_DIAG program_full: skip reason=no_client")
             return None
         if not client.is_ready():
+            logger.info("WORKER_DIAG program_full: skip reason=not_ready  last_error=%r",
+                        getattr(client, "last_error", None))
             return None
         if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            logger.info("WORKER_DIAG program_full: skip reason=env_off")
             return None
         if "program_full" not in self._get_worker_capabilities():
+            logger.info("WORKER_DIAG program_full: skip reason=missing_capability  caps=%r",
+                        self._get_worker_capabilities())
             return None
+        logger.info("WORKER_DIAG program_full: routing via worker")
         try:
             resp = client.program_full(
                 fields,
@@ -567,17 +574,24 @@ class CardManager:
         """
         client = getattr(self, "_worker_client", None)
         if client is None:
+            logger.info("WORKER_DIAG detect: skip reason=no_client")
             return None
         if not client.is_ready():
+            logger.info("WORKER_DIAG detect: skip reason=not_ready  last_error=%r",
+                        getattr(client, "last_error", None))
             return None
         if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            logger.info("WORKER_DIAG detect: skip reason=env_off")
             return None
         caps = self._get_worker_capabilities()
         # Prefer true in-process detect; fall back to subprocess-backed detect verbs.
         if "detect_inprocess" not in caps and "detect" not in caps and "read_fields" not in caps:
+            logger.info("WORKER_DIAG detect: skip reason=missing_capability  caps=%r", caps)
             return None
         # Use detect_inprocess when available (no subprocess); else existing detect.
         verb_fn = client.detect_inprocess if "detect_inprocess" in caps else client.detect
+        logger.info("WORKER_DIAG detect: routing via worker  verb=%s",
+                    "detect_inprocess" if "detect_inprocess" in caps else "detect")
         try:
             return verb_fn(
                 session_id=self._current_session_id,
@@ -2192,21 +2206,30 @@ class CardManager:
         """
         import os
         if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            logger.info("WORKER_DIAG readback: skip reason=env_off")
             return None
         client = getattr(self, "_worker_client", None)
         if client is None:
+            logger.info("WORKER_DIAG readback: skip reason=no_client")
             return None
         try:
             if not client.is_ready():
+                logger.info("WORKER_DIAG readback: skip reason=not_ready  last_error=%r",
+                            getattr(client, "last_error", None))
                 return None
         except Exception:
             return None
         if "detect_inprocess" not in self._get_worker_capabilities():
+            logger.info("WORKER_DIAG readback: skip reason=missing_capability  caps=%r",
+                        self._get_worker_capabilities())
             return None
         session_id = self._current_session_id
         card_gen = self._current_card_gen
         if session_id is None or card_gen is None:
+            logger.info("WORKER_DIAG readback: skip reason=no_session  "
+                        "session_id=%r  card_gen=%r", session_id, card_gen)
             return None
+        logger.info("WORKER_DIAG readback: routing via worker  session_id=%r", session_id)
         pysim_path = self.cli_path or ""
         try:
             result = client.detect_inprocess(

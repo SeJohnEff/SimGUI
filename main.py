@@ -281,21 +281,32 @@ class SimGUIApp(QMainWindow):
         self._auto_artifact = AutoArtifactManager(self._ns_manager)
         self._standards_mgr = StandardsManager()
         self._worker_client = None
+        logger.info("WORKER_DIAG SIMGUI_WORKER=%r  SIMGUI_WORKER_INPROCESS=%r",
+                    os.environ.get("SIMGUI_WORKER", ""),
+                    os.environ.get("SIMGUI_WORKER_INPROCESS", ""))
         if _worker_mode_enabled():
             try:
                 from card_worker_client import PersistentWorkerClient
+                logger.info("WORKER_DIAG PersistentWorkerClient: constructing")
                 _wc = PersistentWorkerClient()
                 _wc.start()
-                _wc.preload()
-                if _wc.is_ready():
-                    logger.info("PersistentWorkerClient started and preloaded")
-                else:
-                    logger.warning("Worker preload failed (%s); using subprocess fallback",
-                                   _wc.last_error)
+                logger.info("WORKER_DIAG start_called  state=%s  last_error=%r",
+                            getattr(_wc, "_state", "?"), _wc.last_error)
+                preload_ok = _wc.preload()
+                logger.info("WORKER_DIAG preload result=%r  is_ready=%r  last_error=%r",
+                            preload_ok, _wc.is_ready(), _wc.last_error)
                 self._worker_client = _wc
             except Exception as exc:
                 logger.warning("Worker start failed, using subprocess fallback: %s", exc)
+        logger.info("WORKER_DIAG CardManager.set_worker_client called  client=%r",
+                    self._worker_client)
         self._card_manager.set_worker_client(self._worker_client)
+        if self._worker_client is not None:
+            try:
+                caps = self._card_manager._get_worker_capabilities()
+                logger.info("WORKER_DIAG CardManager worker capabilities after preload: %r", caps)
+            except Exception as exc:
+                logger.warning("WORKER_DIAG failed to fetch worker capabilities: %s", exc)
 
         self._card_watcher = CardWatcher(
             self._card_manager, self._iccid_index, poll_interval=1.5,
