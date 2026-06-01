@@ -4,6 +4,7 @@ In-process pySim programming and detect for the persistent worker.
 Lazy-imports pySim so normal CI (which may not have pySim installed) is unaffected.
 
 Public entry points:
+    authenticate_inprocess(adm1_hex, reader_index=0, is_gialersim=False) -> (ok: bool, msg: str)
     program_full(fields, adm1_hex, reader_index=0) -> (ok: bool, stdout: str, stderr: str)
     detect_inprocess(reader_index=0) -> dict  (detect schema, no subprocess)
 
@@ -123,6 +124,34 @@ def _build_cp(fields: Dict[str, str], adm1_hex: str) -> Dict[str, Any]:
             cp[dst] = v
     cp["adm1"] = adm1_hex
     return cp
+
+
+def authenticate_inprocess(
+    adm1_hex: str,
+    reader_index: int = 0,
+    is_gialersim: bool = False,
+) -> Tuple[bool, str]:
+    """Verify ADM1 using the long-lived scc session. No subprocess.
+
+    Gialersim cards skip VERIFY (CHV 0x0A would fail with 6f00 and burn an
+    attempt). Returns a DEFERRED sentinel so the caller stores ADM1 for
+    pySim-prog without touching the card.
+    """
+    if is_gialersim:
+        return True, "DEFERRED:gialersim"
+
+    rt = _load_pysim()
+    try:
+        _ensure_session(rt, reader_index)
+        _session["scc"].verify_chv(0x0A, adm1_hex)
+        return True, ""
+    except Exception as exc:
+        s = str(exc)
+        if "6983" in s:
+            return False, "CARD_BLOCKED:6983"
+        if "6982" in s or "SwMatchError" in s:
+            return False, "AUTH_FAILED:6982"
+        return False, f"TRANSPORT_ERROR:{exc!r}"
 
 
 def program_full(

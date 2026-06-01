@@ -421,3 +421,143 @@ class TestDetectInprocessHandler:
         _send({"id": 21, "verb": "capabilities"})
         caps = responses[0]["result"]
         assert "detect_inprocess" not in caps
+
+
+# ---------------------------------------------------------------------------
+# Phase C.4a — authenticate_inprocess unit tests
+# ---------------------------------------------------------------------------
+
+class TestAuthenticateInprocess:
+    """authenticate_inprocess uses the long-lived scc session; no subprocess."""
+
+    def _fake_scc(self):
+        scc = mock.MagicMock()
+        scc.verify_chv.return_value = ("", "9000")
+        return scc
+
+    def _install_session(self, monkeypatch, scc):
+        monkeypatch.setitem(card_worker_inproc._session, "sl", object())
+        monkeypatch.setitem(card_worker_inproc._session, "scc", scc)
+        monkeypatch.setitem(card_worker_inproc._session, "reader_index", 0)
+
+    def _fake_rt(self, monkeypatch, scc):
+        rt = mock.MagicMock()
+        rt.SimCardCommands.return_value = scc
+        rt.init_reader.return_value = mock.MagicMock()
+        monkeypatch.setattr(card_worker_inproc, "_pysim_runtime", rt)
+        return rt
+
+    def test_success_calls_verify_chv(self, monkeypatch):
+        scc = self._fake_scc()
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("3838383838383838", 0, False)
+        assert ok is True
+        assert msg == ""
+        scc.verify_chv.assert_called_once_with(0x0A, "3838383838383838")
+
+    def test_wrong_key_maps_to_auth_failed(self, monkeypatch):
+        scc = self._fake_scc()
+        scc.verify_chv.side_effect = Exception("SW mismatch: 6982 != 9000")
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("deadbeefdeadbeef", 0, False)
+        assert ok is False
+        assert msg.startswith("AUTH_FAILED")
+
+    def test_swmatcherror_maps_to_auth_failed(self, monkeypatch):
+        scc = self._fake_scc()
+        scc.verify_chv.side_effect = Exception("SwMatchError occurred")
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("deadbeefdeadbeef", 0, False)
+        assert ok is False
+        assert msg.startswith("AUTH_FAILED")
+
+    def test_blocked_maps_to_card_blocked(self, monkeypatch):
+        scc = self._fake_scc()
+        scc.verify_chv.side_effect = Exception("Authentication blocked: 6983")
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("3838383838383838", 0, False)
+        assert ok is False
+        assert msg.startswith("CARD_BLOCKED")
+
+    def test_gialersim_deferred_does_not_call_verify_chv(self, monkeypatch):
+        scc = self._fake_scc()
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("3838383838383838", 0, True)
+        assert ok is True
+        assert msg == "DEFERRED:gialersim"
+        scc.verify_chv.assert_not_called()
+
+    def test_transport_error_maps_correctly(self, monkeypatch):
+        scc = self._fake_scc()
+        scc.verify_chv.side_effect = Exception("PCSC connection lost")
+        self._install_session(monkeypatch, scc)
+        self._fake_rt(monkeypatch, scc)
+        ok, msg = card_worker_inproc.authenticate_inprocess("3838383838383838", 0, False)
+        assert ok is False
+        assert msg.startswith("TRANSPORT_ERROR")
+
+
+class TestWorkerAuthDelegateRouting:
+    """WorkerAuthDelegate routes to inproc or subprocess depending on env var."""
+
+    def test_inprocess_enabled_calls_authenticate_inprocess(self, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        called = {}
+
+        def fake_auth_inprocess(adm1_hex, reader_index, is_gialersim):
+            called["adm1"] = adm1_hex
+            called["reader"] = reader_index
+            called["gialersim"] = is_gialersim
+            return (True, "")
+
+        monkeypatch.setattr(
+            card_worker_inproc, "authenticate_inprocess", fake_auth_inprocess
+        )
+
+        delegate = card_worker_process.WorkerAuthDelegate("/fake/pysim", 0, False)
+        ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is True
+        assert called["adm1"] == "3838383838383838"
+        assert called["gialersim"] is False
+
+    def test_inprocess_enabled_gialersim_passes_flag(self, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        called = {}
+
+        def fake_auth_inprocess(adm1_hex, reader_index, is_gialersim):
+            called["gialersim"] = is_gialersim
+            return (True, "DEFERRED:gialersim")
+
+        monkeypatch.setattr(
+            card_worker_inproc, "authenticate_inprocess", fake_auth_inprocess
+        )
+
+        delegate = card_worker_process.WorkerAuthDelegate("/fake/pysim", 0, True)
+        ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is True
+        assert called["gialersim"] is True
+
+    def test_inprocess_disabled_uses_subprocess(self, monkeypatch):
+        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        subprocess_calls = []
+
+        def fake_run(*args, **kwargs):
+            subprocess_calls.append(args)
+            result = mock.MagicMock()
+            result.stdout = ""
+            result.stderr = ""
+            result.returncode = 0
+            return result
+
+        monkeypatch.setattr(card_worker_process.subprocess, "run", fake_run)
+        monkeypatch.setattr(os.path, "isfile", lambda p: True)
+
+        delegate = card_worker_process.WorkerAuthDelegate("/fake/pysim", 0, False)
+        ok, msg = delegate.authenticate_adm("3838383838383838")
+        assert ok is True
+        assert len(subprocess_calls) == 1

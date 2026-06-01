@@ -44,13 +44,24 @@ _session_reader_index = 0
 
 
 class WorkerAuthDelegate:
-    """Stub delegate wired to the active worker session. authenticate_adm deferred to Phase 3A-5."""
+    """Auth delegate for the active worker session."""
 
-    def __init__(self, pysim_path, reader_index):
+    def __init__(self, pysim_path, reader_index, is_gialersim=False):
         self.pysim_path = pysim_path
         self.reader_index = reader_index
+        self.is_gialersim = is_gialersim
 
     def authenticate_adm(self, adm1_hex):
+        if _inprocess_enabled():
+            try:
+                import card_worker_inproc as _inproc
+                return _inproc.authenticate_inprocess(
+                    adm1_hex, self.reader_index, self.is_gialersim
+                )
+            except Exception as exc:
+                return (False, f"TRANSPORT_ERROR:{exc!r}")
+
+        # Subprocess fallback — used when SIMGUI_WORKER_INPROCESS is not set.
         script = os.path.join(self.pysim_path, "pySim-shell.py")
         if not os.path.isfile(script):
             return (False, "TRANSPORT_ERROR:CLI_NOT_FOUND")
@@ -259,7 +270,10 @@ def _handle_detect(req_id, params):
     global _session_profile, _session_pysim_path, _session_reader_index
     try:
         from card_profiles import ProfileFactory
-        _session_profile = ProfileFactory().create(card_type, delegate=WorkerAuthDelegate(pysim_path, reader_index))
+        _session_profile = ProfileFactory().create(
+            card_type,
+            delegate=WorkerAuthDelegate(pysim_path, reader_index, is_gialersim=(card_type == "gialersim")),
+        )
         _session_pysim_path = pysim_path
         _session_reader_index = reader_index
     except Exception:
