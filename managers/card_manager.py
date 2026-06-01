@@ -339,6 +339,11 @@ def _get_probe_env() -> Optional[Dict[str, str]]:
     return env
 
 
+def _inprocess_enabled() -> bool:
+    """Return True unless SIMGUI_WORKER_INPROCESS=0 explicitly opts out."""
+    return os.environ.get("SIMGUI_WORKER_INPROCESS") != "0"
+
+
 def _find_cli_tool() -> Tuple[Optional[str], CLIBackend]:
     """Locate sysmo-usim-tool or pySim repo on the system.
 
@@ -538,7 +543,7 @@ class CardManager:
             logger.info("WORKER_DIAG program_full: skip reason=not_ready  last_error=%r",
                         getattr(client, "last_error", None))
             return None
-        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+        if not _inprocess_enabled():
             logger.info("WORKER_DIAG program_full: skip reason=env_off")
             return None
         if "program_full" not in self._get_worker_capabilities():
@@ -580,7 +585,7 @@ class CardManager:
         if not client.is_ready():
             logger.info("WORKER_DIAG program_delta: skip reason=not_ready")
             return None
-        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+        if not _inprocess_enabled():
             logger.info("WORKER_DIAG program_delta: skip reason=env_off")
             return None
         caps = self._get_worker_capabilities()
@@ -685,7 +690,7 @@ class CardManager:
             logger.info("WORKER_DIAG detect: skip reason=not_ready  last_error=%r",
                         getattr(client, "last_error", None))
             return None
-        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+        if not _inprocess_enabled():
             logger.info("WORKER_DIAG detect: skip reason=env_off")
             return None
         caps = self._get_worker_capabilities()
@@ -831,14 +836,17 @@ class CardManager:
                 f'({len(rlist)} reader(s) detected)'
             )
 
-        # Primary: subprocess-based probe (killable, no orphaned threads).
+        # Primary: in-process thread probe (no subprocess launch overhead).
+        reader = rlist[self._pcsc_reader_index]
+        ip_present, ip_msg = self._probe_with_timeout(reader)
+        if ip_msg != 'PC/SC probe timed out':
+            return ip_present, ip_msg
+
+        # Fallback: subprocess-based probe when in-process timed out.
         sub = self._probe_via_subprocess(self._pcsc_reader_index, self._PROBE_TIMEOUT)
         if sub.available:
             return sub.present, sub.message
-
-        # Fallback: in-process thread probe (v0.5.59 path).
-        reader = rlist[self._pcsc_reader_index]
-        return self._probe_with_timeout(reader)
+        return ip_present, ip_msg
 
     def _probe_via_subprocess(self, reader_index: int, timeout: float) -> '_ProbeResult':
         """Run the PC/SC probe in a fresh interpreter subprocess.
@@ -2369,8 +2377,7 @@ class CardManager:
         None when the worker is unavailable, not ready, the env gate is unset,
         or the call fails for any reason.  Never mutates self.card_info.
         """
-        import os
-        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+        if not _inprocess_enabled():
             logger.info("WORKER_DIAG readback: skip reason=env_off")
             return None
         client = getattr(self, "_worker_client", None)

@@ -2,7 +2,7 @@
 
 Tests verify:
 - Worker success path bypasses subprocess and produces WRITE_OK_VERIFIED
-- SIMGUI_WORKER_INPROCESS=0 (or absent) routes to subprocess
+- SIMGUI_WORKER_INPROCESS=0 routes to subprocess (default is ON)
 - Missing capability falls back to subprocess
 - Transport error (exception) falls back to subprocess
 - worker_error=True in response falls back to subprocess
@@ -104,8 +104,8 @@ class TestWorkerRouting:
         assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFIED
 
     def test_env_var_off_skips_worker(self, tmp_path, monkeypatch):
-        """SIMGUI_WORKER_INPROCESS unset -> worker not consulted -> subprocess called."""
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        """SIMGUI_WORKER_INPROCESS=0 -> worker not consulted -> subprocess called."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         cm = _make_cm(tmp_path)
         client = _mock_client(caps=["program_full"])
         cm.set_worker_client(client)
@@ -429,7 +429,7 @@ class TestDeltaWorkerRouting:
         assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
 
     def test_falls_back_env_off(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         cm = _make_cm_nonempty(tmp_path)
         cm.set_worker_client(_mock_delta_client())
         assert cm._try_worker_program_delta(self._changed()) is None

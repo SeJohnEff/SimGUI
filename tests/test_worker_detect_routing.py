@@ -161,8 +161,8 @@ class TestWorkerDetectRouting:
         mock_cli.assert_called()
 
     def test_env_var_off_falls_back_to_run_cli(self, tmp_path, monkeypatch):
-        """SIMGUI_WORKER_INPROCESS unset -> legacy path even if READY+capable."""
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        """SIMGUI_WORKER_INPROCESS=0 -> legacy path even if READY+capable."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         cm = _make_cm(tmp_path)
         result = DetectResult(ok=True, card_type="gialersim", blank=False, fields={})
         client = _mock_client(caps=["detect"], detect_result=result)

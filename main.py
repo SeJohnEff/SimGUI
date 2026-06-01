@@ -57,8 +57,8 @@ logger = logging.getLogger(__name__)
 
 
 def _worker_mode_enabled() -> bool:
-    """Return True when the persistent worker subprocess is requested at startup."""
-    return os.environ.get("SIMGUI_WORKER") == "1"
+    """Return True unless SIMGUI_WORKER=0 explicitly opts out."""
+    return os.environ.get("SIMGUI_WORKER") != "0"
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +281,15 @@ class SimGUIApp(QMainWindow):
         self._auto_artifact = AutoArtifactManager(self._ns_manager)
         self._standards_mgr = StandardsManager()
         self._worker_client = None
-        logger.info("WORKER_DIAG SIMGUI_WORKER=%r  SIMGUI_WORKER_INPROCESS=%r",
-                    os.environ.get("SIMGUI_WORKER", ""),
-                    os.environ.get("SIMGUI_WORKER_INPROCESS", ""))
+        _raw_w = os.environ.get("SIMGUI_WORKER")
+        _raw_ip = os.environ.get("SIMGUI_WORKER_INPROCESS")
+        logger.info(
+            "WORKER_DIAG worker_effective enabled=%s inprocess=%s raw_worker=%r raw_inprocess=%r",
+            _worker_mode_enabled(),
+            _raw_ip != "0",
+            _raw_w,
+            _raw_ip,
+        )
         if _worker_mode_enabled():
             try:
                 from card_worker_client import PersistentWorkerClient

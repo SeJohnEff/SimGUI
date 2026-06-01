@@ -781,13 +781,11 @@ def test_preload_worker_error_transitions_to_error():
 
 
 def test_worker_mode_enabled_uses_simgui_worker(monkeypatch):
-    """_worker_mode_enabled() returns True only when SIMGUI_WORKER=1."""
-    import sys
-    import importlib
+    """_worker_mode_enabled() defaults ON; returns False only when SIMGUI_WORKER=0."""
     import main as _main
-    monkeypatch.setenv("SIMGUI_WORKER", "1")
-    assert _main._worker_mode_enabled() is True
     monkeypatch.setenv("SIMGUI_WORKER", "0")
     assert _main._worker_mode_enabled() is False
+    monkeypatch.setenv("SIMGUI_WORKER", "1")
+    assert _main._worker_mode_enabled() is True
     monkeypatch.delenv("SIMGUI_WORKER", raising=False)
-    assert _main._worker_mode_enabled() is False
+    assert _main._worker_mode_enabled() is True

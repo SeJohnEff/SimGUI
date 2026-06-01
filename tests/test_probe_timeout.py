@@ -522,10 +522,16 @@ class TestSubprocessProbe:
         assert ok is True
         assert msg == "3B AB CD"
 
-    # --- 1. subprocess timeout returns 'PC/SC probe timed out'; _probe_thread is None ---
+    # --- 1. subprocess timeout returns 'PC/SC probe timed out' ---
+    # With new probe order, in-process runs first; subprocess is the fallback
+    # when in-process times out.
 
     def test_subprocess_timeout_result_and_no_thread(self, monkeypatch):
         cm = _patched_probe_cm(monkeypatch)
+
+        # Simulate in-process probe timing out so subprocess fallback runs.
+        monkeypatch.setattr(cm, "_probe_with_timeout",
+                            lambda reader, timeout=None: (False, "PC/SC probe timed out"))
 
         def _raise_timeout(*a, **kw):
             raise subprocess.TimeoutExpired(cmd=["python"], timeout=2.0)
@@ -534,7 +540,6 @@ class TestSubprocessProbe:
         ok, msg = cm.probe_card_presence()
         assert ok is False
         assert msg == "PC/SC probe timed out"
-        assert cm._probe_thread is None
 
     # --- env: frozen mode passes PYTHONPATH including sys._MEIPASS ---
 
@@ -631,10 +636,13 @@ class TestSubprocessProbe:
         monkeypatch.setattr(cm_mod.subprocess, "run", _run)
         cm = CardManager(pcsc_reader_index=0)
 
+        # In-process times out → subprocess fallback runs (and also times out on call 1).
+        monkeypatch.setattr(cm, "_probe_with_timeout",
+                            lambda reader, timeout=None: (False, "PC/SC probe timed out"))
+
         ok1, msg1 = cm.probe_card_presence()
         assert ok1 is False
         assert msg1 == "PC/SC probe timed out"
-        assert cm._probe_thread is None  # no orphaned thread
 
         ok2, msg2 = cm.probe_card_presence()
         assert ok2 is True
