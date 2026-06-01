@@ -100,3 +100,38 @@ class TestDetectInprocessRouting:
         client.detect.assert_called_once()
         client.detect_inprocess.assert_not_called()
         mock_cli.assert_not_called()
+
+    def test_public_fields_shell_skipped_when_worker_returns_all_three(self, tmp_path, monkeypatch):
+        """_read_public_fields_via_shell not called when SPN+ACC+FPLMN all present in worker result."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm(tmp_path)
+        result = DetectResult(
+            ok=True, card_type="sysmoisim-sja5", blank=False,
+            fields={"ICCID": "8946220000000000001", "IMSI": "244220000000001",
+                    "SPN": "TestNet", "ACC": "0001", "FPLMN": ""},
+        )
+        client = _make_client(caps=["detect_inprocess"], detect_result=result)
+        cm.set_worker_client(client)
+
+        with patch.object(cm, "_read_public_fields_via_shell") as mock_shell:
+            ok, _ = cm.detect_card()
+
+        assert ok is True
+        mock_shell.assert_not_called()
+
+    def test_public_fields_shell_called_when_worker_missing_a_field(self, tmp_path, monkeypatch):
+        """_read_public_fields_via_shell called when any of SPN/ACC/FPLMN absent in worker result."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm(tmp_path)
+        result = DetectResult(
+            ok=True, card_type="sysmoisim-sja5", blank=False,
+            fields={"ICCID": "8946220000000000001", "IMSI": "244220000000001", "SPN": "TestNet"},
+        )
+        client = _make_client(caps=["detect_inprocess"], detect_result=result)
+        cm.set_worker_client(client)
+
+        with patch.object(cm, "_read_public_fields_via_shell") as mock_shell:
+            ok, _ = cm.detect_card()
+
+        assert ok is True
+        mock_shell.assert_called_once()

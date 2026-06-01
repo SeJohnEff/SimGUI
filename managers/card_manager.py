@@ -845,7 +845,9 @@ class CardManager:
                     return True, "Card detected via pySim (blank)"
                 if _wr.ok:
                     self._apply_worker_detect_result(_wr)
-                    self._read_public_fields_via_shell()
+                    _f = _wr.fields or {}
+                    if not (_f.get("SPN") is not None and _f.get("ACC") is not None and _f.get("FPLMN") is not None):
+                        self._read_public_fields_via_shell()
                     self._original_card_data = dict(self.card_info)
                     return True, "Card detected via pySim"
                 return False, _wr.msg or _wr.error or "No card detected"
