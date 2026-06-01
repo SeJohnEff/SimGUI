@@ -475,14 +475,29 @@ class CardWatcher:
         """Run worker detect and fire the appropriate callback."""
         from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
 
+        if not hasattr(self, "_worker_caps_cache"):
+            try:
+                self._worker_caps_cache = self._worker_client.capabilities()
+            except Exception:
+                self._worker_caps_cache = []
+
         try:
-            result = self._worker_client.detect(
-                session_id=session_id,
-                card_gen=card_gen,
-                pysim_path=self._pysim_path,
-                reader_index=0,
-                timeout=30.0,
-            )
+            if "detect_inprocess" in self._worker_caps_cache:
+                result = self._worker_client.detect_inprocess(
+                    session_id=session_id,
+                    card_gen=card_gen,
+                    pysim_path=self._pysim_path,
+                    reader_index=0,
+                    timeout=30.0,
+                )
+            else:
+                result = self._worker_client.detect(
+                    session_id=session_id,
+                    card_gen=card_gen,
+                    pysim_path=self._pysim_path,
+                    reader_index=0,
+                    timeout=30.0,
+                )
         except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
             self._last_read_failed = True
             if self.on_error:

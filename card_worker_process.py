@@ -48,8 +48,8 @@ _BASE_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "de
 
 
 def _inprocess_enabled() -> bool:
-    """Phase 1 spike: in-process pySim path is opt-in via env var."""
-    return os.environ.get("SIMGUI_WORKER_INPROCESS") == "1"
+    """In-process pySim path is default-on; set SIMGUI_WORKER_INPROCESS=0 to disable."""
+    return os.environ.get("SIMGUI_WORKER_INPROCESS") != "0"
 
 
 def _capabilities() -> list:

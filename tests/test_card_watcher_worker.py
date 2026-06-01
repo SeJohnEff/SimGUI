@@ -515,3 +515,47 @@ def test_on_worker_session_ready_does_not_fire_on_detect_error():
     watcher._check_once()
 
     assert sessions == []
+
+
+# ---------------------------------------------------------------------------
+# Test 22: _worker_read_and_notify uses detect_inprocess when capability present
+# ---------------------------------------------------------------------------
+
+def test_worker_read_uses_detect_inprocess_when_available():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid1"),
+        detect_result=DetectResult(ok=True, blank=True),
+    )
+    worker.detect_inprocess_calls = 0
+
+    def fake_detect_inprocess(**kwargs):
+        worker.detect_inprocess_calls += 1
+        return DetectResult(ok=True, blank=True)
+
+    worker.detect_inprocess = fake_detect_inprocess
+    worker.capabilities = lambda: ["detect", "detect_inprocess", "read_fields"]
+
+    watcher, _ = make_watcher(worker=worker)
+    watcher.on_card_unknown = lambda x: None
+    watcher._check_once()
+
+    assert worker.detect_inprocess_calls == 1
+    assert worker.detect_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 23: _worker_read_and_notify falls back to detect when inprocess absent
+# ---------------------------------------------------------------------------
+
+def test_worker_read_falls_back_to_detect_when_inprocess_absent():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid1"),
+        detect_result=DetectResult(ok=True, blank=True),
+    )
+    worker.capabilities = lambda: ["detect", "read_fields"]
+
+    watcher, _ = make_watcher(worker=worker)
+    watcher.on_card_unknown = lambda x: None
+    watcher._check_once()
+
+    assert worker.detect_calls == 1

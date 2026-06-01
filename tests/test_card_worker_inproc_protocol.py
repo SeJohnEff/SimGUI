@@ -72,8 +72,8 @@ def _install_fake_pysim(monkeypatch, program_spy=None, raise_on_program=None):
 
 # --- Tests ---
 
-def test_handler_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+def test_handler_disabled_when_opted_out(monkeypatch):
+    monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
     responses = _capture_responses(monkeypatch)
 
     _send({"id": 1, "verb": "program_full",
@@ -166,8 +166,8 @@ def test_handler_pysim_import_failed(monkeypatch):
     assert r["error"] == "PYSIM_IMPORT_FAILED"
 
 
-def test_capability_excluded_when_flag_off(monkeypatch):
-    monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+def test_capability_excluded_when_opted_out(monkeypatch):
+    monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
     responses = _capture_responses(monkeypatch)
     _send({"id": 7, "verb": "capabilities"})
     assert "program_full" not in responses[0]["result"]
@@ -327,9 +327,9 @@ def _install_fake_pysim_detect(monkeypatch, iccid=None, imsi=None, spn=None,
 
 class TestDetectInprocessHandler:
 
-    def test_handler_disabled_without_env(self, monkeypatch):
-        """detect_inprocess verb returns INPROCESS_DISABLED when env var unset."""
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+    def test_handler_disabled_when_opted_out(self, monkeypatch):
+        """detect_inprocess verb returns INPROCESS_DISABLED when explicitly disabled."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         responses = _capture_responses(monkeypatch)
         _send({"id": 99, "verb": "detect_inprocess", "params": {"reader_index": 0}})
         assert len(responses) == 1
@@ -415,8 +415,8 @@ class TestDetectInprocessHandler:
         assert "detect_inprocess" in caps
 
     def test_capabilities_exclude_detect_inprocess_when_disabled(self, monkeypatch):
-        """detect_inprocess absent from capabilities when env var unset."""
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        """detect_inprocess absent from capabilities when explicitly disabled."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         responses = _capture_responses(monkeypatch)
         _send({"id": 21, "verb": "capabilities"})
         caps = responses[0]["result"]
@@ -543,7 +543,7 @@ class TestWorkerAuthDelegateRouting:
         assert called["gialersim"] is True
 
     def test_inprocess_disabled_uses_subprocess(self, monkeypatch):
-        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
         subprocess_calls = []
 
         def fake_run(*args, **kwargs):

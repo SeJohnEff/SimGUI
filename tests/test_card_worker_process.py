@@ -102,14 +102,15 @@ def test_status_returns_idle_and_pid():
 
 # --- capabilities ---
 
-def test_capabilities_contains_four_verbs():
+def test_capabilities_contains_base_verbs():
     proc = _spawn()
     try:
         _banner(proc)
         resp, _ = _send(proc, "capabilities")
         assert resp["ok"] is True
-        caps = resp["result"]
-        assert set(caps) == {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"}
+        caps = set(resp["result"])
+        base = {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"}
+        assert base.issubset(caps)
     finally:
         proc.terminate()
         proc.wait()
@@ -661,6 +662,11 @@ class TestHandleAuthenticate:
 
 class TestWorkerAuthDelegateAuthenticateAdm:
 
+    @pytest.fixture(autouse=True)
+    def disable_inprocess(self, monkeypatch):
+        # These tests cover the CLI subprocess auth path; disable in-process mode.
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
+
     def _make_delegate(self, pysim_path="/opt/pysim", reader_index=0):
         return card_worker_process.WorkerAuthDelegate(pysim_path, reader_index)
 
@@ -731,3 +737,37 @@ class TestWorkerAuthDelegateAuthenticateAdm:
                 ok, msg = delegate.authenticate_adm("3838383838383838")
         assert ok is False
         assert msg.startswith("TRANSPORT_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# _inprocess_enabled default-on semantics
+# ---------------------------------------------------------------------------
+
+def test_inprocess_enabled_default_on(monkeypatch):
+    import card_worker_process as cwp
+    monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+    assert cwp._inprocess_enabled() is True
+
+
+def test_inprocess_enabled_opt_out(monkeypatch):
+    import card_worker_process as cwp
+    monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "0")
+    assert cwp._inprocess_enabled() is False
+
+
+def test_inprocess_enabled_explicit_on(monkeypatch):
+    import card_worker_process as cwp
+    monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+    assert cwp._inprocess_enabled() is True
+
+
+def test_capabilities_include_detect_inprocess_by_default(monkeypatch):
+    """_capabilities() includes detect_inprocess when inprocess is enabled and inproc loads."""
+    import card_worker_process as cwp
+    monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+    # Patch card_worker_inproc so delta_supported_fields returns True
+    fake_inproc = type("FakeInproc", (), {"delta_supported_fields": staticmethod(lambda: ["IMSI"])})()
+    monkeypatch.setitem(__import__("sys").modules, "card_worker_inproc", fake_inproc)
+    caps = cwp._capabilities()
+    assert "detect_inprocess" in caps
+    assert "program_full" in caps
