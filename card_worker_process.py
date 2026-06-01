@@ -101,6 +101,19 @@ def _smartcard_readers():
         return []
 
 
+def _reset_inprocess_session_if_available(reason: str) -> None:
+    """Reset the in-process pySim transport on card lifecycle transitions.
+
+    Lazy-imports card_worker_inproc; never raises outward. Safe to call
+    whether or not SIMGUI_WORKER_INPROCESS is set.
+    """
+    try:
+        import card_worker_inproc as _inproc
+        _inproc.reset_session()
+    except Exception:
+        pass
+
+
 def _handle_probe(req_id, params):
     global _card_gen, _session_id, _last_atr, _card_present
     global _session_profile, _session_pysim_path, _session_reader_index
@@ -145,6 +158,7 @@ def _handle_probe(req_id, params):
             _session_profile = None
             _session_pysim_path = ""
             _session_reader_index = 0
+            _reset_inprocess_session_if_available("card_removed")
         _write({"id": req_id, "ok": True, "present": False, "msg": "No card in reader"})
         return
 
@@ -158,6 +172,7 @@ def _handle_probe(req_id, params):
         _session_profile = None
         _session_pysim_path = ""
         _session_reader_index = 0
+        _reset_inprocess_session_if_available("new_card_generation")
 
     _write({
         "id": req_id,

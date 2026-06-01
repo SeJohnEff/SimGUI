@@ -178,3 +178,92 @@ def test_capability_advertised_when_flag_on(monkeypatch):
     responses = _capture_responses(monkeypatch)
     _send({"id": 8, "verb": "capabilities"})
     assert "program_full" in responses[0]["result"]
+
+
+# ---------------------------------------------------------------------------
+# Phase B.1 — in-process session lifecycle reset tests
+# ---------------------------------------------------------------------------
+
+def _make_probe_readers(monkeypatch, present: bool, atr_hex: str = "3b9f96"):
+    """Patch _smartcard_readers and threading so probe behaves synchronously."""
+    import threading as _threading
+
+    class _FakeConn:
+        def connect(self):
+            if not present:
+                raise Exception("no card")
+        def getATR(self):
+            return bytes.fromhex(atr_hex)
+
+    class _FakeReader:
+        def createConnection(self):
+            return _FakeConn()
+
+    monkeypatch.setattr(card_worker_process, "_smartcard_readers", lambda: [_FakeReader()])
+
+    # Patch threading.Thread so the inner _connect() runs synchronously.
+    original_thread = _threading.Thread
+    class _SyncThread:
+        def __init__(self, target=None, daemon=None, name=None):
+            self._target = target
+        def start(self):
+            self._target()
+        def join(self, timeout=None):
+            pass
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(card_worker_process, "__builtins__", card_worker_process.__builtins__)
+    # Patch threading inside the module namespace via sys.modules trick
+    import sys
+    fake_threading = type(sys)("threading")
+    fake_threading.Thread = _SyncThread
+    monkeypatch.setitem(sys.modules, "threading", fake_threading)
+
+
+def test_reset_called_on_card_removal(monkeypatch):
+    """reset_session() is called when probe transitions present→absent."""
+    reset_calls = []
+    monkeypatch.setattr(card_worker_inproc, "reset_session", lambda: reset_calls.append("reset"))
+
+    responses = _capture_responses(monkeypatch)
+    _make_probe_readers(monkeypatch, present=False)
+
+    # Pre-seed _card_present=True so removal transition fires.
+    card_worker_process._card_present = True
+    _send({"id": 10, "verb": "probe", "params": {"reader_index": 0, "timeout": 1.0}})
+
+    assert reset_calls == ["reset"], "reset_session must be called on card removal"
+    assert responses[0]["present"] is False
+
+
+def test_reset_called_on_new_card_generation(monkeypatch):
+    """reset_session() is called on absent→present (new card inserted)."""
+    reset_calls = []
+    monkeypatch.setattr(card_worker_inproc, "reset_session", lambda: reset_calls.append("reset"))
+
+    responses = _capture_responses(monkeypatch)
+    _make_probe_readers(monkeypatch, present=True)
+
+    # Pre-seed absent state so absent→present transition fires.
+    card_worker_process._card_present = False
+    _send({"id": 11, "verb": "probe", "params": {"reader_index": 0, "timeout": 1.0}})
+
+    assert reset_calls == ["reset"], "reset_session must be called on new card generation"
+    assert responses[0]["present"] is True
+
+
+def test_reset_not_called_for_stable_same_card(monkeypatch):
+    """reset_session() is NOT called when card was already present (same generation)."""
+    reset_calls = []
+    monkeypatch.setattr(card_worker_inproc, "reset_session", lambda: reset_calls.append("reset"))
+
+    responses = _capture_responses(monkeypatch)
+    _make_probe_readers(monkeypatch, present=True)
+
+    # Pre-seed present state — no transition, same card.
+    card_worker_process._card_present = True
+    _send({"id": 12, "verb": "probe", "params": {"reader_index": 0, "timeout": 1.0}})
+
+    assert reset_calls == [], "reset_session must NOT be called for stable same-card probe"
+    assert responses[0]["present"] is True
