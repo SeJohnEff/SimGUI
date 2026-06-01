@@ -184,42 +184,65 @@ def _handle_probe(req_id, params):
     })
 
 
+def _run_pysim_read(cli: str, reader_index: int, timeout: float):
+    return subprocess.run(
+        [sys.executable, cli, "-p", str(reader_index)],
+        capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _detect_error(req_id, error, worker_error, stdout="", stderr=""):
+    _write({
+        "id": req_id, "ok": False, "blank": False, "card_type": "",
+        "fields": {}, "stdout": stdout, "stderr": stderr,
+        "worker_error": worker_error, "error": error,
+    })
+
+
 def _handle_detect(req_id, params):
     p = params or {}
     session_id = p.get("session_id")
     card_gen = p.get("card_gen")
 
     if session_id != _session_id or card_gen != _card_gen:
-        _write({"id": req_id, "ok": False, "error": "STALE_SESSION"})
+        _detect_error(req_id, "STALE_SESSION", worker_error=True)
         return
 
     pysim_path = p.get("pysim_path", "")
     if not pysim_path:
-        _write({"id": req_id, "ok": False, "error": "CLI_NOT_FOUND"})
+        _detect_error(req_id, "CLI_NOT_FOUND", worker_error=True)
         return
 
     cli = os.path.join(pysim_path, "pySim-read.py")
     if not os.path.isfile(cli):
-        _write({"id": req_id, "ok": False, "error": "CLI_NOT_FOUND"})
+        _detect_error(req_id, "CLI_NOT_FOUND", worker_error=True)
         return
 
     timeout = p.get("timeout", 30)
     reader_index = p.get("reader_index", 0)
 
     try:
-        proc = subprocess.run(
-            [sys.executable, cli, "-p", str(reader_index)],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        proc = _run_pysim_read(cli, reader_index, timeout)
     except subprocess.TimeoutExpired:
-        _write({"id": req_id, "ok": False, "error": "CARD_UNRESPONSIVE"})
+        _detect_error(req_id, "CARD_UNRESPONSIVE", worker_error=False)
         return
+
+    # Transient PCSC lock contention: retry once on protocolerror.
+    if proc.returncode != 0 and "protocolerror" in proc.stderr.lower():
+        import time as _time
+        _time.sleep(1.0)
+        try:
+            proc = _run_pysim_read(cli, reader_index, timeout)
+        except subprocess.TimeoutExpired:
+            _detect_error(req_id, "CARD_UNRESPONSIVE", worker_error=False)
+            return
 
     from pysim_parser import parse_pysim_output
     try:
         fields = parse_pysim_output(proc.stdout)
     except Exception:
-        _write({"id": req_id, "ok": False, "error": "PARSE_FAILED"})
+        _detect_error(req_id, "PARSE_FAILED", worker_error=False,
+                      stdout=proc.stdout, stderr=proc.stderr)
         return
 
     card_type = fields.get("card_type_str", "")
@@ -228,7 +251,8 @@ def _handle_detect(req_id, params):
     blank = (card_type == "gialersim") or (not has_iccid and not has_imsi)
 
     if proc.returncode != 0 and not card_type and not has_iccid and not has_imsi:
-        _write({"id": req_id, "ok": False, "error": "DETECT_FAILED"})
+        _detect_error(req_id, "DETECT_FAILED", worker_error=False,
+                      stdout=proc.stdout, stderr=proc.stderr)
         return
 
     global _session_profile, _session_pysim_path, _session_reader_index
@@ -242,7 +266,11 @@ def _handle_detect(req_id, params):
         _session_pysim_path = ""
         _session_reader_index = 0
 
-    _write({"id": req_id, "ok": True, "blank": blank, "fields": fields})
+    _write({
+        "id": req_id, "ok": True, "blank": blank, "card_type": card_type,
+        "fields": fields, "stdout": proc.stdout, "stderr": proc.stderr,
+        "worker_error": False,
+    })
 
 
 def _handle_authenticate(req_id, params):

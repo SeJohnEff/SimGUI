@@ -354,7 +354,7 @@ def test_probe_ok_false_with_result_preserves_card_gen():
 
 def test_detect_sends_correct_verb_and_params():
     client = _MockClient()
-    client._send_return = {"ok": True, "result": {"card_type": "sysmoISIM-SJA5", "blank": False, "fields": {}}}
+    client._send_return = {"ok": True, "card_type": "sysmoISIM-SJA5", "blank": False, "fields": {}, "stdout": "", "stderr": "", "worker_error": False}
     client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", reader_index=0, timeout=30.0)
     assert len(client._send_calls) == 1
     call = client._send_calls[0]
@@ -370,14 +370,14 @@ def test_detect_sends_correct_verb_and_params():
 
 def test_detect_default_request_timeout_is_timeout_plus_one():
     client = _MockClient()
-    client._send_return = {"ok": True, "result": {}}
+    client._send_return = {"ok": True, "blank": False, "card_type": "", "fields": {}, "stdout": "", "stderr": "", "worker_error": False}
     client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", timeout=30.0)
     assert client._send_calls[0]["timeout"] == pytest.approx(31.0)
 
 
 def test_detect_custom_request_timeout_overrides_default():
     client = _MockClient()
-    client._send_return = {"ok": True, "result": {}}
+    client._send_return = {"ok": True, "blank": False, "card_type": "", "fields": {}, "stdout": "", "stderr": "", "worker_error": False}
     client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim", timeout=30.0, request_timeout=45.0)
     assert client._send_calls[0]["timeout"] == pytest.approx(45.0)
 
@@ -386,13 +386,12 @@ def test_detect_ok_response_parsed_correctly():
     client = _MockClient()
     client._send_return = {
         "ok": True,
-        "result": {
-            "card_type": "sysmoISIM-SJA5",
-            "blank": False,
-            "fields": {"ICCID": "8946001234567890123", "IMSI": "240011234567890"},
-            "session_id": "sess-42",
-            "card_gen": 7,
-        },
+        "card_type": "sysmoISIM-SJA5",
+        "blank": False,
+        "fields": {"ICCID": "8946001234567890123", "IMSI": "240011234567890"},
+        "stdout": "Autodetected card type: sysmoISIM-SJA5\n",
+        "stderr": "",
+        "worker_error": False,
     }
     result = client.detect(session_id="sess-42", card_gen=7, pysim_path="/opt/pysim")
     assert isinstance(result, DetectResult)
@@ -400,8 +399,6 @@ def test_detect_ok_response_parsed_correctly():
     assert result.card_type == "sysmoISIM-SJA5"
     assert result.blank is False
     assert result.fields["ICCID"] == "8946001234567890123"
-    assert result.session_id == "sess-42"
-    assert result.card_gen == 7
     assert result.error is None
 
 
@@ -409,13 +406,12 @@ def test_detect_blank_card_response_parsed_correctly():
     client = _MockClient()
     client._send_return = {
         "ok": True,
-        "result": {
-            "card_type": "gialersim",
-            "blank": True,
-            "fields": {},
-            "session_id": "sess-blank",
-            "card_gen": 3,
-        },
+        "card_type": "gialersim",
+        "blank": True,
+        "fields": {},
+        "stdout": "Autodetected card type: gialersim\n",
+        "stderr": "",
+        "worker_error": False,
     }
     result = client.detect(session_id="sess-blank", card_gen=3, pysim_path="/opt/pysim")
     assert result.ok is True
@@ -441,7 +437,7 @@ def test_detect_stale_session_response_parsed_as_error():
 
 def test_read_fields_sends_correct_verb():
     client = _MockClient()
-    client._send_return = {"ok": True, "result": {}}
+    client._send_return = {"ok": True, "blank": False, "card_type": "", "fields": {}, "stdout": "", "stderr": "", "worker_error": False}
     client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim")
     assert client._send_calls[0]["verb"] == "read_fields"
 
@@ -450,27 +446,66 @@ def test_read_fields_ok_response_parsed_correctly():
     client = _MockClient()
     client._send_return = {
         "ok": True,
-        "result": {
-            "card_type": "sysmoISIM-SJA5",
-            "blank": False,
-            "fields": {"IMSI": "240019876543210", "ACC": "0001"},
-            "session_id": "s2",
-            "card_gen": 5,
-        },
+        "card_type": "sysmoISIM-SJA5",
+        "blank": False,
+        "fields": {"IMSI": "240019876543210", "ACC": "0001"},
+        "stdout": "",
+        "stderr": "",
+        "worker_error": False,
     }
     result = client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim")
     assert isinstance(result, DetectResult)
     assert result.ok is True
     assert result.fields["IMSI"] == "240019876543210"
-    assert result.card_gen == 5
     assert result.error is None
 
 
 def test_read_fields_default_request_timeout_is_timeout_plus_one():
     client = _MockClient()
-    client._send_return = {"ok": True, "result": {}}
+    client._send_return = {"ok": True, "blank": False, "card_type": "", "fields": {}, "stdout": "", "stderr": "", "worker_error": False}
     client.read_fields(session_id="s2", card_gen=5, pysim_path="/opt/pysim", timeout=20.0)
     assert client._send_calls[0]["timeout"] == pytest.approx(21.0)
+
+
+def test_detect_response_includes_card_type_and_worker_error():
+    client = _MockClient()
+    client._send_return = {
+        "ok": True,
+        "card_type": "sysmoISIM-SJA5",
+        "blank": False,
+        "fields": {"ICCID": "8946000000000000001"},
+        "stdout": "output",
+        "stderr": "",
+        "worker_error": False,
+    }
+    result = client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+    assert result.card_type == "sysmoISIM-SJA5"
+    assert result.ok is True
+
+
+def test_detect_worker_error_response_parsed_as_failure():
+    client = _MockClient()
+    client._send_return = {
+        "ok": False,
+        "error": "CLI_NOT_FOUND",
+        "blank": False,
+        "card_type": "",
+        "fields": {},
+        "stdout": "",
+        "stderr": "",
+        "worker_error": True,
+    }
+    result = client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
+    assert result.ok is False
+    assert result.error == "CLI_NOT_FOUND"
+
+
+def test_detect_missing_ok_raises_protocol_error():
+    from card_worker_client import WorkerProtocolError
+    client = _MockClient()
+    client._send_return = {"result": {"something": "unexpected"}}
+    with pytest.raises(WorkerProtocolError):
+        client.detect(session_id="s1", card_gen=1, pysim_path="/opt/pysim")
 
 
 # ---------------------------------------------------------------------------

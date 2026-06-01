@@ -309,15 +309,14 @@ class PersistentWorkerClient:
             },
             timeout=rt,
         )
-        result = resp.get("result") or {}
+        if "ok" not in resp:
+            raise WorkerProtocolError(str(resp))
         if resp.get("ok"):
             return DetectResult(
                 ok=True,
-                card_type=result.get("card_type"),
-                blank=bool(result.get("blank", False)),
-                fields=result.get("fields") or {},
-                session_id=result.get("session_id"),
-                card_gen=result.get("card_gen"),
+                card_type=resp.get("card_type"),
+                blank=bool(resp.get("blank", False)),
+                fields=resp.get("fields") or {},
             )
         return DetectResult(
             ok=False,
@@ -432,15 +431,14 @@ class PersistentWorkerClient:
             },
             timeout=rt,
         )
-        result = resp.get("result") or {}
+        if "ok" not in resp:
+            raise WorkerProtocolError(str(resp))
         if resp.get("ok"):
             return DetectResult(
                 ok=True,
-                card_type=result.get("card_type"),
-                blank=bool(result.get("blank", False)),
-                fields=result.get("fields") or {},
-                session_id=result.get("session_id"),
-                card_gen=result.get("card_gen"),
+                card_type=resp.get("card_type"),
+                blank=bool(resp.get("blank", False)),
+                fields=resp.get("fields") or {},
             )
         return DetectResult(
             ok=False,

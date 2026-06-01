@@ -396,6 +396,7 @@ class TestHandleDetectUnit:
                 resp = _run_detect(params)
         assert resp["ok"] is False
         assert resp["error"] == "DETECT_FAILED"
+        assert resp["worker_error"] is False
 
     def test_read_fields_mirrors_successful_detect(self):
         _reset_detect_state("abc123", 1)
@@ -409,6 +410,66 @@ class TestHandleDetectUnit:
         resp = captured[0]
         assert resp["ok"] is True
         assert resp["fields"]["ICCID"] == "8946000000000000001"
+        assert resp["card_type"] == "sysmoisim-sja5"
+        assert resp["worker_error"] is False
+        assert "stdout" in resp
+        assert "stderr" in resp
+
+    def test_detect_success_includes_stable_schema_fields(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        with patch("card_worker_process.subprocess.run", return_value=completed):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                resp = _run_detect(params)
+        assert resp["ok"] is True
+        assert resp["card_type"] == "sysmoisim-sja5"
+        assert resp["blank"] is False
+        assert resp["worker_error"] is False
+        assert resp["stdout"] == SJA5_OUTPUT
+        assert resp["stderr"] == ""
+
+    def test_stale_session_sets_worker_error_true(self):
+        params = {**_BASE_PARAMS, "session_id": "wrong", "card_gen": 1}
+        with patch("card_worker_process.os.path.isfile", return_value=True):
+            resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "STALE_SESSION"
+        assert resp["worker_error"] is True
+
+    def test_cli_not_found_sets_worker_error_true(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        with patch("card_worker_process.os.path.isfile", return_value=False):
+            resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["error"] == "CLI_NOT_FOUND"
+        assert resp["worker_error"] is True
+
+    def test_protocolerror_retries_once_then_succeeds(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        fail = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ProtocolError: T=0")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
+        run_results = [fail, ok]
+        with patch("card_worker_process.subprocess.run", side_effect=run_results):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                with patch("card_worker_process.time" if hasattr(card_worker_process, "time") else "time.sleep"):
+                    import unittest.mock as _mock
+                    with _mock.patch("time.sleep"):
+                        resp = _run_detect(params)
+        assert resp["ok"] is True
+        assert resp["fields"]["ICCID"] == "8946000000000000001"
+
+    def test_protocolerror_retries_once_then_fails(self):
+        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
+        fail1 = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ProtocolError: T=0")
+        fail2 = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="still failing")
+        run_results = [fail1, fail2]
+        with patch("card_worker_process.subprocess.run", side_effect=run_results):
+            with patch("card_worker_process.os.path.isfile", return_value=True):
+                import unittest.mock as _mock
+                with _mock.patch("time.sleep"):
+                    resp = _run_detect(params)
+        assert resp["ok"] is False
+        assert resp["worker_error"] is False
 
     def test_capabilities_include_detect_and_read_fields(self):
         assert "detect" in card_worker_process._CAPABILITIES
