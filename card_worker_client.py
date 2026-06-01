@@ -138,8 +138,12 @@ class PersistentWorkerClient:
         self._state = WorkerState.STARTING
         self._last_error = None
         try:
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--simgui-worker-process"]
+            else:
+                cmd = [sys.executable, self._script]
             self._process = subprocess.Popen(
-                [sys.executable, self._script],
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

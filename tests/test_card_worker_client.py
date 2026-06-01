@@ -780,6 +780,41 @@ def test_preload_worker_error_transitions_to_error():
     assert client.last_error is not None
 
 
+def test_start_frozen_uses_flag(monkeypatch):
+    """In a frozen app, start() spawns [sys.executable, '--simgui-worker-process']."""
+    import card_worker_client as _cwc
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    client = PersistentWorkerClient(worker_script="/fake/card_worker_process.py")
+    captured = {}
+
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        raise OSError("stop here")
+
+    monkeypatch.setattr(_cwc.subprocess, "Popen", fake_popen)
+    with pytest.raises(WorkerStartError):
+        client.start()
+    assert captured["cmd"] == [sys.executable, "--simgui-worker-process"]
+
+
+def test_start_unfrozen_uses_script(monkeypatch):
+    """Without sys.frozen, start() spawns [sys.executable, script_path]."""
+    import card_worker_client as _cwc
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    script = "/fake/card_worker_process.py"
+    client = PersistentWorkerClient(worker_script=script)
+    captured = {}
+
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        raise OSError("stop here")
+
+    monkeypatch.setattr(_cwc.subprocess, "Popen", fake_popen)
+    with pytest.raises(WorkerStartError):
+        client.start()
+    assert captured["cmd"] == [sys.executable, script]
+
+
 def test_worker_mode_enabled_uses_simgui_worker(monkeypatch):
     """_worker_mode_enabled() defaults ON; returns False only when SIMGUI_WORKER=0."""
     import main as _main

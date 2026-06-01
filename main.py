@@ -9,10 +9,17 @@ together managers, panels, and state management.
 
 from __future__ import annotations
 
-import csv
-import logging
 import os
 import sys
+
+# Worker dispatch — must precede all heavy imports and logging setup.
+if "--simgui-worker-process" in sys.argv or os.environ.get("SIMGUI_WORKER_PROCESS") == "1":
+    sys.argv = [a for a in sys.argv if a != "--simgui-worker-process"]
+    from card_worker_process import main as _worker_main
+    sys.exit(_worker_main())
+
+import csv
+import logging
 from datetime import datetime
 from typing import Optional
 
