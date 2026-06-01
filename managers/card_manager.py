@@ -664,6 +664,8 @@ class CardManager:
             python_exe = self._venv_python or sys.executable
         pysim_env = _get_pysim_env()
         cmd = [python_exe, script_path] + list(args)
+        logger.info("PY_LOAD_DIAG subprocess script=%s python=%s args=%r",
+                    os.path.basename(script_path), os.path.basename(python_exe), list(args))
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout,
@@ -747,6 +749,8 @@ class CardManager:
             python_exe = self._venv_python or sys.executable
         if not python_exe:
             return _ProbeResult.unavailable("No Python interpreter for subprocess probe")
+        logger.info("PY_LOAD_DIAG subprocess pcsc-probe python=%s reader=%d",
+                    os.path.basename(python_exe), reader_index)
         try:
             proc = subprocess.run(
                 [python_exe, '-c', _PCSC_PROBE_SCRIPT, str(reader_index)],
@@ -1046,6 +1050,10 @@ class CardManager:
         # NOTE: pySim-shell uses 'quit', NOT 'exit'.
         full_input = commands.rstrip('\n') + '\nquit\n'
         logger.debug("pySim-shell input:\n%s", full_input)
+        _ct = getattr(self, "card_type", None)
+        logger.info("PY_LOAD_DIAG subprocess pySim-shell python=%s reader=%d has_adm1=%s card_type=%s",
+                    os.path.basename(python_exe), self._pcsc_reader_index,
+                    bool(adm1_hex), _ct.name if _ct else "UNKNOWN")
         try:
             result = subprocess.run(
                 cmd, input=full_input, capture_output=True, text=True,
@@ -1181,6 +1189,8 @@ class CardManager:
         if self.card_type == CardType.GIALERSIM:
             secrets.add(self._hex_to_adm1_ascii(adm1_hex))
         pysim_env = _get_pysim_env()
+        logger.info("PY_LOAD_DIAG subprocess pySim-prog python=%s card_type=%s reader=%d",
+                    os.path.basename(python_exe), pysim_type, self._pcsc_reader_index)
         logger.info("pySim-prog command: %s",
                     ' '.join('***' if c in secrets else c for c in cmd))
         try:
