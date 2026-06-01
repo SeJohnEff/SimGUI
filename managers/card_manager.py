@@ -2124,27 +2124,32 @@ class CardManager:
                 time.sleep(self._VERIFY_DELAY_S)
                 logger.info("Verify attempt %d/%d", attempt, self._VERIFY_RETRIES)
 
-            ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
-            logger.info("Verify read-back (attempt %d): ok=%s, "
-                        "stdout_lines=%d, stderr_lines=%d",
-                        attempt, ok,
-                        len(stdout.splitlines()) if stdout else 0,
-                        len(stderr.splitlines()) if stderr else 0)
-            if stdout:
-                logger.debug("Verify stdout:\n%s", stdout[:500])
-            if not ok and not stdout:
-                last_mismatches = [
-                    f"pySim-read error: "
-                    f"{self._clean_pysim_error(stderr) or 'Unknown error'}"
-                ]
-                continue  # retry
+            worker_fields = self._try_worker_readback_fields()
+            if worker_fields is not None:
+                logger.info("Verify read-back (attempt %d): using in-process worker", attempt)
+                readback = worker_fields
+            else:
+                ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
+                logger.info("Verify read-back (attempt %d): ok=%s, "
+                            "stdout_lines=%d, stderr_lines=%d",
+                            attempt, ok,
+                            len(stdout.splitlines()) if stdout else 0,
+                            len(stderr.splitlines()) if stderr else 0)
+                if stdout:
+                    logger.debug("Verify stdout:\n%s", stdout[:500])
+                if not ok and not stdout:
+                    last_mismatches = [
+                        f"pySim-read error: "
+                        f"{self._clean_pysim_error(stderr) or 'Unknown error'}"
+                    ]
+                    continue  # retry
 
-            # Parse the output into a fresh dict
-            saved_info = self.card_info
-            self.card_info = {}
-            self._parse_pysim_output(stdout)
-            readback = dict(self.card_info)
-            self.card_info = saved_info  # restore
+                # Parse the output into a fresh dict
+                saved_info = self.card_info
+                self.card_info = {}
+                self._parse_pysim_output(stdout)
+                readback = dict(self.card_info)
+                self.card_info = saved_info  # restore
 
             # Compare key fields
             last_mismatches = []
@@ -2177,6 +2182,45 @@ class CardManager:
             f"Programming commands sent but read-back verification FAILED "
             f"after {self._VERIFY_RETRIES} attempts.\n{detail}"
         ), readback
+
+    def _try_worker_readback_fields(self) -> Optional[Dict[str, str]]:
+        """Attempt in-process readback via the persistent worker.
+
+        Returns a fields dict (ICCID, IMSI, SPN, ACC, FPLMN) on success, or
+        None when the worker is unavailable, not ready, the env gate is unset,
+        or the call fails for any reason.  Never mutates self.card_info.
+        """
+        import os
+        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            return None
+        client = getattr(self, "_worker_client", None)
+        if client is None:
+            return None
+        try:
+            if not client.is_ready():
+                return None
+        except Exception:
+            return None
+        if "detect_inprocess" not in self._get_worker_capabilities():
+            return None
+        session_id = self._current_session_id
+        card_gen = self._current_card_gen
+        if session_id is None or card_gen is None:
+            return None
+        pysim_path = self.cli_path or ""
+        try:
+            result = client.detect_inprocess(
+                session_id=session_id,
+                card_gen=card_gen,
+                pysim_path=pysim_path,
+                reader_index=self._pcsc_reader_index,
+            )
+        except Exception as exc:
+            logger.debug("Worker readback failed: %s", exc)
+            return None
+        if not result.ok:
+            return None
+        return dict(result.fields) if result.fields else None
 
     def verify_card(self, expected: Dict[str, str]) -> Tuple[bool, List[str]]:
         """Verify card data matches expected values."""
