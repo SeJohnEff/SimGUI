@@ -7,9 +7,41 @@ Top-level imports: sys, json, os only.
 """
 
 import json
+import logging
 import os
 import subprocess
 import sys
+
+# Redirect all logging to stderr before any lazy import can emit a log line.
+# Without this, a logger writing to the root StreamHandler (which defaults to
+# sys.stderr but may be reconfigured to sys.stdout in a PyInstaller bundle)
+# can pollute the JSON-only stdout protocol channel.
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
+
+
+class _JsonOnlyStdout:
+    """Stdout wrapper that enforces the JSON-lines protocol.
+
+    Any write() whose stripped content does not start with '{' is silently
+    redirected to stderr so that banner/logging lines cannot corrupt the
+    protocol channel.  JSON writes pass through to the real stdout unchanged.
+    """
+
+    def __init__(self, real: "sys.stdout") -> None:
+        self._real = real
+
+    def write(self, s: str) -> int:
+        if s.strip() and not s.lstrip().startswith("{"):
+            sys.stderr.write("[worker-stdout-guard] " + s)
+            sys.stderr.flush()
+            return len(s)
+        return self._real.write(s)
+
+    def flush(self) -> None:
+        self._real.flush()
+
+    def fileno(self) -> int:
+        return self._real.fileno()
 
 
 _BASE_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"]
@@ -528,6 +560,7 @@ def _handle(line: str) -> bool:
 
 
 def main() -> None:
+    sys.stdout = _JsonOnlyStdout(sys.stdout)
     banner = json.dumps({"event": "ready", "pid": os.getpid()})
     sys.stderr.write(banner + "\n")
     sys.stderr.flush()
