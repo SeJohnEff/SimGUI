@@ -557,6 +557,49 @@ class CardManager:
         stderr = resp.get("stderr", "")
         return (ok, stdout, stderr)
 
+    def _try_worker_detect_card(self):
+        """Attempt card detection via the in-process worker.
+
+        Returns a DetectResult on card-present or card-absent results.
+        Returns None if the worker is unavailable, not ready, missing the
+        required capability, or a transport/protocol error occurs — callers
+        must fall back to the legacy subprocess path.
+        """
+        client = getattr(self, "_worker_client", None)
+        if client is None:
+            return None
+        if not client.is_ready():
+            return None
+        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            return None
+        caps = self._get_worker_capabilities()
+        if "detect" not in caps and "read_fields" not in caps:
+            return None
+        try:
+            return client.detect(
+                session_id=self._current_session_id,
+                card_gen=self._current_card_gen,
+                pysim_path=self.cli_path,
+                reader_index=self._pcsc_reader_index,
+            )
+        except Exception as exc:
+            logger.warning("Worker detect transport error: %s", exc)
+            return None
+
+    def _apply_worker_detect_result(self, result) -> None:
+        """Apply a worker DetectResult to CardManager state.
+
+        Maps result.card_type via _PYSIM_CARD_TYPE_MAP, populates card_info
+        from result.fields, and snapshots _original_card_data. All worker
+        result field mapping is centralised here.
+        """
+        if result.card_type:
+            self.card_type = self._PYSIM_CARD_TYPE_MAP.get(
+                result.card_type.lower(), CardType.UNKNOWN
+            )
+        self.card_info = dict(result.fields) if result.fields else {}
+        self._original_card_data = dict(self.card_info)
+
     def get_last_program_result(self) -> ProgramResult:
         """Return the result of the most recent programming attempt.
 
@@ -789,6 +832,21 @@ class CardManager:
                            "pySim and set the appropriate environment variable.")
 
         if self.cli_backend == CLIBackend.PYSIM:
+            # Worker detect route (opt-in via SIMGUI_WORKER_INPROCESS=1).
+            # Returns None when worker is unavailable/not-ready — fall through
+            # to the legacy subprocess path below.
+            _wr = self._try_worker_detect_card()
+            if _wr is not None:
+                if _wr.blank:
+                    self._apply_worker_detect_result(_wr)
+                    return True, "Card detected via pySim (blank)"
+                if _wr.ok:
+                    self._apply_worker_detect_result(_wr)
+                    self._read_public_fields_via_shell()
+                    self._original_card_data = dict(self.card_info)
+                    return True, "Card detected via pySim"
+                return False, _wr.msg or _wr.error or "No card detected"
+
             ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
             if not ok and 'protocolerror' in stderr.lower():
                 # Transient PCSC lock contention — retry once after a short delay.
