@@ -15,7 +15,7 @@ import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 _LOG = logging.getLogger(__name__)
 _STDERR_LOG = logging.getLogger("card_worker.stderr")
@@ -440,6 +440,41 @@ class PersistentWorkerClient:
         resp = self.send(
             "program_full",
             params={"fields": fields, "adm1_hex": adm1_hex, "reader_index": reader_index},
+            timeout=timeout + 1.0,
+        )
+        if "ok" not in resp and "error" not in resp:
+            raise WorkerProtocolError(str(resp))
+        return resp
+
+    def program_delta_capabilities(self, timeout: float = 2.0) -> List[str]:
+        """Return the worker's supported delta-write field names."""
+        resp = self.send("program_delta_capabilities", timeout=timeout)
+        result = resp.get("result")
+        if not isinstance(result, list):
+            raise WorkerProtocolError(str(resp))
+        return result
+
+    def program_delta(
+        self,
+        changed: Dict[str, Any],
+        adm1_hex: str,
+        reader_index: int = 0,
+        card_type: Optional[str] = None,
+        session_id: Optional[str] = None,
+        card_gen: Optional[int] = None,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        """Send program_delta request; returns raw response dict."""
+        resp = self.send(
+            "program_delta",
+            params={
+                "changed": changed,
+                "adm1_hex": adm1_hex,
+                "reader_index": reader_index,
+                "card_type": card_type,
+                "session_id": session_id,
+                "card_gen": card_gen,
+            },
             timeout=timeout + 1.0,
         )
         if "ok" not in resp and "error" not in resp:

@@ -564,6 +564,111 @@ class CardManager:
         stderr = resp.get("stderr", "")
         return (ok, stdout, stderr)
 
+    def _try_worker_program_delta(
+        self, changed: Dict[str, str]
+    ) -> Optional[Tuple[bool, str]]:
+        """Attempt delta-write via the in-process worker.
+
+        Returns (ok, msg) on definitive outcome (worker handled it, including failures
+        after write_started=True). Returns None to signal fallback to pySim-shell.
+        Never falls back after write_started=True.
+        """
+        client = getattr(self, "_worker_client", None)
+        if client is None:
+            logger.info("WORKER_DIAG program_delta: skip reason=no_client")
+            return None
+        if not client.is_ready():
+            logger.info("WORKER_DIAG program_delta: skip reason=not_ready")
+            return None
+        if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
+            logger.info("WORKER_DIAG program_delta: skip reason=env_off")
+            return None
+        caps = self._get_worker_capabilities()
+        if "program_delta" not in caps:
+            logger.info("WORKER_DIAG program_delta: skip reason=missing_capability  caps=%r", caps)
+            return None
+        session_id = self._current_session_id
+        card_gen = self._current_card_gen
+        if session_id is None or card_gen is None:
+            logger.info("WORKER_DIAG program_delta: skip reason=no_session")
+            return None
+        # Check changed keys are all supported by the worker.
+        try:
+            supported = set(client.program_delta_capabilities())
+        except Exception as exc:
+            logger.warning("WORKER_DIAG program_delta: skip reason=caps_fetch_failed  err=%s", exc)
+            return None
+        unsupported = set(changed.keys()) - supported
+        if unsupported:
+            logger.info("WORKER_DIAG program_delta: skip reason=unsupported_fields  fields=%r",
+                        sorted(unsupported))
+            return None
+        # Map CardType → pySim card type string using same table as _run_pysim_prog.
+        pysim_type = 'auto'
+        if self.card_type == CardType.SJA5:
+            pysim_type = 'sysmoISIM-SJA5'
+        elif self.card_type == CardType.SJA2:
+            pysim_type = 'sysmoISIM-SJA2'
+        elif self.card_type == CardType.SJS1:
+            pysim_type = 'sysmoUSIM-SJS1'
+        logger.info("WORKER_DIAG program_delta: routing via worker  fields=%r  card_type=%s",
+                    sorted(changed.keys()), pysim_type)
+        try:
+            resp = client.program_delta(
+                changed=changed,
+                adm1_hex=self._authenticated_adm1_hex,
+                reader_index=self._pcsc_reader_index,
+                card_type=pysim_type,
+                session_id=session_id,
+                card_gen=card_gen,
+                timeout=30.0,
+            )
+        except Exception as exc:
+            logger.warning("WORKER_DIAG program_delta: transport error=%s", exc)
+            return None  # pre-write transport failure — safe to fall back
+
+        write_started = bool(resp.get("write_started"))
+
+        if resp.get("worker_error"):
+            if write_started:
+                # Cannot fall back — card state unknown.
+                msg = (f"Worker delta-write error after write started: "
+                       f"{resp.get('error')}. Partial write possible.")
+                self._last_program_result = ProgramResult(
+                    outcome=ProgramOutcome.WRITE_FAILED,
+                    message=msg,
+                    failed_fields=tuple(resp.get("failed_fields", [])),
+                )
+                return False, msg
+            logger.warning("WORKER_DIAG program_delta: worker_error before write, falling back: %s",
+                           resp.get("error"))
+            return None
+
+        if not write_started:
+            # Pre-write rejection (e.g. UNSUPPORTED_FIELDS, STALE_SESSION). Fall back.
+            logger.info("WORKER_DIAG program_delta: fallback write_started=false  error=%r",
+                        resp.get("error"))
+            return None
+
+        written = resp.get("written_fields", [])
+        failed = resp.get("failed_fields", [])
+
+        if not resp.get("ok"):
+            msg = (f"Worker delta-write failed: {resp.get('error')}  "
+                   f"written={written}  failed={failed}")
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED,
+                message=msg,
+                written_only_fields=tuple(written),
+                failed_fields=tuple(failed),
+            )
+            return False, msg
+
+        # Worker APDUs completed — return written fields so _program_nonempty_card
+        # can run the same readback verification as the legacy pySim-shell path.
+        # WRITE_OK_VERIFIED is never set here; the caller sets it after verify.
+        return True, written
+
     def _try_worker_detect_card(self):
         """Attempt card detection via the in-process worker.
 
@@ -1955,6 +2060,56 @@ class CardManager:
         Only IMSI and FPLMN are written.  Ki/OPc, ACC, and SPN are not
         programmed in this flow \u2014 Ki/OPc require card replacement.
         """
+        worker_result = self._try_worker_program_delta(changed)
+        if worker_result is not None:
+            w_ok, w_data = worker_result
+            if not w_ok:
+                return False, w_data  # terminal failure, _last_program_result already set
+            # Worker APDUs succeeded. w_data is the list of written field names.
+            # Run the same readback verification as the legacy pySim-shell path.
+            written_fields = list(w_data)
+            summary = ', '.join(written_fields)
+            verify_data = {f: changed[f] for f in written_fields if f in changed}
+            logger.info("Worker delta write OK (%s); running readback verification", summary)
+            report = self._verify_written_fields(verify_data)
+
+            if report.failed_fields:
+                msg = (f"Programming succeeded but verification mismatch on: "
+                       f"{', '.join(report.failed_fields)}")
+                self._last_program_result = ProgramResult(
+                    outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED,
+                    message=msg,
+                    verified_fields=tuple(report.verified_fields),
+                    failed_fields=tuple(report.failed_fields),
+                    written_only_fields=(),
+                    skipped_fields=(),
+                )
+                return False, msg
+
+            if report.verification_error is not None:
+                msg = (f"Card programmed: {summary}\n"
+                       "(Verification pending — read the card again to confirm.)")
+                self._last_program_result = ProgramResult(
+                    outcome=ProgramOutcome.WRITE_OK_PENDING,
+                    message=msg,
+                    written_only_fields=(),
+                    skipped_fields=(),
+                )
+                return True, msg
+
+            if report.readback_data:
+                for k, v in report.readback_data.items():
+                    self.card_info[k] = v
+            msg = f"Card programmed and verified: {summary}"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+                message=msg,
+                verified_fields=tuple(report.verified_fields),
+                written_only_fields=(),
+                skipped_fields=(),
+            )
+            return True, msg
+
         commands: List[str] = []
         fields_written: List[str] = []
 

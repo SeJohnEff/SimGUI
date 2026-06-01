@@ -325,3 +325,158 @@ class TestWorkerStateTransitions:
 
         mock_proc.assert_called_once()
         assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: program_delta routing through CardManager
+# ---------------------------------------------------------------------------
+
+def _make_cm_nonempty(tmp_path):
+    """CardManager configured for a non-empty SJA5 card."""
+    cm = _make_cm(tmp_path)
+    cm.card_type = CardType.SJA5
+    cm._original_card_data = {"ICCID": "8946080000000000001", "IMSI": "001010000000001"}
+    cm._current_session_id = "sess-abc"
+    cm._current_card_gen = 1
+    return cm
+
+
+def _mock_delta_client(supported_fields=None, delta_resp=None, ready=True):
+    client = MagicMock()
+    client.is_ready.return_value = ready
+    if supported_fields is None:
+        supported_fields = ["FPLMN", "IMSI"]
+    client.capabilities.return_value = ["program_delta", "program_delta_capabilities"]
+    client.program_delta_capabilities.return_value = supported_fields
+    if delta_resp is not None:
+        client.program_delta.return_value = delta_resp
+    return client
+
+
+class TestDeltaWorkerRouting:
+
+    def _changed(self):
+        return {"IMSI": "001010000000002"}
+
+    def test_routes_to_worker_when_env_caps_session_valid(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": True, "write_started": True,
+            "written_fields": ["IMSI"], "failed_fields": [], "error": None,
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        with patch.object(cm, "_run_pysim_shell") as mock_shell:
+            result = cm._try_worker_program_delta(self._changed())
+        assert result is not None
+        assert result[0] is True
+        # result[1] is the written_fields list, not a message string
+        assert "IMSI" in result[1]
+        mock_shell.assert_not_called()
+        client.program_delta.assert_called_once()
+
+    def test_worker_delta_success_calls_verify_not_pysim_shell(self, tmp_path, monkeypatch):
+        """Worker write success routes to readback verification, not pySim-shell."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": True, "write_started": True,
+            "written_fields": ["IMSI"], "failed_fields": [], "error": None,
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        with patch.object(cm, "_run_pysim_shell") as mock_shell, \
+             patch.object(cm, "_verify_written_fields",
+                          return_value=_good_verify_report()) as mock_verify:
+            ok, _ = cm._program_nonempty_card({}, {"IMSI": "001010000000002"})
+        mock_shell.assert_not_called()
+        mock_verify.assert_called_once()
+        assert ok is True
+
+    def test_worker_delta_success_produces_write_ok_verified_after_verify(self, tmp_path, monkeypatch):
+        """Outcome is WRITE_OK_VERIFIED only after successful readback."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": True, "write_started": True,
+            "written_fields": ["IMSI"], "failed_fields": [], "error": None,
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        with patch.object(cm, "_verify_written_fields",
+                          return_value=_good_verify_report()):
+            ok, _ = cm._program_nonempty_card({}, {"IMSI": "001010000000002"})
+        from state_manager import ProgramOutcome
+        assert ok is True
+        assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFIED
+
+    def test_worker_delta_success_verify_fail_produces_verification_failed(self, tmp_path, monkeypatch):
+        """Verification failure after worker write produces WRITE_OK_VERIFICATION_FAILED."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": True, "write_started": True,
+            "written_fields": ["IMSI"], "failed_fields": [], "error": None,
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        with patch.object(cm, "_verify_written_fields",
+                          return_value=_failed_verify_report()):
+            ok, _ = cm._program_nonempty_card({}, {"IMSI": "001010000000002"})
+        from state_manager import ProgramOutcome
+        assert ok is False
+        assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+
+    def test_falls_back_env_off(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
+        cm = _make_cm_nonempty(tmp_path)
+        cm.set_worker_client(_mock_delta_client())
+        assert cm._try_worker_program_delta(self._changed()) is None
+
+    def test_falls_back_cap_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = MagicMock()
+        client.is_ready.return_value = True
+        client.capabilities.return_value = []
+        cm.set_worker_client(client)
+        assert cm._try_worker_program_delta(self._changed()) is None
+
+    def test_falls_back_unsupported_field(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(supported_fields=["FPLMN"])  # no IMSI
+        cm.set_worker_client(client)
+        assert cm._try_worker_program_delta({"IMSI": "001010000000002"}) is None
+
+    def test_falls_back_pre_write_failure_write_started_false(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": False, "write_started": False,
+            "written_fields": [], "failed_fields": [], "error": "STALE_SESSION",
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        assert cm._try_worker_program_delta(self._changed()) is None
+
+    def test_no_fallback_write_started_true_failure(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        client = _mock_delta_client(delta_resp={
+            "ok": False, "write_started": True,
+            "written_fields": [], "failed_fields": ["IMSI"], "error": "SW_IMSI=6982",
+            "worker_error": False,
+        })
+        cm.set_worker_client(client)
+        result = cm._try_worker_program_delta(self._changed())
+        assert result is not None   # definitive failure returned, not None
+        assert result[0] is False   # ok=False
+
+    def test_falls_back_no_session(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm_nonempty(tmp_path)
+        cm._current_session_id = None
+        cm.set_worker_client(_mock_delta_client())
+        assert cm._try_worker_program_delta(self._changed()) is None

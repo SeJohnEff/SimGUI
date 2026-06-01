@@ -25,6 +25,13 @@ def _capabilities() -> list:
     if _inprocess_enabled():
         caps.append("program_full")
         caps.append("detect_inprocess")
+        try:
+            import card_worker_inproc as _inproc
+            if _inproc.delta_supported_fields():
+                caps.append("program_delta")
+                caps.append("program_delta_capabilities")
+        except Exception:
+            pass
     return caps
 
 
@@ -401,6 +408,72 @@ def _handle_program_full(req_id, params):
     _write({"id": req_id, "ok": bool(ok), "stdout": stdout, "stderr": stderr, "worker_error": False})
 
 
+def _handle_program_delta(req_id, params):
+    """In-process delta-write for non-empty cards. Gated by SIMGUI_WORKER_INPROCESS=1."""
+    if not _inprocess_enabled():
+        _write({"id": req_id, "ok": False, "error": "INPROCESS_DISABLED", "worker_error": True})
+        return
+
+    p = params or {}
+    changed = p.get("changed")
+    adm1_hex = p.get("adm1_hex")
+    if not isinstance(changed, dict) or not isinstance(adm1_hex, str) or not adm1_hex:
+        _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST", "worker_error": True})
+        return
+
+    # Session staleness guard.
+    req_session_id = p.get("session_id")
+    req_card_gen = p.get("card_gen")
+    if req_session_id is not None and req_session_id != _session_id:
+        _write({"id": req_id, "ok": False, "error": "STALE_SESSION",
+                "write_started": False, "worker_error": True})
+        return
+    if req_card_gen is not None and req_card_gen != _card_gen:
+        _write({"id": req_id, "ok": False, "error": "STALE_CARD_GEN",
+                "write_started": False, "worker_error": True})
+        return
+
+    reader_index = p.get("reader_index", 0)
+    card_type = p.get("card_type")
+
+    try:
+        import card_worker_inproc as _inproc
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED",
+                "msg": str(exc), "worker_error": True})
+        return
+
+    try:
+        res = _inproc.program_delta(changed, adm1_hex, reader_index, card_type)
+    except _inproc.PysimImportError as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED",
+                "msg": str(exc), "worker_error": True})
+        return
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": f"WORKER_EXCEPTION:{type(exc).__name__}",
+                "write_started": False, "worker_error": True})
+        return
+
+    _write({
+        "id": req_id,
+        "ok": bool(res.get("ok")),
+        "write_started": bool(res.get("write_started")),
+        "written_fields": res.get("written_fields", []),
+        "failed_fields": res.get("failed_fields", []),
+        "error": res.get("error"),
+        "worker_error": False,
+    })
+
+
+def _handle_program_delta_capabilities(req_id):
+    try:
+        import card_worker_inproc as _inproc
+        fields = _inproc.delta_supported_fields()
+    except Exception:
+        fields = []
+    _write({"id": req_id, "ok": True, "result": fields})
+
+
 def _handle(line: str) -> bool:
     """Parse one request line and write one response. Returns False to stop."""
     try:
@@ -444,6 +517,10 @@ def _handle(line: str) -> bool:
         _handle_program_full(req_id, req.get("params"))
     elif verb == "detect_inprocess":
         _handle_detect_inprocess(req_id, req.get("params"))
+    elif verb == "program_delta":
+        _handle_program_delta(req_id, req.get("params"))
+    elif verb == "program_delta_capabilities":
+        _handle_program_delta_capabilities(req_id)
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 

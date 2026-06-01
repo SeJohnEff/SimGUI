@@ -561,3 +561,82 @@ class TestWorkerAuthDelegateRouting:
         ok, msg = delegate.authenticate_adm("3838383838383838")
         assert ok is True
         assert len(subprocess_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: program_delta
+# ---------------------------------------------------------------------------
+
+class TestProgramDeltaInproc:
+    """Tests for card_worker_inproc.program_delta and writer registry."""
+
+    def _fake_rt(self, monkeypatch):
+        rt = mock.MagicMock()
+        rt.init_reader.return_value = mock.MagicMock()
+        monkeypatch.setattr(card_worker_inproc, "_pysim_runtime", rt)
+        return rt
+
+    def _install_session(self, monkeypatch, scc):
+        monkeypatch.setitem(card_worker_inproc._session, "sl", object())
+        monkeypatch.setitem(card_worker_inproc._session, "scc", scc)
+        monkeypatch.setitem(card_worker_inproc._session, "reader_index", 0)
+
+    def test_delta_supported_fields_returns_imsi_and_fplmn(self):
+        fields = card_worker_inproc.delta_supported_fields()
+        assert "IMSI" in fields
+        assert "FPLMN" in fields
+
+    def test_unsupported_field_rejected_write_started_false(self, monkeypatch):
+        rt = self._fake_rt(monkeypatch)
+        scc = mock.MagicMock()
+        self._install_session(monkeypatch, scc)
+        rt.card_detect.return_value = mock.MagicMock()
+        res = card_worker_inproc.program_delta(
+            {"Ki": "aabbcc"}, "3838383838383838", 0, "sysmoISIM-SJA5")
+        assert res["write_started"] is False
+        assert res["ok"] is False
+        assert res["error"] == "UNSUPPORTED_FIELDS"
+        assert "Ki" in res["unsupported_fields"]
+        scc.verify_chv.assert_not_called()
+
+    def test_fplmn_semicolon_string_parsed_to_list(self, monkeypatch):
+        rt = self._fake_rt(monkeypatch)
+        scc = mock.MagicMock()
+        self._install_session(monkeypatch, scc)
+        card = mock.MagicMock()
+        card.update_fplmn.return_value = "9000"
+        rt.card_detect.return_value = card
+        res = card_worker_inproc.program_delta(
+            {"FPLMN": "24001;24201"}, "3838383838383838", 0, "auto")
+        assert res["ok"] is True
+        card.update_fplmn.assert_called_once_with(["24001", "24201"])
+
+    def test_successful_delta_writes_only_changed_fields(self, monkeypatch):
+        rt = self._fake_rt(monkeypatch)
+        scc = mock.MagicMock()
+        self._install_session(monkeypatch, scc)
+        card = mock.MagicMock()
+        card.update_imsi.return_value = "9000"
+        rt.card_detect.return_value = card
+        res = card_worker_inproc.program_delta(
+            {"IMSI": "001010123456789"}, "3838383838383838", 0, "sysmoISIM-SJA5")
+        assert res["ok"] is True
+        assert res["write_started"] is True
+        assert "IMSI" in res["written_fields"]
+        assert res["failed_fields"] == []
+        card.update_imsi.assert_called_once_with("001010123456789")
+        card.update_fplmn.assert_not_called()
+
+    def test_writer_non9000_sets_failed_fields(self, monkeypatch):
+        rt = self._fake_rt(monkeypatch)
+        scc = mock.MagicMock()
+        self._install_session(monkeypatch, scc)
+        card = mock.MagicMock()
+        card.update_imsi.return_value = "6982"
+        rt.card_detect.return_value = card
+        res = card_worker_inproc.program_delta(
+            {"IMSI": "001010123456789"}, "3838383838383838", 0, "sysmoISIM-SJA5")
+        assert res["ok"] is False
+        assert res["write_started"] is True
+        assert "IMSI" in res["failed_fields"]
+        assert "IMSI" not in res["written_fields"]

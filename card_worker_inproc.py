@@ -19,7 +19,7 @@ Test hook: tests may set ``_pysim_runtime`` to a fake object exposing the same
 attributes used here, bypassing the real lazy import.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 _NOT_PROGRAMMING_FIELDS = ("PIN1", "PUK1")
@@ -27,6 +27,94 @@ _NOT_PROGRAMMING_FIELDS = ("PIN1", "PUK1")
 
 _session: Dict[str, Any] = {"sl": None, "scc": None, "reader_index": None}
 _pysim_runtime: Optional[Any] = None
+
+
+# ---------------------------------------------------------------------------
+# Delta writer registry — source-proven against pySim legacy cards.py
+# update_imsi(imsi) -> sw  (SimCard, line 78)
+# update_fplmn(list_of_plmn_str) -> sw  (UsimCard, line 269)
+# ---------------------------------------------------------------------------
+
+def _write_imsi(card: Any, value: str) -> str:
+    return card.update_imsi(value)
+
+
+def _write_fplmn(card: Any, value: str) -> str:
+    plmns = [p.strip() for p in value.split(';') if p.strip()]
+    return card.update_fplmn(plmns)
+
+
+_DELTA_WRITERS: Dict[str, Any] = {
+    "IMSI": _write_imsi,
+    "FPLMN": _write_fplmn,
+}
+
+
+def delta_supported_fields() -> List[str]:
+    """Return sorted list of field names the delta writer registry supports."""
+    return sorted(_DELTA_WRITERS.keys())
+
+
+def program_delta(
+    changed: Dict[str, str],
+    adm1_hex: str,
+    reader_index: int = 0,
+    card_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Write only the fields in *changed* in-process using the long-lived session.
+
+    Returns a dict with keys: ok, write_started, written_fields, failed_fields, error.
+    Never falls back — caller must not retry via subprocess if write_started=True.
+    Never logs ADM1 value.
+    """
+    result: Dict[str, Any] = {
+        "ok": False,
+        "write_started": False,
+        "written_fields": [],
+        "failed_fields": [],
+        "error": None,
+    }
+
+    # Reject unsupported fields before touching the card.
+    unsupported = [k for k in changed if k not in _DELTA_WRITERS]
+    if unsupported:
+        result["error"] = "UNSUPPORTED_FIELDS"
+        result["unsupported_fields"] = unsupported
+        return result
+
+    if not changed:
+        result["ok"] = True
+        result["error"] = "NO_CHANGES"
+        return result
+
+    rt = _load_pysim()
+    _ensure_session(rt, reader_index)
+    scc = _session["scc"]
+
+    ct = card_type or "auto"
+    card = rt.card_detect(ct, scc)
+    if card is None:
+        result["error"] = "NO_CARD"
+        return result
+
+    # Authenticate before writes.
+    scc.verify_chv(0x0A, adm1_hex)
+
+    result["write_started"] = True
+    for field, value in changed.items():
+        try:
+            sw = _DELTA_WRITERS[field](card, value)
+            if sw == "9000":
+                result["written_fields"].append(field)
+            else:
+                result["failed_fields"].append(field)
+                result["error"] = f"SW_{field}={sw}"
+        except Exception as exc:
+            result["failed_fields"].append(field)
+            result["error"] = f"{field}:{type(exc).__name__}"
+
+    result["ok"] = len(result["failed_fields"]) == 0
+    return result
 
 
 class PysimImportError(RuntimeError):
