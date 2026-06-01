@@ -6,6 +6,7 @@ No PCSC, no pySim, no card operations, no Qt, no managers.
 Standard library only.
 """
 
+import enum
 import json
 import logging
 import os
@@ -18,6 +19,14 @@ from typing import Any, Dict, Optional
 
 _LOG = logging.getLogger(__name__)
 _STDERR_LOG = logging.getLogger("card_worker.stderr")
+
+
+class WorkerState(enum.Enum):
+    NOT_STARTED = "not_started"
+    STARTING = "starting"
+    READY = "ready"
+    ERROR = "error"
+    STOPPED = "stopped"
 
 
 class WorkerError(Exception):
@@ -106,19 +115,39 @@ class PersistentWorkerClient:
         self._process: Optional[subprocess.Popen] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._state: WorkerState = WorkerState.NOT_STARTED
+        self._last_error: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
+    @property
+    def state(self) -> WorkerState:
+        return self._state
+
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
+
+    def is_ready(self) -> bool:
+        return self._state == WorkerState.READY
+
     def start(self) -> None:
         """Spawn the worker process and wait for the ready banner."""
-        self._process = subprocess.Popen(
-            [sys.executable, self._script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        self._state = WorkerState.STARTING
+        self._last_error = None
+        try:
+            self._process = subprocess.Popen(
+                [sys.executable, self._script],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            self._state = WorkerState.ERROR
+            self._last_error = str(exc)
+            raise WorkerStartError(f"Failed to spawn worker: {exc}") from exc
 
         # Read the ready banner from stderr with a timeout.
         banner_line = self._readline_with_timeout(
@@ -126,27 +155,38 @@ class PersistentWorkerClient:
         )
         if banner_line is None:
             self._process.terminate()
-            raise WorkerStartError("Worker did not emit ready banner in time")
+            self._process = None
+            self._state = WorkerState.ERROR
+            self._last_error = "Worker did not emit ready banner in time"
+            raise WorkerStartError(self._last_error)
 
         try:
             banner = json.loads(banner_line)
         except (json.JSONDecodeError, ValueError):
             self._process.terminate()
-            raise WorkerStartError(f"Worker emitted non-JSON banner: {banner_line!r}")
+            self._process = None
+            self._state = WorkerState.ERROR
+            self._last_error = f"Worker emitted non-JSON banner: {banner_line!r}"
+            raise WorkerStartError(self._last_error)
 
         if banner.get("event") != "ready":
             self._process.terminate()
-            raise WorkerStartError(f"Unexpected banner event: {banner!r}")
+            self._process = None
+            self._state = WorkerState.ERROR
+            self._last_error = f"Unexpected banner event: {banner!r}"
+            raise WorkerStartError(self._last_error)
 
         # Start background stderr drain.
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr, daemon=True, name="worker-stderr-drain"
         )
         self._stderr_thread.start()
+        self._state = WorkerState.READY
 
     def stop(self) -> None:
         """Send shutdown request; terminate if the process lingers."""
         if self._process is None:
+            self._state = WorkerState.STOPPED
             return
         try:
             self.send("shutdown", timeout=3.0)
@@ -157,6 +197,7 @@ class PersistentWorkerClient:
         except subprocess.TimeoutExpired:
             self._process.terminate()
         self._process = None
+        self._state = WorkerState.STOPPED
 
     def is_alive(self) -> bool:
         return self._process is not None and self._process.poll() is None

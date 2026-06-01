@@ -533,7 +533,7 @@ class CardManager:
         client = getattr(self, "_worker_client", None)
         if client is None:
             return None
-        if not client.is_alive():
+        if not client.is_ready():
             return None
         if os.environ.get("SIMGUI_WORKER_INPROCESS") != "1":
             return None

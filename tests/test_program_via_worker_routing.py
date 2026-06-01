@@ -14,6 +14,8 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from managers.card_manager import CardManager, CardType, CLIBackend
@@ -42,9 +44,10 @@ def _make_cm(tmp_path):
     return cm
 
 
-def _mock_client(caps=None, program_full_resp=None, alive=True, raise_exc=None):
+def _mock_client(caps=None, program_full_resp=None, ready=True, raise_exc=None):
     client = MagicMock()
-    client.is_alive.return_value = alive
+    client.is_alive.return_value = ready
+    client.is_ready.return_value = ready
     client.capabilities.return_value = caps if caps is not None else ["program_full"]
     if raise_exc is not None:
         client.program_full.side_effect = raise_exc
@@ -193,3 +196,132 @@ class TestWorkerRouting:
         assert ok is False
         from state_manager import ProgramOutcome
         assert cm.get_last_program_result().outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+
+    def test_worker_not_ready_skips_worker(self, tmp_path, monkeypatch):
+        """Client is_ready()=False -> falls back to subprocess even with env+capability."""
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm(tmp_path)
+        client = _mock_client(caps=["program_full"], ready=False)
+        cm.set_worker_client(client)
+
+        with patch.object(cm, "_run_pysim_prog", return_value=(True, "Done", "")) as mock_proc:
+            with patch.object(cm, "_verify_written_fields", return_value=_good_verify_report()):
+                ok, _ = cm._program_via_pysim_prog({"IMSI": "001010123456789"})
+
+        mock_proc.assert_called_once()
+        client.program_full.assert_not_called()
+
+
+class TestWorkerStateTransitions:
+    """Unit tests for WorkerState enum and PersistentWorkerClient state tracking."""
+
+    def test_initial_state_is_not_started(self):
+        from card_worker_client import PersistentWorkerClient, WorkerState
+        client = PersistentWorkerClient(worker_script="/nonexistent")
+        assert client.state == WorkerState.NOT_STARTED
+        assert client.last_error is None
+        assert client.is_ready() is False
+
+    def test_state_ready_after_successful_start(self, tmp_path):
+        from card_worker_client import PersistentWorkerClient, WorkerState
+        import json, threading
+
+        ready_banner = json.dumps({"event": "ready"}) + "\n"
+        client = PersistentWorkerClient.__new__(PersistentWorkerClient)
+        client._script = "/fake"
+        client._start_timeout = 2.0
+        client._process = None
+        client._stderr_thread = None
+        client._lock = threading.Lock()
+        client._state = WorkerState.NOT_STARTED
+        client._last_error = None
+
+        fake_proc = MagicMock()
+        fake_proc.stderr.readline.return_value = ready_banner.encode()
+        fake_proc.stdout = MagicMock()
+        fake_proc.stdin = MagicMock()
+
+        with patch("card_worker_client.subprocess.Popen", return_value=fake_proc):
+            with patch.object(
+                PersistentWorkerClient,
+                "_readline_with_timeout",
+                return_value=ready_banner,
+            ):
+                client.start()
+
+        assert client.state == WorkerState.READY
+        assert client.last_error is None
+        assert client.is_ready() is True
+
+    def test_state_error_on_bad_banner(self, tmp_path):
+        from card_worker_client import PersistentWorkerClient, WorkerState, WorkerStartError
+        import threading
+
+        client = PersistentWorkerClient.__new__(PersistentWorkerClient)
+        client._script = "/fake"
+        client._start_timeout = 2.0
+        client._process = None
+        client._stderr_thread = None
+        client._lock = threading.Lock()
+        client._state = WorkerState.NOT_STARTED
+        client._last_error = None
+
+        fake_proc = MagicMock()
+        fake_proc.stdin = MagicMock()
+
+        with patch("card_worker_client.subprocess.Popen", return_value=fake_proc):
+            with patch.object(
+                PersistentWorkerClient,
+                "_readline_with_timeout",
+                return_value=None,  # timeout
+            ):
+                with pytest.raises(WorkerStartError):
+                    client.start()
+
+        assert client.state == WorkerState.ERROR
+        assert client.last_error is not None
+        assert client.is_ready() is False
+
+    def test_state_stopped_after_stop(self):
+        from card_worker_client import PersistentWorkerClient, WorkerState
+        import threading
+
+        client = PersistentWorkerClient.__new__(PersistentWorkerClient)
+        client._script = "/fake"
+        client._start_timeout = 2.0
+        client._process = None
+        client._stderr_thread = None
+        client._lock = threading.Lock()
+        client._state = WorkerState.NOT_STARTED
+        client._last_error = None
+
+        client.stop()  # stop with no process
+        assert client.state == WorkerState.STOPPED
+
+    def test_cardmanager_skips_worker_when_not_ready(self, tmp_path, monkeypatch):
+        """CardManager checks is_ready(), not is_alive() — NOT_STARTED client skips worker."""
+        import pytest
+        monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        cm = _make_cm(tmp_path)
+        from card_worker_client import PersistentWorkerClient, WorkerState
+        import threading
+
+        # Build a real client stuck in NOT_STARTED (never started)
+        real_client = PersistentWorkerClient.__new__(PersistentWorkerClient)
+        real_client._script = "/fake"
+        real_client._start_timeout = 2.0
+        real_client._process = None
+        real_client._stderr_thread = None
+        real_client._lock = threading.Lock()
+        real_client._state = WorkerState.NOT_STARTED
+        real_client._last_error = None
+
+        cm.set_worker_client(real_client)
+        assert real_client.is_ready() is False
+
+        with patch.object(cm, "_run_pysim_prog", return_value=(True, "Done", "")) as mock_proc:
+            with patch.object(cm, "_verify_written_fields", return_value=_good_verify_report()):
+                ok, _ = cm._program_via_pysim_prog({"IMSI": "001010123456789"})
+
+        mock_proc.assert_called_once()
+        assert ok is True
