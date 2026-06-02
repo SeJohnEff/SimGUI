@@ -40,7 +40,8 @@ class FakeCardManager:
 class FakeWorker:
     def __init__(self, result=None, raises=None, detect_result=None, ready=True):
         self.probe_calls = 0
-        self.detect_calls = 0
+        self.detect_calls = 0           # legacy; kept for tests that still check it
+        self.detect_inprocess_calls = 0
         self._result = result
         self._raises = raises
         self._detect_result = detect_result
@@ -50,11 +51,22 @@ class FakeWorker:
     def is_ready(self):
         return self._ready
 
+    def capabilities(self):
+        return ["detect_inprocess"]
+
     def probe(self, **kwargs):
         self.probe_calls += 1
         if self._raises is not None:
             raise self._raises
         return self._result
+
+    def detect_inprocess(self, **kwargs):
+        self.detect_inprocess_calls += 1
+        if self._detect_raises is not None:
+            raise self._detect_raises
+        if self._detect_result is not None:
+            return self._detect_result
+        return DetectResult(ok=True, blank=True)
 
     def detect(self, **kwargs):
         self.detect_calls += 1
@@ -295,11 +307,11 @@ def test_no_worker_uses_native_path():
 # Test 11: pysim_path forwarded to worker detect
 # ---------------------------------------------------------------------------
 
-def test_pysim_path_forwarded_to_detect():
+def test_pysim_path_forwarded_to_detect_inprocess():
     calls = []
 
     class TrackingWorker(FakeWorker):
-        def detect(self, **kwargs):
+        def detect_inprocess(self, **kwargs):
             calls.append(kwargs.copy())
             return DetectResult(ok=True, blank=True)
 
@@ -548,21 +560,25 @@ def test_worker_read_uses_detect_inprocess_when_available():
 
 
 # ---------------------------------------------------------------------------
-# Test 23: _worker_read_and_notify falls back to detect when inprocess absent
+# Test 23: _worker_read_and_notify fires on_error when detect_inprocess absent
 # ---------------------------------------------------------------------------
 
-def test_worker_read_falls_back_to_detect_when_inprocess_absent():
+def test_worker_read_fires_error_when_detect_inprocess_absent():
     worker = FakeWorker(
         result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid1"),
         detect_result=DetectResult(ok=True, blank=True),
     )
-    worker.capabilities = lambda: ["detect", "read_fields"]
+    worker.capabilities = lambda: []  # detect_inprocess not advertised
 
+    errors = []
     watcher, _ = make_watcher(worker=worker)
-    watcher.on_card_unknown = lambda x: None
+    watcher.on_error = errors.append
     watcher._check_once()
 
-    assert worker.detect_calls == 1
+    assert worker.detect_calls == 0
+    assert worker.detect_inprocess_calls == 0
+    assert watcher._last_read_failed is True
+    assert any("not available" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

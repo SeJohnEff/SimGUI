@@ -694,16 +694,12 @@ class CardManager:
             logger.info("WORKER_DIAG detect: skip reason=env_off")
             return None
         caps = self._get_worker_capabilities()
-        # Prefer true in-process detect; fall back to subprocess-backed detect verbs.
-        if "detect_inprocess" not in caps and "detect" not in caps and "read_fields" not in caps:
+        if "detect_inprocess" not in caps:
             logger.info("WORKER_DIAG detect: skip reason=missing_capability  caps=%r", caps)
             return None
-        # Use detect_inprocess when available (no subprocess); else existing detect.
-        verb_fn = client.detect_inprocess if "detect_inprocess" in caps else client.detect
-        logger.info("WORKER_DIAG detect: routing via worker  verb=%s",
-                    "detect_inprocess" if "detect_inprocess" in caps else "detect")
+        logger.info("WORKER_DIAG detect: routing via worker  verb=detect_inprocess")
         try:
-            return verb_fn(
+            return client.detect_inprocess(
                 session_id=self._current_session_id,
                 card_gen=self._current_card_gen,
                 pysim_path=self.cli_path,

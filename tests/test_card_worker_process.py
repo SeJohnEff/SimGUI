@@ -109,7 +109,7 @@ def test_capabilities_contains_base_verbs():
         resp, _ = _send(proc, "capabilities")
         assert resp["ok"] is True
         caps = set(resp["result"])
-        base = {"ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"}
+        base = {"ping", "status", "capabilities", "shutdown", "probe", "authenticate"}
         assert base.issubset(caps)
     finally:
         proc.terminate()
@@ -292,189 +292,9 @@ class TestHandleProbeUnit:
         assert "probe" in card_worker_process._CAPABILITIES
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for _handle_detect / read_fields (Phase 2D-B1)
-# ---------------------------------------------------------------------------
-
-SJA5_OUTPUT = (
-    "Autodetected card type: sysmoISIM-SJA5\n"
-    "ICCID: 8946000000000000001\n"
-    "IMSI: 240010000000001\n"
-    "ACC: 0001\n"
-)
-
-GIALERSIM_OUTPUT = (
-    "Autodetected card type: gialersim\n"
-    "ACC: ffff\n"
-)
-
-_BASE_PARAMS = {
-    "pysim_path": "/opt/pysim",
-    "reader_index": 0,
-    "timeout": 10,
-}
-
-
-def _reset_detect_state(session_id="abc123", card_gen=1):
-    card_worker_process._session_id = session_id
-    card_worker_process._card_gen = card_gen
-    card_worker_process._card_present = True
-
-
-def _run_detect(params, session_id="abc123", card_gen=1):
-    _reset_detect_state(session_id, card_gen)
-    captured = []
-    with patch.object(card_worker_process, "_write", side_effect=captured.append):
-        card_worker_process._handle_detect("req1", params)
-    return captured[0]
-
-
-class TestHandleDetectUnit:
-
-    def setup_method(self):
-        _reset_probe_state()
-
-    def test_sja5_output_ok_blank_false_fields_populated(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                resp = _run_detect(params)
-        assert resp["ok"] is True
-        assert resp["blank"] is False
-        assert resp["fields"]["ICCID"] == "8946000000000000001"
-        assert resp["fields"]["IMSI"] == "240010000000001"
-
-    def test_gialersim_output_ok_blank_true(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=GIALERSIM_OUTPUT, stderr="")
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                resp = _run_detect(params)
-        assert resp["ok"] is True
-        assert resp["blank"] is True
-
-    def test_wrong_session_id_returns_stale_session(self):
-        params = {**_BASE_PARAMS, "session_id": "wrong", "card_gen": 1}
-        with patch("card_worker_process.os.path.isfile", return_value=True):
-            resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "STALE_SESSION"
-
-    def test_wrong_card_gen_returns_stale_session(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 99}
-        with patch("card_worker_process.os.path.isfile", return_value=True):
-            resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "STALE_SESSION"
-
-    def test_missing_pysim_path_returns_cli_not_found(self):
-        params = {"session_id": "abc123", "card_gen": 1, "reader_index": 0}
-        resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "CLI_NOT_FOUND"
-
-    def test_missing_pysim_read_script_returns_cli_not_found(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        with patch("card_worker_process.os.path.isfile", return_value=False):
-            resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "CLI_NOT_FOUND"
-
-    def test_subprocess_timeout_returns_card_unresponsive(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        with patch("card_worker_process.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="x", timeout=10)):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "CARD_UNRESPONSIVE"
-
-    def test_nonzero_no_parseable_output_returns_detect_failed(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="error")
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "DETECT_FAILED"
-        assert resp["worker_error"] is False
-
-    def test_read_fields_mirrors_successful_detect(self):
-        _reset_detect_state("abc123", 1)
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        captured = []
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                with patch.object(card_worker_process, "_write", side_effect=captured.append):
-                    card_worker_process._handle_detect("req2", params)
-        resp = captured[0]
-        assert resp["ok"] is True
-        assert resp["fields"]["ICCID"] == "8946000000000000001"
-        assert resp["card_type"] == "sysmoisim-sja5"
-        assert resp["worker_error"] is False
-        assert "stdout" in resp
-        assert "stderr" in resp
-
-    def test_detect_success_includes_stable_schema_fields(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                resp = _run_detect(params)
-        assert resp["ok"] is True
-        assert resp["card_type"] == "sysmoisim-sja5"
-        assert resp["blank"] is False
-        assert resp["worker_error"] is False
-        assert resp["stdout"] == SJA5_OUTPUT
-        assert resp["stderr"] == ""
-
-    def test_stale_session_sets_worker_error_true(self):
-        params = {**_BASE_PARAMS, "session_id": "wrong", "card_gen": 1}
-        with patch("card_worker_process.os.path.isfile", return_value=True):
-            resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "STALE_SESSION"
-        assert resp["worker_error"] is True
-
-    def test_cli_not_found_sets_worker_error_true(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        with patch("card_worker_process.os.path.isfile", return_value=False):
-            resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["error"] == "CLI_NOT_FOUND"
-        assert resp["worker_error"] is True
-
-    def test_protocolerror_retries_once_then_succeeds(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        fail = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ProtocolError: T=0")
-        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        run_results = [fail, ok]
-        with patch("card_worker_process.subprocess.run", side_effect=run_results):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                with patch("card_worker_process.time" if hasattr(card_worker_process, "time") else "time.sleep"):
-                    import unittest.mock as _mock
-                    with _mock.patch("time.sleep"):
-                        resp = _run_detect(params)
-        assert resp["ok"] is True
-        assert resp["fields"]["ICCID"] == "8946000000000000001"
-
-    def test_protocolerror_retries_once_then_fails(self):
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        fail1 = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ProtocolError: T=0")
-        fail2 = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="still failing")
-        run_results = [fail1, fail2]
-        with patch("card_worker_process.subprocess.run", side_effect=run_results):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                import unittest.mock as _mock
-                with _mock.patch("time.sleep"):
-                    resp = _run_detect(params)
-        assert resp["ok"] is False
-        assert resp["worker_error"] is False
-
-    def test_capabilities_include_detect_and_read_fields(self):
-        assert "detect" in card_worker_process._CAPABILITIES
-        assert "read_fields" in card_worker_process._CAPABILITIES
+def test_detect_and_read_fields_not_in_base_capabilities():
+    assert "detect" not in card_worker_process._BASE_CAPABILITIES
+    assert "read_fields" not in card_worker_process._BASE_CAPABILITIES
 
 
 # ---------------------------------------------------------------------------
@@ -492,45 +312,6 @@ class TestSessionProfile:
     def setup_method(self):
         _reset_probe_state()
         _reset_session_profile()
-
-    def test_sja5_detect_stores_sja5_profile(self):
-        from card_profiles import SJA5Profile
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        _reset_detect_state()
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                with patch.object(card_worker_process, "_write", side_effect=lambda x: None):
-                    card_worker_process._handle_detect("req1", params)
-        assert isinstance(card_worker_process._session_profile, SJA5Profile)
-        assert card_worker_process._session_pysim_path == "/opt/pysim"
-        assert card_worker_process._session_reader_index == 0
-
-    def test_gialersim_detect_stores_gialersimprofile(self):
-        from card_profiles import GialerSIMProfile
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=GIALERSIM_OUTPUT, stderr="")
-        _reset_detect_state()
-        with patch("card_worker_process.subprocess.run", return_value=completed):
-            with patch("card_worker_process.os.path.isfile", return_value=True):
-                with patch.object(card_worker_process, "_write", side_effect=lambda x: None):
-                    card_worker_process._handle_detect("req1", params)
-        assert isinstance(card_worker_process._session_profile, GialerSIMProfile)
-
-    def test_profile_creation_failure_leaves_none_but_detect_ok(self):
-        import card_profiles
-        params = {**_BASE_PARAMS, "session_id": "abc123", "card_gen": 1}
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=SJA5_OUTPUT, stderr="")
-        _reset_detect_state()
-        card_worker_process._session_profile = object()  # non-None sentinel
-        captured = []
-        with patch.object(card_profiles.ProfileFactory, "create", side_effect=Exception("boom")):
-            with patch("card_worker_process.subprocess.run", return_value=completed):
-                with patch("card_worker_process.os.path.isfile", return_value=True):
-                    with patch.object(card_worker_process, "_write", side_effect=captured.append):
-                        card_worker_process._handle_detect("req1", params)
-        assert captured[0]["ok"] is True
-        assert card_worker_process._session_profile is None
 
     def test_probe_new_insertion_clears_stale_session_profile(self):
         card_worker_process._session_profile = object()  # non-None sentinel

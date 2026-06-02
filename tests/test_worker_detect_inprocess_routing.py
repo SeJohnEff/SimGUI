@@ -84,22 +84,19 @@ class TestDetectInprocessRouting:
         assert cm.card_info["ICCID"] == "8946220000000000001"
         assert cm._original_card_data == cm.card_info
 
-    def test_detect_used_when_only_detect_cap_present(self, tmp_path, monkeypatch):
-        """Only 'detect' cap (no detect_inprocess) -> client.detect called; detect_inprocess not called."""
+    def test_worker_skipped_when_detect_inprocess_absent(self, tmp_path, monkeypatch):
+        """Without 'detect_inprocess' cap, detect_via_worker returns None and legacy CLI runs."""
         monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
         cm = _make_cm(tmp_path)
         result = DetectResult(ok=True, card_type="gialersim", blank=True, fields={})
         client = _make_client(caps=["detect"], detect_result=result)
         cm.set_worker_client(client)
 
-        with patch.object(cm, "_run_cli") as mock_cli:
-            ok, msg = cm.detect_card()
+        detect_via_worker_result = cm._try_worker_detect_card()
 
-        assert ok is True
-        assert msg == "Card detected via pySim (blank)"
-        client.detect.assert_called_once()
+        assert detect_via_worker_result is None
+        client.detect.assert_not_called()
         client.detect_inprocess.assert_not_called()
-        mock_cli.assert_not_called()
 
     def test_public_fields_shell_skipped_when_worker_returns_all_three(self, tmp_path, monkeypatch):
         """_read_public_fields_via_shell not called when SPN+ACC+FPLMN all present in worker result."""

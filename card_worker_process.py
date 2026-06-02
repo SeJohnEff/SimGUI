@@ -44,7 +44,7 @@ class _JsonOnlyStdout:
         return self._real.fileno()
 
 
-_BASE_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "detect", "read_fields", "authenticate"]
+_BASE_CAPABILITIES = ["ping", "status", "capabilities", "shutdown", "probe", "authenticate"]
 
 
 def _inprocess_enabled() -> bool:
@@ -64,25 +64,6 @@ def _setup_pysim_path() -> None:
     if os.path.isdir(pysim_dir) and pysim_dir not in sys.path:
         sys.path.insert(0, pysim_dir)
 
-
-def _get_python_executable() -> str:
-    """Return the Python interpreter for subprocesses.
-
-    In a frozen bundle sys.executable is the app binary, which cannot run
-    .py scripts.  Locate the bundled CPython framework instead.
-    """
-    if not getattr(sys, "frozen", False):
-        return sys.executable
-    contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
-    fw_bin = os.path.join(
-        contents, "Frameworks", "Python3.framework",
-        "Versions", "Current", "bin",
-    )
-    for name in ("python3.9", "python3.10", "python3.11", "python3.12", "python3"):
-        candidate = os.path.join(fw_bin, name)
-        if os.path.isfile(candidate):
-            return candidate
-    return sys.executable  # broken fallback — logged by caller
 
 
 def _capabilities() -> list:
@@ -269,95 +250,11 @@ def _handle_probe(req_id, params):
     })
 
 
-def _run_pysim_read(cli: str, reader_index: int, timeout: float):
-    return subprocess.run(
-        [_get_python_executable(), cli, "-p", str(reader_index)],
-        capture_output=True, text=True, timeout=timeout,
-    )
-
-
 def _detect_error(req_id, error, worker_error, stdout="", stderr=""):
     _write({
         "id": req_id, "ok": False, "blank": False, "card_type": "",
         "fields": {}, "stdout": stdout, "stderr": stderr,
         "worker_error": worker_error, "error": error,
-    })
-
-
-def _handle_detect(req_id, params):
-    p = params or {}
-    session_id = p.get("session_id")
-    card_gen = p.get("card_gen")
-
-    if session_id != _session_id or card_gen != _card_gen:
-        _detect_error(req_id, "STALE_SESSION", worker_error=True)
-        return
-
-    pysim_path = p.get("pysim_path", "")
-    if not pysim_path:
-        _detect_error(req_id, "CLI_NOT_FOUND", worker_error=True)
-        return
-
-    cli = os.path.join(pysim_path, "pySim-read.py")
-    if not os.path.isfile(cli):
-        _detect_error(req_id, "CLI_NOT_FOUND", worker_error=True)
-        return
-
-    timeout = p.get("timeout", 30)
-    reader_index = p.get("reader_index", 0)
-
-    try:
-        proc = _run_pysim_read(cli, reader_index, timeout)
-    except subprocess.TimeoutExpired:
-        _detect_error(req_id, "CARD_UNRESPONSIVE", worker_error=False)
-        return
-
-    # Transient PCSC lock contention: retry once on protocolerror.
-    if proc.returncode != 0 and "protocolerror" in proc.stderr.lower():
-        import time as _time
-        _time.sleep(1.0)
-        try:
-            proc = _run_pysim_read(cli, reader_index, timeout)
-        except subprocess.TimeoutExpired:
-            _detect_error(req_id, "CARD_UNRESPONSIVE", worker_error=False)
-            return
-
-    from pysim_parser import parse_pysim_output
-    try:
-        fields = parse_pysim_output(proc.stdout)
-    except Exception:
-        _detect_error(req_id, "PARSE_FAILED", worker_error=False,
-                      stdout=proc.stdout, stderr=proc.stderr)
-        return
-
-    card_type = fields.get("card_type_str", "")
-    has_iccid = bool(fields.get("ICCID", "").strip())
-    has_imsi = bool(fields.get("IMSI", "").strip())
-    blank = (card_type == "gialersim") or (not has_iccid and not has_imsi)
-
-    if proc.returncode != 0 and not card_type and not has_iccid and not has_imsi:
-        _detect_error(req_id, "DETECT_FAILED", worker_error=False,
-                      stdout=proc.stdout, stderr=proc.stderr)
-        return
-
-    global _session_profile, _session_pysim_path, _session_reader_index
-    try:
-        from card_profiles import ProfileFactory
-        _session_profile = ProfileFactory().create(
-            card_type,
-            delegate=WorkerAuthDelegate(pysim_path, reader_index, is_gialersim=(card_type == "gialersim")),
-        )
-        _session_pysim_path = pysim_path
-        _session_reader_index = reader_index
-    except Exception:
-        _session_profile = None
-        _session_pysim_path = ""
-        _session_reader_index = 0
-
-    _write({
-        "id": req_id, "ok": True, "blank": blank, "card_type": card_type,
-        "fields": fields, "stdout": proc.stdout, "stderr": proc.stderr,
-        "worker_error": False,
     })
 
 
@@ -562,8 +459,6 @@ def _handle(line: str) -> bool:
         return False
     elif verb == "probe":
         _handle_probe(req_id, req.get("params"))
-    elif verb in ("detect", "read_fields"):
-        _handle_detect(req_id, req.get("params"))
     elif verb == "authenticate":
         _handle_authenticate(req_id, req.get("params"))
     elif verb == "preload":
