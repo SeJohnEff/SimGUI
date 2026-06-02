@@ -484,6 +484,8 @@ def _handle(line: str) -> bool:
                 else:
                     _write({"id": req_id, "ok": False, "error": "PRELOAD_FAILED", "msg": err})
             except Exception as exc:
+                import traceback
+                traceback.print_exc(file=sys.stderr)
                 _write({"id": req_id, "ok": False, "error": "PRELOAD_FAILED", "msg": str(exc)})
         else:
             _write({"id": req_id, "ok": True, "result": {"inprocess": False}})

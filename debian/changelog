@@ -1,3 +1,14 @@
+simgui (0.5.66) unstable; urgency=medium
+
+  * fix: add stdlib hiddenimports (pdb, cmd, readline, rlcompleter, code,
+    codeop, pprint, inspect, difflib, doctest, unittest) to SimGUI.spec so
+    PyInstaller bundles them; pySim/cmd2 import chain needs pdb at import
+    time in console=False builds, causing worker preload failure
+  * debug: log full exception traceback on worker preload failure so future
+    import-chain errors are diagnosable from stderr
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 02 Jun 2026 00:00:00 +0000
+
 simgui (0.5.65) unstable; urgency=medium
 
   * fix: worker _setup_pysim_path() now uses sys._MEIPASS (Contents/Resources/)
