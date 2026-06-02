@@ -462,6 +462,15 @@ def _handle(line: str) -> bool:
     elif verb == "authenticate":
         _handle_authenticate(req_id, req.get("params"))
     elif verb == "preload":
+        if getattr(sys, "frozen", False):
+            _diag_contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+            _diag_pysim_dir = os.path.join(_diag_contents, "Frameworks", "pysim")
+            logging.warning(
+                "WORKER_PRELOAD_DIAG frozen=True pysim_dir=%r exists=%r sys.path=%r",
+                _diag_pysim_dir, os.path.isdir(_diag_pysim_dir), sys.path,
+            )
+        else:
+            logging.warning("WORKER_PRELOAD_DIAG frozen=False sys.path=%r", sys.path)
         if _inprocess_enabled():
             try:
                 import card_worker_inproc as _inproc

@@ -1,3 +1,10 @@
+simgui (0.5.64) unstable; urgency=medium
+
+  * debug: log sys.path and pysim_dir existence at worker preload time to
+    diagnose "No module named 'pySim'" in frozen .app bundle
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 02 Jun 2026 00:00:00 +0000
+
 simgui (0.5.63) unstable; urgency=medium
 
   * fix: gate _worker_client assignment on preload success — if preload
