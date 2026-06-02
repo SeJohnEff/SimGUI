@@ -174,7 +174,9 @@ def test_capability_excluded_when_opted_out(monkeypatch):
 
 
 def test_capability_advertised_when_flag_on(monkeypatch):
+    import types
     monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+    monkeypatch.setitem(__import__("sys").modules, "pySim", types.ModuleType("pySim"))
     responses = _capture_responses(monkeypatch)
     _send({"id": 8, "verb": "capabilities"})
     assert "program_full" in responses[0]["result"]
@@ -407,8 +409,10 @@ class TestDetectInprocessHandler:
         assert r["worker_error"] is True
 
     def test_capabilities_include_detect_inprocess_when_enabled(self, monkeypatch):
-        """detect_inprocess appears in capabilities only when SIMGUI_WORKER_INPROCESS=1."""
+        """detect_inprocess appears in capabilities only when inprocess enabled and pySim importable."""
+        import types
         monkeypatch.setenv("SIMGUI_WORKER_INPROCESS", "1")
+        monkeypatch.setitem(__import__("sys").modules, "pySim", types.ModuleType("pySim"))
         responses = _capture_responses(monkeypatch)
         _send({"id": 20, "verb": "capabilities"})
         caps = responses[0]["result"]

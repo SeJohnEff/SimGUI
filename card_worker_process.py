@@ -52,12 +52,46 @@ def _inprocess_enabled() -> bool:
     return os.environ.get("SIMGUI_WORKER_INPROCESS") != "0"
 
 
+def _setup_pysim_path() -> None:
+    """In a PyInstaller bundle the pySim directory is copied to
+    Contents/Frameworks/pysim but is not on sys.path, so 'import pySim'
+    fails.  Detect the bundle layout and add the path before any import."""
+    if not getattr(sys, "frozen", False):
+        return
+    # sys.executable = .../Contents/MacOS/<binary>
+    contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+    pysim_dir = os.path.join(contents, "Frameworks", "pysim")
+    if os.path.isdir(pysim_dir) and pysim_dir not in sys.path:
+        sys.path.insert(0, pysim_dir)
+
+
+def _get_python_executable() -> str:
+    """Return the Python interpreter for subprocesses.
+
+    In a frozen bundle sys.executable is the app binary, which cannot run
+    .py scripts.  Locate the bundled CPython framework instead.
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+    fw_bin = os.path.join(
+        contents, "Frameworks", "Python3.framework",
+        "Versions", "Current", "bin",
+    )
+    for name in ("python3.9", "python3.10", "python3.11", "python3.12", "python3"):
+        candidate = os.path.join(fw_bin, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return sys.executable  # broken fallback — logged by caller
+
+
 def _capabilities() -> list:
     caps = list(_BASE_CAPABILITIES)
     if _inprocess_enabled():
-        caps.append("program_full")
         try:
             import card_worker_inproc as _inproc
+            import pySim  # confirm pySim itself is importable, not just the wrapper
+            caps.append("program_full")
             caps.append("detect_inprocess")
             if _inproc.delta_supported_fields():
                 caps.append("program_delta")
@@ -237,7 +271,7 @@ def _handle_probe(req_id, params):
 
 def _run_pysim_read(cli: str, reader_index: int, timeout: float):
     return subprocess.run(
-        [sys.executable, cli, "-p", str(reader_index)],
+        [_get_python_executable(), cli, "-p", str(reader_index)],
         capture_output=True, text=True, timeout=timeout,
     )
 
@@ -560,6 +594,7 @@ def _handle(line: str) -> bool:
 
 
 def main() -> None:
+    _setup_pysim_path()
     sys.stdout = _JsonOnlyStdout(sys.stdout)
     banner = json.dumps({"event": "ready", "pid": os.getpid()})
     sys.stderr.write(banner + "\n")

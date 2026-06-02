@@ -764,10 +764,12 @@ def test_inprocess_enabled_explicit_on(monkeypatch):
 def test_capabilities_include_detect_inprocess_by_default(monkeypatch):
     """_capabilities() includes detect_inprocess when inprocess is enabled and inproc loads."""
     import card_worker_process as cwp
+    import types
     monkeypatch.delenv("SIMGUI_WORKER_INPROCESS", raising=False)
-    # Patch card_worker_inproc so delta_supported_fields returns True
     fake_inproc = type("FakeInproc", (), {"delta_supported_fields": staticmethod(lambda: ["IMSI"])})()
     monkeypatch.setitem(__import__("sys").modules, "card_worker_inproc", fake_inproc)
+    # pySim must also appear importable — _capabilities() imports it as a guard
+    monkeypatch.setitem(__import__("sys").modules, "pySim", types.ModuleType("pySim"))
     caps = cwp._capabilities()
     assert "detect_inprocess" in caps
     assert "program_full" in caps
