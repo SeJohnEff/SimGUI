@@ -1,3 +1,12 @@
+simgui (0.5.63) unstable; urgency=medium
+
+  * fix: gate _worker_client assignment on preload success — if preload
+    fails, leave _worker_client=None so CardWatcher falls back to the
+    direct PCSC path; previously a failed preload left state=ERROR with
+    is_ready()=False causing card insertion to be invisible to the UI forever
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 02 Jun 2026 00:00:00 +0000
+
 simgui (0.5.57) unstable; urgency=medium
 
   * feat: macOS SMB NAS auto-program — saved network profiles, startup

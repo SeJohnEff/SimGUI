@@ -308,7 +308,13 @@ class SimGUIApp(QMainWindow):
                 preload_ok = _wc.preload()
                 logger.info("WORKER_DIAG preload result=%r  is_ready=%r  last_error=%r",
                             preload_ok, _wc.is_ready(), _wc.last_error)
-                self._worker_client = _wc
+                if preload_ok:
+                    self._worker_client = _wc
+                else:
+                    logger.warning(
+                        "Worker preload failed (%s), falling back to direct PCSC path",
+                        _wc.last_error,
+                    )
             except Exception as exc:
                 logger.warning("Worker start failed, using subprocess fallback: %s", exc)
         logger.info("WORKER_DIAG CardManager.set_worker_client called  client=%r",
