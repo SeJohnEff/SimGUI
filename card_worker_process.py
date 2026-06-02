@@ -56,9 +56,9 @@ def _capabilities() -> list:
     caps = list(_BASE_CAPABILITIES)
     if _inprocess_enabled():
         caps.append("program_full")
-        caps.append("detect_inprocess")
         try:
             import card_worker_inproc as _inproc
+            caps.append("detect_inprocess")
             if _inproc.delta_supported_fields():
                 caps.append("program_delta")
                 caps.append("program_delta_capabilities")

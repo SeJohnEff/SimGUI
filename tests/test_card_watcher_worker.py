@@ -38,13 +38,17 @@ class FakeCardManager:
 
 
 class FakeWorker:
-    def __init__(self, result=None, raises=None, detect_result=None):
+    def __init__(self, result=None, raises=None, detect_result=None, ready=True):
         self.probe_calls = 0
         self.detect_calls = 0
         self._result = result
         self._raises = raises
         self._detect_result = detect_result
         self._detect_raises = None
+        self._ready = ready
+
+    def is_ready(self):
+        return self._ready
 
     def probe(self, **kwargs):
         self.probe_calls += 1
@@ -559,3 +563,25 @@ def test_worker_read_falls_back_to_detect_when_inprocess_absent():
     watcher._check_once()
 
     assert worker.detect_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 24: _worker_read_and_notify skips detect when worker not ready
+# ---------------------------------------------------------------------------
+
+def test_worker_read_skips_detect_when_not_ready():
+    worker = FakeWorker(
+        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid1"),
+        detect_result=DetectResult(ok=True, blank=True),
+        ready=False,
+    )
+    watcher, _ = make_watcher(worker=worker)
+
+    errors = []
+    watcher.on_error = errors.append
+    watcher._check_once()
+
+    assert worker.detect_calls == 0
+    assert watcher._last_read_failed is True
+    assert len(errors) == 1
+    assert "not ready" in errors[0].lower()

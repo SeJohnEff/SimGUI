@@ -475,6 +475,15 @@ class CardWatcher:
         """Run worker detect and fire the appropriate callback."""
         from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
 
+        if not self._worker_client.is_ready():
+            self._last_read_failed = True
+            if self.on_error:
+                try:
+                    self.on_error("Worker not ready — preload may have failed")
+                except Exception:
+                    pass
+            return
+
         if not hasattr(self, "_worker_caps_cache"):
             try:
                 self._worker_caps_cache = self._worker_client.capabilities()
