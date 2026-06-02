@@ -1,3 +1,12 @@
+simgui (0.5.65) unstable; urgency=medium
+
+  * fix: worker _setup_pysim_path() now uses sys._MEIPASS (Contents/Resources/)
+    instead of the wrong Contents/Frameworks/ path; also adds pysim-site-packages
+    so transport dependencies are importable — fixes "No module named 'pySim'"
+    preload failure in frozen .app bundle
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 02 Jun 2026 00:00:00 +0000
+
 simgui (0.5.64) unstable; urgency=medium
 
   * debug: log sys.path and pysim_dir existence at worker preload time to

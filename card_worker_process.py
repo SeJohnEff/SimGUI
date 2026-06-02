@@ -53,16 +53,16 @@ def _inprocess_enabled() -> bool:
 
 
 def _setup_pysim_path() -> None:
-    """In a PyInstaller bundle the pySim directory is copied to
-    Contents/Frameworks/pysim but is not on sys.path, so 'import pySim'
-    fails.  Detect the bundle layout and add the path before any import."""
-    if not getattr(sys, "frozen", False):
+    """In a PyInstaller bundle pySim data files land at sys._MEIPASS
+    (Contents/Resources/), not Contents/Frameworks/.  Add both the pySim
+    package directory and its site-packages to sys.path before any import.
+    Mirrors the logic in CardManager._get_pysim_env()."""
+    if not (getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")):
         return
-    # sys.executable = .../Contents/MacOS/<binary>
-    contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
-    pysim_dir = os.path.join(contents, "Frameworks", "pysim")
-    if os.path.isdir(pysim_dir) and pysim_dir not in sys.path:
-        sys.path.insert(0, pysim_dir)
+    for subdir in ("pysim", "pysim-site-packages"):
+        p = os.path.join(sys._MEIPASS, subdir)
+        if os.path.isdir(p) and p not in sys.path:
+            sys.path.insert(0, p)
 
 
 
@@ -462,12 +462,16 @@ def _handle(line: str) -> bool:
     elif verb == "authenticate":
         _handle_authenticate(req_id, req.get("params"))
     elif verb == "preload":
-        if getattr(sys, "frozen", False):
-            _diag_contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
-            _diag_pysim_dir = os.path.join(_diag_contents, "Frameworks", "pysim")
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            _diag_pysim_dir = os.path.join(sys._MEIPASS, "pysim")
+            _diag_site_pkgs = os.path.join(sys._MEIPASS, "pysim-site-packages")
             logging.warning(
-                "WORKER_PRELOAD_DIAG frozen=True pysim_dir=%r exists=%r sys.path=%r",
-                _diag_pysim_dir, os.path.isdir(_diag_pysim_dir), sys.path,
+                "WORKER_PRELOAD_DIAG frozen=True meipass=%r pysim_exists=%r "
+                "site_pkgs_exists=%r sys.path=%r",
+                sys._MEIPASS,
+                os.path.isdir(_diag_pysim_dir),
+                os.path.isdir(_diag_site_pkgs),
+                sys.path,
             )
         else:
             logging.warning("WORKER_PRELOAD_DIAG frozen=False sys.path=%r", sys.path)
