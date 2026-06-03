@@ -23,11 +23,7 @@ a = Analysis(
           if os.path.exists('pysim-site-packages') else []),
     ],
     hiddenimports=[
-        # pyscard — card reader access
-        'smartcard',
-        'smartcard.scard',
-        'smartcard.scard._scard',
-        # complete stdlib used by pySim/cmd2 import chain (computed via modulefinder)
+        'smartcard', 'smartcard.scard', 'smartcard.scard._scard',
         'abc', 'argparse', 'array', 'ast', 'asyncio', 'base64', 'bdb',
         'binascii', 'bisect', 'bz2', 'calendar', 'cmd', 'code', 'codecs',
         'codeop', 'collections', 'concurrent', 'contextlib', 'contextvars',
