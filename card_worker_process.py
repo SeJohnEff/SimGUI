@@ -236,6 +236,13 @@ def _handle_probe(req_id, params):
         _write({"id": req_id, "ok": False, "error": "PROBE_TIMEOUT"})
         return
 
+    if exc_box:
+        import sys as _sys
+        _sys.stderr.write(
+            f"[PROBE_CONNECT_ERR] {type(exc_box[0]).__name__}: {exc_box[0]}\n"
+        )
+        _sys.stderr.flush()
+
     if exc_box or "atr" not in result:
         if _card_present:
             _card_present = False
