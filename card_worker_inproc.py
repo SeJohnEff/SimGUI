@@ -358,6 +358,30 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         return result
 
     except Exception as exc:
+        # Map no-card / PCSC-connect errors to NO_CARD so the watcher
+        # treats them as "no card present" rather than an error state.
+        # pySim raises NoCardException (and smartcard raises NoCardException
+        # or CardConnectionException) when the reader is empty or the
+        # transport connect fails because no card is seated.
+        exc_name = type(exc).__name__
+        exc_str = str(exc)
+        _no_card_signals = (
+            "NoCardException",
+            "CardConnectionException",
+            "No card",
+            "No smart card",
+            "unable to connect",
+            "no card",
+        )
+        is_no_card = exc_name in ("NoCardException", "CardConnectionException") or any(
+            s.lower() in exc_str.lower() for s in _no_card_signals
+        )
+        if is_no_card:
+            # Drop the broken session so the next poll opens a fresh one
+            # (pySim PCSC transport is not reusable after a connect failure).
+            reset_session()
+            result["error"] = "NO_CARD"
+            return result
         result["error"] = "DETECT_FAILED"
-        result["stderr"] = f"{type(exc).__name__}: {exc}"
+        result["stderr"] = f"{exc_name}: {exc_str}"
         return result
