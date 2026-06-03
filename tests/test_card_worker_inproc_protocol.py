@@ -443,6 +443,7 @@ class TestAuthenticateInprocess:
         monkeypatch.setitem(card_worker_inproc._session, "sl", object())
         monkeypatch.setitem(card_worker_inproc._session, "scc", scc)
         monkeypatch.setitem(card_worker_inproc._session, "reader_index", 0)
+        monkeypatch.setitem(card_worker_inproc._session, "card_connected", True)
 
     def _fake_rt(self, monkeypatch, scc):
         rt = mock.MagicMock()
@@ -584,6 +585,7 @@ class TestProgramDeltaInproc:
         monkeypatch.setitem(card_worker_inproc._session, "sl", object())
         monkeypatch.setitem(card_worker_inproc._session, "scc", scc)
         monkeypatch.setitem(card_worker_inproc._session, "reader_index", 0)
+        monkeypatch.setitem(card_worker_inproc._session, "card_connected", True)
 
     def test_delta_supported_fields_returns_imsi_and_fplmn(self):
         fields = card_worker_inproc.delta_supported_fields()

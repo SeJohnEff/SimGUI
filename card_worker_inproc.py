@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 _NOT_PROGRAMMING_FIELDS = ("PIN1", "PUK1")
 
 
-_session: Dict[str, Any] = {"sl": None, "scc": None, "reader_index": None}
+_session: Dict[str, Any] = {"sl": None, "scc": None, "reader_index": None, "card_connected": False}
 _pysim_runtime: Optional[Any] = None
 
 
@@ -190,31 +190,41 @@ class _NoCardError(Exception):
 
 
 def _ensure_session(rt: Any, reader_index: int) -> None:
-    """Open and connect the PCSC transport, reusing it across requests.
+    """Ensure the PCSC reader handle and card connection are ready.
 
-    Raises _NoCardError when the reader is found but no card is seated.
-    Raises any other exception for genuine transport/reader errors.
+    Reader handle (sl) is created once and reused across polls — it is never
+    torn down just because no card is present.  Card connection is (re)attempted
+    on every call when card_connected is False, so insertion is detected without
+    recreating the reader handle (and without triggering 'Using reader PCSC'
+    on every poll).
+
+    Raises _NoCardError when the reader handle is open but no card is seated.
+    Raises any other exception for genuine reader/transport errors.
     """
-    if _session["sl"] is not None and _session["reader_index"] == reader_index:
-        return
+    # Create the reader handle only once (or when reader index changes).
+    if _session["sl"] is None or _session["reader_index"] != reader_index:
+        opts = _Opts()
+        opts.pcsc_dev = reader_index
+        sl = rt.init_reader(opts)
+        _session["sl"] = sl
+        _session["scc"] = rt.SimCardCommands(transport=sl)
+        _session["reader_index"] = reader_index
+        _session["card_connected"] = False
 
-    opts = _Opts()
-    opts.pcsc_dev = reader_index
-    sl = rt.init_reader(opts)
-    try:
-        sl.connect()
-    except Exception as exc:
-        exc_name = type(exc).__name__
-        exc_str = str(exc).lower()
-        if exc_name in ("NoCardException", "CardConnectionException",
-                        "NoCardError") or any(
-            s in exc_str for s in ("no card", "no smart card", "unable to connect")
-        ):
-            raise _NoCardError() from exc
-        raise
-    _session["sl"] = sl
-    _session["scc"] = rt.SimCardCommands(transport=sl)
-    _session["reader_index"] = reader_index
+    # (Re)connect the card when not already connected.
+    if not _session["card_connected"]:
+        try:
+            _session["sl"].connect()
+            _session["card_connected"] = True
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            exc_str = str(exc).lower()
+            if exc_name in ("NoCardException", "CardConnectionException",
+                            "NoCardError") or any(
+                s in exc_str for s in ("no card", "no smart card", "unable to connect")
+            ):
+                raise _NoCardError() from exc
+            raise
 
 
 def reset_session() -> None:
@@ -222,6 +232,7 @@ def reset_session() -> None:
     _session["sl"] = None
     _session["scc"] = None
     _session["reader_index"] = None
+    _session["card_connected"] = False
 
 
 def _build_cp(fields: Dict[str, str], adm1_hex: str) -> Dict[str, Any]:
@@ -330,7 +341,11 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     try:
         _ensure_session(rt, reader_index)
     except _NoCardError:
-        reset_session()
+        # Reader handle (sl) stays alive — only the card connection is absent.
+        # Do NOT call reset_session(): that would destroy sl and force
+        # init_reader() on every poll, causing 'Using reader PCSC' spam and
+        # preventing stable detection when the card is inserted.
+        _session["card_connected"] = False
         result["error"] = "NO_CARD"
         return result
 
@@ -338,6 +353,9 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         scc = _session["scc"]
         card = rt.card_detect("auto", scc)
         if card is None:
+            # Autodetection failed — card may have been removed after connect().
+            # Reset connection state so next poll retries connect().
+            _session["card_connected"] = False
             result["error"] = "NO_CARD"
             return result
 
@@ -396,6 +414,10 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         return result
 
     except Exception as exc:
+        # Card communication failed mid-read (e.g. card removed during APDU).
+        # Clear card_connected so the next poll retries connect() rather than
+        # going straight to card_detect on a broken transport.
+        _session["card_connected"] = False
         exc_name = type(exc).__name__
         exc_str = str(exc)
         result["error"] = "DETECT_FAILED"
