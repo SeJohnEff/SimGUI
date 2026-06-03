@@ -40,6 +40,18 @@ class _JsonOnlyStdout:
     def flush(self) -> None:
         self._real.flush()
 
+    def isatty(self) -> bool:
+        return False
+
+    def readable(self) -> bool:
+        return False
+
+    def writable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
     def fileno(self) -> int:
         return self._real.fileno()
 
