@@ -123,6 +123,11 @@ git rev-parse --short HEAD > "$PROJECT_ROOT/GITHASH" 2>/dev/null \
 echo "GITHASH: $(cat "$PROJECT_ROOT/GITHASH")"
 
 # --- Run PyInstaller ---
+# Remove dist/ entirely before building — PyInstaller's --clean only wipes
+# the build/ work dir, not dist/. Stale files from a previous build can
+# survive an in-place overwrite and end up in the pkg with the wrong content.
+echo "Removing stale dist/ before build..."
+rm -rf "$PROJECT_ROOT/dist"
 echo "Running PyInstaller with SimGUI.spec..."
 "$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y
 
