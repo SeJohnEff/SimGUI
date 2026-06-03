@@ -129,10 +129,23 @@ class _Runtime:
 
 
 class _Opts:
-    """Minimal stand-in for the argparse Namespace pySim's init_reader expects."""
-    pcsc_dev = 0
+    """Minimal stand-in for the argparse Namespace pySim's init_reader expects.
+
+    Covers every attribute read by pySim's init_reader() and PcscSimLink.__init__():
+      - apdu_trace   : checked first in init_reader before any reader selection
+      - pcsc_dev     : selects PCSC reader by index
+      - pcsc_regex   : selects PCSC reader by name regex (mutually exclusive with pcsc_dev)
+      - pcsc_shared  : use shared (non-exclusive) card connection
+      - osmocon_sock : Calypso transport (unused)
+      - modem_dev    : modem AT transport (unused)
+      - modem_baud   : modem baud rate
+    """
+    pcsc_dev: int = 0
+    pcsc_regex = None
+    pcsc_shared: bool = False
+    apdu_trace: bool = False
     modem_dev = None
-    modem_baud = 115200
+    modem_baud: int = 115200
     osmocon_sock = None
 
 
@@ -382,8 +395,6 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             reset_session()
             result["error"] = "NO_CARD"
             return result
-        import sys
-        print(f"DETECT_FAILED_DIAG exc_type={exc_name!r} exc_msg={exc_str!r}", file=sys.stderr, flush=True)
         result["error"] = "DETECT_FAILED"
         result["stderr"] = f"{exc_name}: {exc_str}"
         return result
