@@ -1,3 +1,13 @@
+simgui (0.5.72) unstable; urgency=medium
+
+  * fix: treat empty ATR list from getATR() as no card present — getATR()
+    returns [] without raising when card is absent; bytes([]).hex()="" was
+    causing present=True with empty ATR and suppressing subsequent reads
+  * cleanup: remove PROBE_DIAG and PROBE_CONNECT_ERR diagnostic log lines
+    added in v0.5.70/v0.5.71; root cause confirmed, diags no longer needed
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+
 simgui (0.5.71) unstable; urgency=medium
 
   * diag: log [PROBE_CONNECT_ERR] exception from conn.connect() so the exact

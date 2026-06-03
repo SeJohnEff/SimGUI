@@ -204,9 +204,6 @@ def _handle_probe(req_id, params):
     timeout = p.get("timeout", 2.0)
 
     readers = _smartcard_readers()
-    import sys as _sys
-    _sys.stderr.write(f"[PROBE_DIAG] readers={readers} reader_index={reader_index}\n")
-    _sys.stderr.flush()
     if not readers or reader_index >= len(readers):
         _card_present = False
         _session_profile = None
@@ -236,14 +233,8 @@ def _handle_probe(req_id, params):
         _write({"id": req_id, "ok": False, "error": "PROBE_TIMEOUT"})
         return
 
-    if exc_box:
-        import sys as _sys
-        _sys.stderr.write(
-            f"[PROBE_CONNECT_ERR] {type(exc_box[0]).__name__}: {exc_box[0]}\n"
-        )
-        _sys.stderr.flush()
-
-    if exc_box or "atr" not in result:
+    atr_raw = result.get("atr") or []
+    if exc_box or not atr_raw:
         if _card_present:
             _card_present = False
             _session_profile = None
