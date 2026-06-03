@@ -234,7 +234,9 @@ class CardWatcher:
                             logger.error("CardWatcher poll error: %s", exc)
                             if self.on_error:
                                 try:
-                                    self.on_error(str(exc))
+                                    # Never expose raw Python exception strings
+                                    # to the UI — they are not user-readable.
+                                    self.on_error("No USB card reader detected")
                                 except Exception:
                                     pass
 
