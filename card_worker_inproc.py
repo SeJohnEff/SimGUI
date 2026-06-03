@@ -362,21 +362,26 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     try:
         scc = _session["scc"]
 
-        # Guard: if the transport reports an empty ATR, card_detect will hang
-        # iterating profiles against an unidentifiable card. Treat empty ATR
-        # as absent and retry on the next poll.
+        # Probe ATR before card_detect. If empty, card_detect may hang
+        # iterating all profiles against an unidentifiable card.
+        import sys as _sys
         try:
             atr_bytes = _session["sl"].get_atr()
-        except Exception:
+            _sys.stderr.write(f"[DETECT_DIAG] get_atr()={bytes(atr_bytes).hex() if atr_bytes else repr(atr_bytes)}\n")
+            _sys.stderr.flush()
+        except Exception as _atr_exc:
             atr_bytes = None
+            _sys.stderr.write(f"[DETECT_DIAG] get_atr() raised {type(_atr_exc).__name__}: {_atr_exc}\n")
+            _sys.stderr.flush()
         if not atr_bytes:
-            import sys as _sys
-            _sys.stderr.write("[DETECT_EMPTY_ATR] card connected but ATR is empty — skipping card_detect\n")
+            _sys.stderr.write("[DETECT_EMPTY_ATR] ATR empty — skipping card_detect, will retry\n")
             _sys.stderr.flush()
             _session["card_connected"] = False
             result["error"] = "NO_CARD"
             return result
 
+        _sys.stderr.write(f"[DETECT_DIAG] calling card_detect ATR={bytes(atr_bytes).hex()}\n")
+        _sys.stderr.flush()
         card = rt.card_detect("auto", scc)
         if card is None:
             # Autodetection failed — card may have been removed after connect().
