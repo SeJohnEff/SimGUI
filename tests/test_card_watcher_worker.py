@@ -101,10 +101,13 @@ def make_watcher(worker=None, cm=None, pysim_path=None):
 # ---------------------------------------------------------------------------
 
 def test_worker_path_selected():
-    worker = FakeWorker(result=ProbeResult(present=False, msg='No card in reader'))
+    # New architecture: detect_inprocess is called directly; probe() is never used.
+    worker = FakeWorker()
+    worker._detect_result = DetectResult(ok=False, error='NO_CARD', msg='No card in reader')
     watcher, cm = make_watcher(worker=worker)
     watcher._check_once()
-    assert worker.probe_calls == 1
+    assert worker.probe_calls == 0
+    assert worker.detect_inprocess_calls == 1
     assert cm.probe_calls == 0
 
 
@@ -114,19 +117,17 @@ def test_worker_path_selected():
 
 def test_same_card_gen_no_reread():
     gen = "gen-abc"
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B 9F", card_gen=gen))
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True, card_gen=gen))
     watcher, cm = make_watcher(worker=worker)
 
     reads = []
     watcher.on_card_unknown = lambda iccid: reads.append(iccid)
 
-    # First probe — new card
-    cm.iccid = None
-    cm.detect_ok = True
+    # First call — new card
     watcher._check_once()
     first_count = len(reads)
 
-    # Second probe — same card_gen
+    # Second call — same card_gen, card already present
     watcher._check_once()
     assert len(reads) == first_count  # no additional read
 
@@ -136,10 +137,8 @@ def test_same_card_gen_no_reread():
 # ---------------------------------------------------------------------------
 
 def test_new_card_gen_triggers_read():
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B 9F", card_gen="gen-1"))
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True, card_gen="gen-1"))
     watcher, cm = make_watcher(worker=worker)
-    cm.iccid = None
-    cm.detect_ok = True
 
     reads = []
     watcher.on_card_unknown = lambda iccid: reads.append(iccid)
@@ -147,8 +146,8 @@ def test_new_card_gen_triggers_read():
     watcher._check_once()
     assert len(reads) == 1
 
-    # Different card_gen
-    worker.set_result(ProbeResult(present=True, atr="3B 9F", card_gen="gen-2"))
+    # Different card_gen — triggers new read
+    worker.set_detect_result(DetectResult(ok=True, blank=True, card_gen="gen-2"))
     watcher._check_once()
     assert len(reads) == 2
 
@@ -158,37 +157,35 @@ def test_new_card_gen_triggers_read():
 # ---------------------------------------------------------------------------
 
 def test_card_gen_none_falls_back_to_atr():
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B 9F 96", card_gen=None))
+    # card_gen=None: after first read, same result suppressed because
+    # _card_present=True and new_gen==old_gen==None and not _last_read_failed.
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True, card_gen=None))
     watcher, cm = make_watcher(worker=worker)
-    cm.iccid = None
-    cm.detect_ok = True
 
     reads = []
     watcher.on_card_unknown = lambda iccid: reads.append(iccid)
 
-    # First probe — triggers read
+    # First call — triggers read
     watcher._check_once()
     assert len(reads) == 1
 
-    # Same ATR, card_gen=None — existing ATR dedup suppresses re-read
+    # Second call — card_gen=None, already present, not failed — suppressed
     watcher._check_once()
     assert len(reads) == 1
 
-    # Different ATR with card_gen=None — triggers new read
-    worker.set_result(ProbeResult(present=True, atr="00 11 22", card_gen=None))
+    # _last_read_failed=True forces re-read even with same card_gen=None
+    watcher._last_read_failed = True
     watcher._check_once()
     assert len(reads) == 2
 
 
 # ---------------------------------------------------------------------------
-# Test 5: result.error PROBE_TIMEOUT — on_error, _card_present preserved, no removal
+# Test 5: WorkerTimeoutError during detect — on_error, _card_present preserved, no removal
 # ---------------------------------------------------------------------------
 
 def test_probe_timeout_calls_on_error_preserves_state():
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B", card_gen="g1"))
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True))
     watcher, cm = make_watcher(worker=worker)
-    cm.iccid = None
-    cm.detect_ok = True
     watcher._check_once()  # card becomes present
     assert watcher._card_present
 
@@ -197,7 +194,7 @@ def test_probe_timeout_calls_on_error_preserves_state():
     watcher.on_error = lambda msg: errors.append(msg)
     watcher.on_card_removed = lambda: removals.append(True)
 
-    worker.set_result(ProbeResult(present=False, error='PROBE_TIMEOUT', msg='timed out'))
+    worker.set_detect_raises(WorkerTimeoutError("detect_inprocess", 30.0))
     watcher._check_once()
 
     assert len(errors) == 1
@@ -206,14 +203,12 @@ def test_probe_timeout_calls_on_error_preserves_state():
 
 
 # ---------------------------------------------------------------------------
-# Test 6: WorkerTimeoutError — same as PROBE_TIMEOUT
+# Test 6: WorkerEOFError during detect — on_error, _card_present preserved, no removal
 # ---------------------------------------------------------------------------
 
 def test_worker_timeout_error_preserves_state():
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B", card_gen="g1"))
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True))
     watcher, cm = make_watcher(worker=worker)
-    cm.iccid = None
-    cm.detect_ok = True
     watcher._check_once()
     assert watcher._card_present
 
@@ -222,7 +217,7 @@ def test_worker_timeout_error_preserves_state():
     watcher.on_error = lambda msg: errors.append(msg)
     watcher.on_card_removed = lambda: removals.append(True)
 
-    worker.set_raises(WorkerTimeoutError("probe", 2.0))
+    worker.set_detect_raises(WorkerEOFError())
     watcher._check_once()
 
     assert len(errors) == 1
@@ -231,11 +226,12 @@ def test_worker_timeout_error_preserves_state():
 
 
 # ---------------------------------------------------------------------------
-# Test 7: WorkerCrashError — on_error, does NOT fall back to native probe
+# Test 7: WorkerCrashError in detect_inprocess — on_error, no native fallback
 # ---------------------------------------------------------------------------
 
 def test_worker_crash_calls_on_error_no_native_fallback():
-    worker = FakeWorker(raises=WorkerCrashError(1))
+    worker = FakeWorker()
+    worker.set_detect_raises(WorkerCrashError(1))
     watcher, cm = make_watcher(worker=worker)
 
     errors = []
@@ -249,11 +245,12 @@ def test_worker_crash_calls_on_error_no_native_fallback():
 
 
 # ---------------------------------------------------------------------------
-# Test 8: WorkerEOFError — on_error, does NOT fall back to native probe
+# Test 8: WorkerEOFError in detect_inprocess — on_error, no native fallback
 # ---------------------------------------------------------------------------
 
 def test_worker_eof_calls_on_error_no_native_fallback():
-    worker = FakeWorker(raises=WorkerEOFError())
+    worker = FakeWorker()
+    worker.set_detect_raises(WorkerEOFError())
     watcher, cm = make_watcher(worker=worker)
 
     errors = []
@@ -271,10 +268,8 @@ def test_worker_eof_calls_on_error_no_native_fallback():
 # ---------------------------------------------------------------------------
 
 def test_no_card_clears_last_card_gen():
-    worker = FakeWorker(result=ProbeResult(present=True, atr="3B", card_gen="g1"))
+    worker = FakeWorker(detect_result=DetectResult(ok=True, blank=True, card_gen="g1"))
     watcher, cm = make_watcher(worker=worker)
-    cm.iccid = None
-    cm.detect_ok = True
     watcher._check_once()
     assert watcher._last_card_gen == "g1"
 
@@ -282,7 +277,7 @@ def test_no_card_clears_last_card_gen():
     watcher.on_reader_ready = lambda: ready.append(True)
     watcher.on_card_removed = lambda: None
 
-    worker.set_result(ProbeResult(present=False, msg='No card in reader'))
+    worker.set_detect_result(DetectResult(ok=False, error='NO_CARD', msg='No card in reader'))
     # blank card debounce requires two consecutive absent probes
     watcher._check_once()
     watcher._check_once()
@@ -315,16 +310,16 @@ def test_pysim_path_forwarded_to_detect_inprocess():
             calls.append(kwargs.copy())
             return DetectResult(ok=True, blank=True)
 
-    worker = TrackingWorker(
-        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid-1")
-    )
+    worker = TrackingWorker()
     watcher, _ = make_watcher(worker=worker, pysim_path="/opt/pysim")
     watcher._check_once()
 
     assert len(calls) == 1
     assert calls[0]["pysim_path"] == "/opt/pysim"
-    assert calls[0]["session_id"] == "sid-1"
-    assert calls[0]["card_gen"] == "g1"
+    # session_id is always None in the new probe-free path
+    assert calls[0]["session_id"] is None
+    # card_gen reflects _last_card_gen (None on first call)
+    assert calls[0]["card_gen"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +474,8 @@ def test_worker_detect_crash_no_native_fallback():
 def test_on_worker_session_ready_fires_on_non_blank_success():
     iccid = "8946101234567890001"
     worker = FakeWorker(
-        result=ProbeResult(present=True, atr="3B", card_gen="g1", session_id="sid-99"),
-        detect_result=DetectResult(ok=True, blank=False, fields={"ICCID": iccid}),
+        detect_result=DetectResult(ok=True, blank=False, fields={"ICCID": iccid},
+                                   session_id="sid-99", card_gen="g1"),
     )
     watcher, _ = make_watcher(worker=worker)
 
@@ -499,8 +494,7 @@ def test_on_worker_session_ready_fires_on_non_blank_success():
 
 def test_on_worker_session_ready_fires_on_blank_success():
     worker = FakeWorker(
-        result=ProbeResult(present=True, atr="3B", card_gen="g2", session_id="sid-blank"),
-        detect_result=DetectResult(ok=True, blank=True),
+        detect_result=DetectResult(ok=True, blank=True, session_id="sid-blank", card_gen="g2"),
     )
     watcher, _ = make_watcher(worker=worker)
 

@@ -413,66 +413,7 @@ class CardWatcher:
                 pass
 
     def _check_once_worker(self):
-        """Poll iteration using worker probe path."""
-        from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
-
-        try:
-            result = self._worker_client.probe()
-        except WorkerTimeoutError as exc:
-            if self.on_error:
-                try:
-                    self.on_error(str(exc))
-                except Exception:
-                    pass
-            return
-        except (WorkerEOFError, WorkerCrashError) as exc:
-            if self.on_error:
-                try:
-                    self.on_error(str(exc))
-                except Exception:
-                    pass
-            return
-
-        if result.error == 'PROBE_TIMEOUT':
-            if self.on_error:
-                try:
-                    self.on_error(result.msg or 'PROBE_TIMEOUT')
-                except Exception:
-                    pass
-            return
-
-        if result.present:
-            new_gen = result.card_gen
-            old_gen = self._last_card_gen
-            if (self._card_present
-                    and new_gen is not None
-                    and new_gen == old_gen
-                    and not self._last_read_failed):
-                return
-            # New non-None card_gen means a different card session even if ATR is
-            # unchanged — clear _last_atr so a fresh read is triggered.
-            if new_gen is not None and new_gen != old_gen:
-                self._last_atr = None
-            self._last_card_gen = new_gen
-            atr = result.atr or ""
-            if self._card_present and atr == self._last_atr and not self._last_read_failed:
-                return
-            self._no_card_streak = 0
-            self._no_reader_poll_count = 0
-            self._card_present = True
-            self._last_atr = atr
-            if self.on_reading:
-                try:
-                    self.on_reading()
-                except Exception:
-                    pass
-            self._worker_read_and_notify(result.session_id, result.card_gen)
-        else:
-            self._last_card_gen = None
-            self._handle_probe_result(False, result.msg or 'No card in reader')
-
-    def _worker_read_and_notify(self, session_id, card_gen):
-        """Run worker detect and fire the appropriate callback."""
+        """Poll using detect_inprocess directly — probe() is not used."""
         from card_worker_client import WorkerTimeoutError, WorkerEOFError, WorkerCrashError
 
         if not self._worker_client.is_ready():
@@ -501,8 +442,8 @@ class CardWatcher:
 
         try:
             result = self._worker_client.detect_inprocess(
-                session_id=session_id,
-                card_gen=card_gen,
+                session_id=None,
+                card_gen=self._last_card_gen,
                 pysim_path=self._pysim_path,
                 reader_index=0,
                 timeout=30.0,
@@ -525,10 +466,32 @@ class CardWatcher:
                     pass
             return
 
+        if result.error == 'NO_CARD':
+            self._last_card_gen = None
+            self._handle_probe_result(False, 'No card in reader')
+            return
+
         if result.ok:
+            new_gen = result.card_gen
+            old_gen = self._last_card_gen
+            if (self._card_present
+                    and new_gen == old_gen
+                    and not self._last_read_failed):
+                return
+            if new_gen != old_gen:
+                self._last_atr = None
+            self._last_card_gen = new_gen
+            self._no_card_streak = 0
+            self._no_reader_poll_count = 0
+            self._card_present = True
+            if self.on_reading:
+                try:
+                    self.on_reading()
+                except Exception:
+                    pass
             if self.on_worker_session_ready is not None:
                 try:
-                    self.on_worker_session_ready(session_id, card_gen)
+                    self.on_worker_session_ready(result.session_id, new_gen)
                 except Exception:
                     pass
             if result.blank:
@@ -540,7 +503,7 @@ class CardWatcher:
                     except Exception:
                         pass
             else:
-                iccid = result.fields.get("ICCID", "")
+                iccid = (result.fields or {}).get("ICCID", "")
                 if iccid:
                     self._last_read_failed = False
                     self._last_iccid = iccid
