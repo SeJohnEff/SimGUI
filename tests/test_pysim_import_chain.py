@@ -15,7 +15,7 @@ import pytest
 REQUIRED_STDLIB = [
     'abc', 'argparse', 'array', 'ast', 'asyncio', 'base64', 'bdb',
     'binascii', 'bisect', 'bz2', 'calendar', 'cmd', 'code', 'codecs',
-    'codeop', 'collections', 'concurrent', 'contextlib', 'contextvars',
+    'codeop', 'collections', 'colorsys', 'concurrent', 'contextlib', 'contextvars',
     'copy', 'copyreg', 'csv', 'ctypes', 'dataclasses', 'datetime',
     'decimal', 'difflib', 'dis', 'doctest', 'email', 'encodings',
     'enum', 'fcntl', 'fnmatch', 'fractions', 'ftplib', 'functools',

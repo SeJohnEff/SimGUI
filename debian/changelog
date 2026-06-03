@@ -1,3 +1,13 @@
+simgui (0.5.69) unstable; urgency=medium
+
+  * fix: add 'colorsys' to hiddenimports in SimGUI.spec and REQUIRED_STDLIB
+    in test_pysim_import_chain.py — cmd2/colorlog import chain requires it
+  * build: add Check 5 to build-macos-app.sh — simulate worker preload with
+    bundled Python before packaging; missing stdlib modules now cause build
+    failure on M4, not runtime failure on target
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+
 simgui (0.5.68) unstable; urgency=medium
 
   * fix: add missing file-like methods (isatty, readable, writable, seekable)

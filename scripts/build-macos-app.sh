@@ -292,6 +292,30 @@ PYSIM_IMPORT_ERR=$(PYTHONHOME="$BUNDLED_FWK_DIR" PYTHONPATH="$BUNDLE_PYSIM_DIR:$
 }
 echo "✓ pySim import smoke test passed (smpp.pdu, pySim.sms, pySim.app)"
 
+# Check 5: simulate worker preload using bundled Python against the built bundle.
+# This catches any missing stdlib module or broken import before the .pkg reaches
+# the target machine. Runs card_worker_inproc.py preload() directly.
+# Uses same PYTHONHOME + PYTHONPATH as the real worker.
+PRELOAD_ERR=$(PYTHONHOME="$BUNDLED_FWK_DIR" \
+    PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH:$PROJECT_ROOT" \
+    SIMGUI_WORKER_INPROCESS=1 \
+    "$BUNDLED_PYTHON" -c "
+import sys
+import card_worker_inproc
+result = card_worker_inproc.preload()
+if result[0]:
+    print('PRELOAD_OK')
+    sys.exit(0)
+else:
+    print('PRELOAD_FAIL: ' + result[1])
+    sys.exit(1)
+" 2>&1) || {
+    echo "✗ Worker preload simulation failed — aborting"
+    echo "$PRELOAD_ERR"
+    exit 1
+}
+echo "✓ Worker preload simulation passed"
+
 echo ""
 echo "✓ Build succeeded!"
 echo ""
