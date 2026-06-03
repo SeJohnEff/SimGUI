@@ -457,6 +457,7 @@ class CardWatcher:
                     pass
             return
 
+        logger.info("[DIAG] detect_inprocess call card_gen=%s", self._last_card_gen)
         try:
             result = self._worker_client.detect_inprocess(
                 session_id=None,
@@ -467,12 +468,16 @@ class CardWatcher:
             )
         except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
             self._last_read_failed = True
+            logger.warning("[DIAG] detect_inprocess exception: %s", exc)
             if self.on_error:
                 try:
                     self.on_error(str(exc))
                 except Exception:
                     pass
             return
+
+        logger.info("[DIAG] detect_inprocess returned ok=%s error=%s blank=%s card_gen=%s",
+                    result.ok, result.error, result.blank, result.card_gen)
 
         if result.error == 'STALE_SESSION':
             self._last_card_gen = None
@@ -502,7 +507,7 @@ class CardWatcher:
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             self._card_present = True
-            logger.info("CardWatcher: card detected via detect_inprocess (card_gen=%s)", new_gen)
+            logger.info("[DIAG] card detected via detect_inprocess (card_gen=%s)", new_gen)
             if self.on_reading:
                 try:
                     self.on_reading()
