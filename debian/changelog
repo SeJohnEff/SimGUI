@@ -1,3 +1,11 @@
+simgui (0.5.68) unstable; urgency=medium
+
+  * fix: add missing file-like methods (isatty, readable, writable, seekable)
+    to _JsonOnlyStdout in card_worker_process.py; pySim import chain calls
+    sys.stdout.isatty() at import time — missing method caused preload failure
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+
 simgui (0.5.67) unstable; urgency=medium
 
   * fix: remove 'test' from hiddenimports in SimGUI.spec — PyInstaller errors
