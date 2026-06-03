@@ -555,6 +555,6 @@ class PersistentWorkerClient:
         try:
             for raw in self._process.stderr:
                 line = raw.decode() if isinstance(raw, bytes) else raw
-                _STDERR_LOG.debug("%s", line.rstrip())
+                _STDERR_LOG.warning("%s", line.rstrip())
         except OSError:
             pass

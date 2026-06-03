@@ -1,3 +1,14 @@
+simgui (0.5.70) unstable; urgency=medium
+
+  * diag: log [SMARTCARD_ERR] exception when _smartcard_readers() fails so
+    pcscard/DYLD errors surface in worker stderr instead of being swallowed
+  * diag: log [PROBE_DIAG] readers+reader_index on every probe so M1 log
+    shows whether readers list is populated
+  * diag: raise worker stderr drain from debug to warning so diagnostic lines
+    are always visible in the application log
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+
 simgui (0.5.69) unstable; urgency=medium
 
   * fix: add 'colorsys' to hiddenimports in SimGUI.spec and REQUIRED_STDLIB

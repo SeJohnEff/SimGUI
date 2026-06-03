@@ -175,7 +175,10 @@ def _smartcard_readers():
     try:
         from smartcard.System import readers as _readers
         return list(_readers())
-    except Exception:
+    except Exception as exc:
+        import sys as _sys
+        _sys.stderr.write(f"[SMARTCARD_ERR] {type(exc).__name__}: {exc}\n")
+        _sys.stderr.flush()
         return []
 
 
@@ -201,6 +204,9 @@ def _handle_probe(req_id, params):
     timeout = p.get("timeout", 2.0)
 
     readers = _smartcard_readers()
+    import sys as _sys
+    _sys.stderr.write(f"[PROBE_DIAG] readers={readers} reader_index={reader_index}\n")
+    _sys.stderr.flush()
     if not readers or reader_index >= len(readers):
         _card_present = False
         _session_profile = None
