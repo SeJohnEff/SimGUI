@@ -382,6 +382,8 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             reset_session()
             result["error"] = "NO_CARD"
             return result
+        import sys
+        print(f"DETECT_FAILED_DIAG exc_type={exc_name!r} exc_msg={exc_str!r}", file=sys.stderr, flush=True)
         result["error"] = "DETECT_FAILED"
         result["stderr"] = f"{exc_name}: {exc_str}"
         return result
