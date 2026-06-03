@@ -18,6 +18,25 @@ fi
 
 cd "$PROJECT_ROOT"
 
+# --- Dirty-worktree guard ---
+# Any locally-modified tracked .py file will be frozen into the bundle by
+# PyInstaller, silently overriding what git pull just fetched.
+# This catches the case before wasting a full build cycle.
+DIRTY_PY=$(git status --short | grep -E '^.M.*\.py$' || true)
+if [ -n "$DIRTY_PY" ]; then
+    echo ""
+    echo "✗ Dirty worktree: the following .py file(s) have local modifications."
+    echo "  PyInstaller will freeze the MODIFIED version, not the repo version."
+    echo ""
+    echo "$DIRTY_PY"
+    echo ""
+    echo "  To discard local edits and build from clean HEAD:"
+    echo "    git checkout -- <file>    # specific file"
+    echo "    git checkout -- .         # all tracked files"
+    echo ""
+    exit 1
+fi
+
 # Cleanup function — remove staging dirs created by this script
 cleanup() {
     rm -rf "$PROJECT_ROOT/pysim-bundle" "$PROJECT_ROOT/pysim-site-packages"
@@ -325,14 +344,19 @@ else:
 }
 echo "✓ Worker preload simulation passed"
 
-# Check 6: verify 'probe' verb is present in the bundled worker capabilities.
-# This catches stale .pyc bytecache causing card_worker_process.py or
-# card_worker_client.py to be compiled from old source.
+# Check 6: verify 'probe' verb is present in the worker source file.
+# Imports directly from PROJECT_ROOT (not the frozen bundle) to test the source
+# that PyInstaller will compile into the bundle.  A dirty worktree on the build
+# machine can leave card_worker_process.py locally modified so that git pull
+# silently skips it (git only refuses to overwrite on conflict; if no upstream
+# commit touches the file, a local edit survives every pull indefinitely).
+# Fix on M4:  git checkout -- card_worker_process.py
 PROBE_CHECK=$(PYTHONHOME="$BUNDLED_FWK_DIR" \
-    PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH:$PROJECT_ROOT" \
+    PYTHONPATH="$PROJECT_ROOT:$BUNDLE_PYSIM_DIR:$SP_PATH" \
     SIMGUI_WORKER_INPROCESS=1 \
     "$BUNDLED_PYTHON" -c "
 import sys, card_worker_process
+print('SOURCE: ' + card_worker_process.__file__)
 caps = card_worker_process._capabilities()
 if 'probe' in caps:
     print('PROBE_OK')
@@ -341,11 +365,15 @@ else:
     print('PROBE_MISSING: capabilities=' + str(caps))
     sys.exit(1)
 " 2>&1) || {
-    echo "✗ Worker 'probe' capability missing — stale bytecache or wrong source bundled:"
+    echo "✗ Worker 'probe' capability missing in source — dirty worktree suspected."
     echo "$PROBE_CHECK"
+    echo ""
+    echo "  Run on M4:  git checkout -- card_worker_process.py"
+    echo "  Then rebuild."
     exit 1
 }
 echo "✓ Worker probe capability present"
+echo "  $PROBE_CHECK" | grep '^SOURCE:' || true
 
 echo ""
 echo "✓ Build succeeded!"
