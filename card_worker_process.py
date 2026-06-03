@@ -31,7 +31,14 @@ class _JsonOnlyStdout:
         self._real = real
 
     def write(self, s: str) -> int:
-        if s.strip() and not s.lstrip().startswith("{"):
+        stripped = s.strip()
+        if not stripped:
+            # Swallow whitespace-only writes (bare \n etc.) — they corrupt the
+            # JSON-lines protocol by causing readline() to return early.
+            sys.stderr.write("[worker-stdout-guard-swallow] " + repr(s) + "\n")
+            sys.stderr.flush()
+            return len(s)
+        if not stripped.startswith("{"):
             sys.stderr.write("[worker-stdout-guard] " + s)
             sys.stderr.flush()
             return len(s)
