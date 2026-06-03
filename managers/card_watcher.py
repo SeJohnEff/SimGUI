@@ -446,7 +446,7 @@ class CardWatcher:
                 card_gen=self._last_card_gen,
                 pysim_path=self._pysim_path,
                 reader_index=0,
-                timeout=30.0,
+                timeout=90.0,
             )
         except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
             self._last_read_failed = True

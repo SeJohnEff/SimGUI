@@ -205,7 +205,17 @@ def _ensure_session(rt: Any, reader_index: int) -> None:
     if _session["sl"] is None or _session["reader_index"] != reader_index:
         opts = _Opts()
         opts.pcsc_dev = reader_index
-        sl = rt.init_reader(opts)
+        try:
+            sl = rt.init_reader(opts)
+        except Exception as exc:
+            # init_reader failed — no reader present. Clear session so next
+            # poll retries init_reader rather than skipping it.
+            _session["sl"] = None
+            _session["card_connected"] = False
+            exc_str = str(exc)
+            if "No reader found" in exc_str:
+                raise type(exc)("No USB card reader detected") from exc
+            raise
         _session["sl"] = sl
         _session["scc"] = rt.SimCardCommands(transport=sl)
         _session["reader_index"] = reader_index
