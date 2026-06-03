@@ -233,8 +233,7 @@ def _handle_probe(req_id, params):
         _write({"id": req_id, "ok": False, "error": "PROBE_TIMEOUT"})
         return
 
-    atr_raw = result.get("atr") or []
-    if exc_box or not atr_raw:
+    if exc_box or "atr" not in result:
         if exc_box:
             sys.stderr.write(
                 f"[PROBE_CONNECT_ERR] {type(exc_box[0]).__name__}: {exc_box[0]}\n"
@@ -250,7 +249,11 @@ def _handle_probe(req_id, params):
         return
 
     # Card present — only increment card_gen on absent → present transition
-    atr_hex = bytes(result["atr"]).hex()
+    atr_raw = result["atr"]  # may be [] on some readers; treat as present
+    if not atr_raw:
+        sys.stderr.write("[PROBE_EMPTY_ATR] card connected but getATR() returned []\n")
+        sys.stderr.flush()
+    atr_hex = bytes(atr_raw).hex()
     if not _card_present:
         _card_gen += 1
         _session_id = os.urandom(8).hex()
