@@ -123,11 +123,15 @@ git rev-parse --short HEAD > "$PROJECT_ROOT/GITHASH" 2>/dev/null \
 echo "GITHASH: $(cat "$PROJECT_ROOT/GITHASH")"
 
 # --- Run PyInstaller ---
-# Remove dist/ entirely before building — PyInstaller's --clean only wipes
-# the build/ work dir, not dist/. Stale files from a previous build can
-# survive an in-place overwrite and end up in the pkg with the wrong content.
-echo "Removing stale dist/ before build..."
+# Remove dist/ and all __pycache__ dirs before building.
+# - dist/: PyInstaller --clean only wipes build/, not dist/. Stale .pyc files
+#   from a previous build can survive an in-place overwrite.
+# - __pycache__: git pull restores .py files but their mtime may be older than
+#   existing .pyc bytecache. PyInstaller picks the .pyc, bundling stale code.
+#   Removing __pycache__ forces recompilation from the current .py sources.
+echo "Removing stale dist/ and __pycache__ before build..."
 rm -rf "$PROJECT_ROOT/dist"
+find "$PROJECT_ROOT" -name '__pycache__' -not -path '*/.venv*' -type d -exec rm -rf {} + 2>/dev/null || true
 echo "Running PyInstaller with SimGUI.spec..."
 "$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y
 
@@ -320,6 +324,28 @@ else:
     exit 1
 }
 echo "✓ Worker preload simulation passed"
+
+# Check 6: verify 'probe' verb is present in the bundled worker capabilities.
+# This catches stale .pyc bytecache causing card_worker_process.py or
+# card_worker_client.py to be compiled from old source.
+PROBE_CHECK=$(PYTHONHOME="$BUNDLED_FWK_DIR" \
+    PYTHONPATH="$BUNDLE_PYSIM_DIR:$SP_PATH:$PROJECT_ROOT" \
+    SIMGUI_WORKER_INPROCESS=1 \
+    "$BUNDLED_PYTHON" -c "
+import sys, card_worker_process
+caps = card_worker_process._capabilities()
+if 'probe' in caps:
+    print('PROBE_OK')
+    sys.exit(0)
+else:
+    print('PROBE_MISSING: capabilities=' + str(caps))
+    sys.exit(1)
+" 2>&1) || {
+    echo "✗ Worker 'probe' capability missing — stale bytecache or wrong source bundled:"
+    echo "$PROBE_CHECK"
+    exit 1
+}
+echo "✓ Worker probe capability present"
 
 echo ""
 echo "✓ Build succeeded!"
