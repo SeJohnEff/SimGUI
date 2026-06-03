@@ -42,7 +42,7 @@ a = Analysis(
         'select', 'selectors', 'shlex', 'shutil', 'signal', 'socket',
         'socketserver', 'ssl', 'stat', 'statistics', 'string', 'struct',
         'subprocess', 'sysconfig', 'tarfile', 'tempfile', 'termios',
-        'test', 'textwrap', 'threading', 'tkinter', 'token', 'tokenize',
+        'textwrap', 'threading', 'tkinter', 'token', 'tokenize',
         'traceback', 'tracemalloc', 'tty', 'types', 'typing', 'unicodedata',
         'unittest', 'urllib', 'warnings', 'weakref', 'webbrowser', 'xml',
         'xmlrpc', 'zipfile', 'zipimport', 'zlib',
