@@ -440,6 +440,7 @@ class CardWatcher:
                     pass
             return
 
+        logger.info("CardWatcher: sending detect_inprocess to worker")
         try:
             result = self._worker_client.detect_inprocess(
                 session_id=None,
@@ -449,6 +450,7 @@ class CardWatcher:
                 timeout=90.0,
             )
         except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
+            logger.info("CardWatcher: detect_inprocess exception type=%s msg=%r", type(exc).__name__, str(exc))
             self._last_read_failed = True
             if self.on_error:
                 try:
@@ -457,6 +459,7 @@ class CardWatcher:
                     pass
             return
 
+        logger.info("CardWatcher: detect_inprocess returned ok=%s error=%r", result.ok, result.error)
         if result.error == 'STALE_SESSION':
             self._last_card_gen = None
             if self.on_error:
