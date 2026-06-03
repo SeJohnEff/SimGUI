@@ -384,6 +384,8 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         _sys.stderr.write(f"[DETECT_DIAG] calling card_detect ATR={atr_val!r}\n")
         _sys.stderr.flush()
         card = rt.card_detect("auto", scc)
+        _sys.stderr.write(f"[DETECT_DIAG] card_detect returned: {card!r}\n")
+        _sys.stderr.flush()
         if card is None:
             # Autodetection failed — card may have been removed after connect().
             # Reset connection state so next poll retries connect().
@@ -397,44 +399,51 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         fields: Dict[str, str] = {}
 
         # ICCID
+        _sys.stderr.write("[DETECT_DIAG] reading ICCID\n"); _sys.stderr.flush()
         try:
             iccid_val, sw = card.read_iccid()
             if sw == "9000" and iccid_val:
                 fields["ICCID"] = iccid_val
-        except Exception:
-            pass
+        except Exception as _e:
+            _sys.stderr.write(f"[DETECT_DIAG] ICCID exc: {_e}\n"); _sys.stderr.flush()
 
         # IMSI
+        _sys.stderr.write("[DETECT_DIAG] reading IMSI\n"); _sys.stderr.flush()
         try:
             imsi_val, sw = card.read_imsi()
             if sw == "9000" and imsi_val:
                 fields["IMSI"] = imsi_val
-        except Exception:
-            pass
+        except Exception as _e:
+            _sys.stderr.write(f"[DETECT_DIAG] IMSI exc: {_e}\n"); _sys.stderr.flush()
 
         # SPN
+        _sys.stderr.write("[DETECT_DIAG] reading SPN\n"); _sys.stderr.flush()
         try:
             spn_result, sw = card.read_spn()
             if sw == "9000" and spn_result:
                 fields["SPN"] = spn_result[0] if isinstance(spn_result, (list, tuple)) else str(spn_result)
-        except Exception:
-            pass
+        except Exception as _e:
+            _sys.stderr.write(f"[DETECT_DIAG] SPN exc: {_e}\n"); _sys.stderr.flush()
 
         # ACC — read_binary returns raw hex; store as-is for CardManager
+        _sys.stderr.write("[DETECT_DIAG] reading ACC\n"); _sys.stderr.flush()
         try:
             acc_raw, sw = card.read_binary("ACC")
             if sw == "9000" and acc_raw:
                 fields["ACC"] = acc_raw
-        except Exception:
-            pass
+        except Exception as _e:
+            _sys.stderr.write(f"[DETECT_DIAG] ACC exc: {_e}\n"); _sys.stderr.flush()
 
         # FPLMN — UsimCard.read_fplmn returns (formatted_str, sw)
+        _sys.stderr.write("[DETECT_DIAG] reading FPLMN\n"); _sys.stderr.flush()
         try:
             fplmn_val, sw = card.read_fplmn()
             if sw == "9000" and fplmn_val:
                 fields["FPLMN"] = fplmn_val
-        except Exception:
-            pass
+        except Exception as _e:
+            _sys.stderr.write(f"[DETECT_DIAG] FPLMN exc: {_e}\n"); _sys.stderr.flush()
+
+        _sys.stderr.write(f"[DETECT_DIAG] fields done: {list(fields.keys())}\n"); _sys.stderr.flush()
 
         blank = (card_type_str == "gialersim") or (
             not fields.get("ICCID") and not fields.get("IMSI")
