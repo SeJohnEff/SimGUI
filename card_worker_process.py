@@ -235,6 +235,11 @@ def _handle_probe(req_id, params):
 
     atr_raw = result.get("atr") or []
     if exc_box or not atr_raw:
+        if exc_box:
+            _sys.stderr.write(
+                f"[PROBE_CONNECT_ERR] {type(exc_box[0]).__name__}: {exc_box[0]}\n"
+            )
+            _sys.stderr.flush()
         if _card_present:
             _card_present = False
             _session_profile = None
