@@ -332,135 +332,130 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     detect/read_fields protocol schema so CardManager needs no schema changes.
 
     Never reads Ki, OPc, ADM1, PIN, PUK — public EFs only.
-    Unreadable fields are omitted or set to "".
+    Unreadable fields are omitted.
     """
-    result: Dict[str, Any] = {
-        "ok": False,
-        "blank": False,
-        "card_type": "",
-        "fields": {},
-        "stdout": "",
-        "stderr": "",
-        "worker_error": False,
-        "error": None,
-    }
+    import sys as _sys
 
     # PysimImportError is allowed to propagate — caller maps it to PYSIM_IMPORT_FAILED.
     rt = _load_pysim()
 
-    try:
-        _ensure_session(rt, reader_index)
-    except _NoCardError:
-        # Reader handle (sl) stays alive — only the card connection is absent.
-        # Do NOT call reset_session(): that would destroy sl and force
-        # init_reader() on every poll, causing 'Using reader PCSC' spam and
-        # preventing stable detection when the card is inserted.
-        _session["card_connected"] = False
-        result["error"] = "NO_CARD"
-        return result
-
-    try:
-        scc = _session["scc"]
-
-        # Probe ATR before card_detect. If empty, card_detect may hang
-        # iterating all profiles against an unidentifiable card.
-        # get_atr() returns a hex string on pySim PcscSimLink, not bytes.
-        import sys as _sys
+    # --- open reader once, reuse across polls ---
+    if _session["sl"] is None or _session["reader_index"] != reader_index:
+        opts = _Opts()
+        opts.pcsc_dev = reader_index
         try:
-            atr_val = _session["sl"].get_atr()
-            _sys.stderr.write(f"[DETECT_DIAG] get_atr()={atr_val!r}\n")
+            sl = rt.init_reader(opts)
+        except Exception as exc:
+            exc_str = str(exc)
+            _sys.stderr.write(f"[DETECT] init_reader failed: {exc_str}\n")
             _sys.stderr.flush()
-        except Exception as _atr_exc:
-            atr_val = None
-            _sys.stderr.write(f"[DETECT_DIAG] get_atr() raised {type(_atr_exc).__name__}: {_atr_exc}\n")
-            _sys.stderr.flush()
-        if not atr_val:
-            _sys.stderr.write("[DETECT_EMPTY_ATR] ATR empty — skipping card_detect, will retry\n")
-            _sys.stderr.flush()
+            _session["sl"] = None
             _session["card_connected"] = False
-            result["error"] = "NO_CARD"
-            return result
-
-        _sys.stderr.write(f"[DETECT_DIAG] calling card_detect ATR={atr_val!r}\n")
+            return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                    "error": "DETECT_FAILED", "stderr": exc_str}
+        _session["sl"] = sl
+        _session["scc"] = rt.SimCardCommands(transport=sl)
+        _session["reader_index"] = reader_index
+        _session["card_connected"] = False
+        _sys.stderr.write(f"[DETECT] reader opened: {sl}\n")
         _sys.stderr.flush()
+
+    # --- connect card when not already connected ---
+    if not _session["card_connected"]:
+        try:
+            _session["sl"].connect()
+            _session["card_connected"] = True
+            _sys.stderr.write("[DETECT] card connected\n")
+            _sys.stderr.flush()
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            exc_str = str(exc).lower()
+            if exc_name in ("NoCardException", "CardConnectionException", "NoCardError") or \
+                    any(s in exc_str for s in ("no card", "no smart card", "unable to connect")):
+                return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                        "error": "NO_CARD"}
+            _session["sl"] = None
+            _session["card_connected"] = False
+            exc_full = f"{exc_name}: {exc}"
+            _sys.stderr.write(f"[DETECT] connect failed: {exc_full}\n")
+            _sys.stderr.flush()
+            return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                    "error": "DETECT_FAILED", "stderr": exc_full}
+
+    # --- ATR guard ---
+    try:
+        atr_val = _session["sl"].get_atr()
+    except Exception:
+        atr_val = None
+    if not atr_val:
+        _session["card_connected"] = False
+        return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                "error": "NO_CARD"}
+
+    # --- detect card type ---
+    scc = _session["scc"]
+    try:
         card = rt.card_detect("auto", scc)
-        _sys.stderr.write(f"[DETECT_DIAG] card_detect returned: {card!r}\n")
-        _sys.stderr.flush()
-        if card is None:
-            # Autodetection failed — card may have been removed after connect().
-            # Reset connection state so next poll retries connect().
-            _session["card_connected"] = False
-            result["error"] = "NO_CARD"
-            return result
-
-        card_type_str = getattr(card, "name", "") or ""
-        result["card_type"] = card_type_str
-
-        fields: Dict[str, str] = {}
-
-        # ICCID
-        _sys.stderr.write("[DETECT_DIAG] reading ICCID\n"); _sys.stderr.flush()
-        try:
-            iccid_val, sw = card.read_iccid()
-            if sw == "9000" and iccid_val:
-                fields["ICCID"] = iccid_val
-        except Exception as _e:
-            _sys.stderr.write(f"[DETECT_DIAG] ICCID exc: {_e}\n"); _sys.stderr.flush()
-
-        # IMSI
-        _sys.stderr.write("[DETECT_DIAG] reading IMSI\n"); _sys.stderr.flush()
-        try:
-            imsi_val, sw = card.read_imsi()
-            if sw == "9000" and imsi_val:
-                fields["IMSI"] = imsi_val
-        except Exception as _e:
-            _sys.stderr.write(f"[DETECT_DIAG] IMSI exc: {_e}\n"); _sys.stderr.flush()
-
-        # SPN
-        _sys.stderr.write("[DETECT_DIAG] reading SPN\n"); _sys.stderr.flush()
-        try:
-            spn_result, sw = card.read_spn()
-            if sw == "9000" and spn_result:
-                fields["SPN"] = spn_result[0] if isinstance(spn_result, (list, tuple)) else str(spn_result)
-        except Exception as _e:
-            _sys.stderr.write(f"[DETECT_DIAG] SPN exc: {_e}\n"); _sys.stderr.flush()
-
-        # ACC — read_binary returns raw hex; store as-is for CardManager
-        _sys.stderr.write("[DETECT_DIAG] reading ACC\n"); _sys.stderr.flush()
-        try:
-            acc_raw, sw = card.read_binary("ACC")
-            if sw == "9000" and acc_raw:
-                fields["ACC"] = acc_raw
-        except Exception as _e:
-            _sys.stderr.write(f"[DETECT_DIAG] ACC exc: {_e}\n"); _sys.stderr.flush()
-
-        # FPLMN — UsimCard.read_fplmn returns (formatted_str, sw)
-        _sys.stderr.write("[DETECT_DIAG] reading FPLMN\n"); _sys.stderr.flush()
-        try:
-            fplmn_val, sw = card.read_fplmn()
-            if sw == "9000" and fplmn_val:
-                fields["FPLMN"] = fplmn_val
-        except Exception as _e:
-            _sys.stderr.write(f"[DETECT_DIAG] FPLMN exc: {_e}\n"); _sys.stderr.flush()
-
-        _sys.stderr.write(f"[DETECT_DIAG] fields done: {list(fields.keys())}\n"); _sys.stderr.flush()
-
-        blank = (card_type_str == "gialersim") or (
-            not fields.get("ICCID") and not fields.get("IMSI")
-        )
-
-        result["ok"] = True
-        result["blank"] = blank
-        result["fields"] = fields
-        return result
-
     except Exception as exc:
-        # Card communication failed mid-read (e.g. card removed during APDU).
-        # Clear card_connected so the next poll retries connect() rather than
-        # going straight to card_detect on a broken transport.
         _session["card_connected"] = False
-        exc_name = type(exc).__name__
-        exc_str = str(exc)
-        result["error"] = "DETECT_FAILED"
-        result["stderr"] = f"{exc_name}: {exc_str or '(no message)'}"
-        return result
+        exc_full = f"{type(exc).__name__}: {exc}"
+        _sys.stderr.write(f"[DETECT] card_detect exc: {exc_full}\n")
+        _sys.stderr.flush()
+        return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                "error": "DETECT_FAILED", "stderr": exc_full}
+
+    if card is None:
+        _session["card_connected"] = False
+        return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                "error": "NO_CARD"}
+
+    card_type_str = getattr(card, "name", "") or ""
+    _sys.stderr.write(f"[DETECT] card_type={card_type_str!r}\n")
+    _sys.stderr.flush()
+
+    # --- read public EFs ---
+    fields: Dict[str, str] = {}
+    try:
+        iccid_val, sw = card.read_iccid()
+        if sw == "9000" and iccid_val:
+            fields["ICCID"] = iccid_val
+    except Exception:
+        pass
+    try:
+        imsi_val, sw = card.read_imsi()
+        if sw == "9000" and imsi_val:
+            fields["IMSI"] = imsi_val
+    except Exception:
+        pass
+    try:
+        spn_result, sw = card.read_spn()
+        if sw == "9000" and spn_result:
+            fields["SPN"] = spn_result[0] if isinstance(spn_result, (list, tuple)) else str(spn_result)
+    except Exception:
+        pass
+    try:
+        acc_raw, sw = card.read_binary("ACC")
+        if sw == "9000" and acc_raw:
+            fields["ACC"] = acc_raw
+    except Exception:
+        pass
+    try:
+        fplmn_val, sw = card.read_fplmn()
+        if sw == "9000" and fplmn_val:
+            fields["FPLMN"] = fplmn_val
+    except Exception:
+        pass
+
+    _sys.stderr.write(f"[DETECT] fields={list(fields.keys())}\n")
+    _sys.stderr.flush()
+
+    blank = (card_type_str == "gialersim") or (
+        not fields.get("ICCID") and not fields.get("IMSI")
+    )
+    return {
+        "ok": True,
+        "blank": blank,
+        "card_type": card_type_str,
+        "fields": fields,
+        "error": None,
+    }
