@@ -54,11 +54,20 @@ class CardWatcher:
         Optional ``IccidIndex`` for auto-matching.  Can be set later
         via the ``index`` property.
     poll_interval :
-        Seconds between polls (default 1.5).
+        Seconds between polls while a card is present (default 1.5).
+        When no card is present the watcher polls at
+        ``insertion_poll_interval`` (default 0.2 s) to detect insertion
+        with near-immediate latency without blocking the event loop.
+    insertion_poll_interval :
+        Seconds between polls while waiting for a card to be inserted
+        (default 0.2).  The pyscard probe returns in < 100 ms on
+        macOS PCSC when no card is seated, so 0.2 s gives < 300 ms
+        end-to-end insertion latency.
     """
 
     def __init__(self, card_manager, iccid_index=None, *,
                  poll_interval: float = 1.5,
+                 insertion_poll_interval: float = 0.2,
                  worker_client=None,
                  pysim_path=None):
         self._cm = card_manager
@@ -66,6 +75,7 @@ class CardWatcher:
         self._poll_interval = poll_interval
         self._worker_client = worker_client
         self._pysim_path = pysim_path
+        self._insertion_poll_interval = insertion_poll_interval
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._paused = False
@@ -135,7 +145,10 @@ class CardWatcher:
         self._thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="CardWatcher")
         self._thread.start()
-        logger.info("CardWatcher started (interval=%.1fs)", self._poll_interval)
+        logger.info(
+            "CardWatcher started (present_interval=%.1fs insertion_interval=%.2fs)",
+            self._poll_interval, self._insertion_poll_interval,
+        )
 
     def stop(self):
         """Stop the polling thread gracefully."""
@@ -199,7 +212,14 @@ class CardWatcher:
             logger.info("Cached ATR→ICCID: %s → %s", self._last_atr, iccid)
 
     def _poll_loop(self):
-        """Main polling loop — runs on background thread."""
+        """Main polling loop — runs on background thread.
+
+        Uses a short interval (insertion_poll_interval, default 0.2 s)
+        while waiting for a card to be inserted so that insertion is
+        detected with near-immediate latency.  Once a card is present
+        the interval switches to poll_interval (default 1.5 s) for the
+        "still present" heartbeat.
+        """
         while not self._stop_event.is_set():
             if not self._paused:
                 with self._poll_lock:
@@ -218,7 +238,9 @@ class CardWatcher:
                                 except Exception:
                                     pass
 
-            self._stop_event.wait(self._poll_interval)
+            # Fast poll while waiting for insertion; slow poll once present.
+            interval = self._poll_interval if self._card_present else self._insertion_poll_interval
+            self._stop_event.wait(interval)
 
     def _check_once(self):
         """Single poll iteration.
@@ -430,6 +452,9 @@ class CardWatcher:
             return
 
         # --- Step 1: fast probe for card presence ---
+        # probe timeout is a safety ceiling only; pyscard connect() fails in
+        # <100 ms when no card is present, so the 0.2 s insertion poll returns
+        # almost immediately.
         try:
             probe = self._worker_client.probe(reader_index=0, timeout=2.0)
         except (WorkerTimeoutError, WorkerEOFError, WorkerCrashError) as exc:
@@ -469,6 +494,8 @@ class CardWatcher:
         self._no_reader_poll_count = 0
         self._card_present = True
         self._last_atr = atr
+        logger.info("CardWatcher: card insertion detected (ATR=%s card_gen=%s) — switching to %.1fs heartbeat",
+                    atr, new_gen, self._poll_interval)
 
         if self.on_reading:
             try:
