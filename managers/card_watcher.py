@@ -505,6 +505,7 @@ class CardWatcher:
         if result.ok:
             new_gen = result.card_gen
             old_gen = self._last_card_gen
+            print(f"[WATCHER-DEDUP] _card_present={self._card_present} new_gen={new_gen!r} old_gen={old_gen!r} last_read_failed={self._last_read_failed}")
             if (self._card_present
                     and new_gen == old_gen
                     and not self._last_read_failed):
