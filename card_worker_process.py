@@ -203,19 +203,14 @@ def _reset_inprocess_session_if_available(reason: str) -> None:
 
 
 def _handle_probe(req_id, params):
-    global _card_gen, _session_id, _last_atr, _card_present
-    global _session_profile, _session_pysim_path, _session_reader_index
-
+    # All session state mutations go through _card_removed() / _new_card_generation().
     p = params or {}
     reader_index = p.get("reader_index", 0)
     timeout = p.get("timeout", 2.0)
 
     readers = _smartcard_readers()
     if not readers or reader_index >= len(readers):
-        _card_present = False
-        _session_profile = None
-        _session_pysim_path = ""
-        _session_reader_index = 0
+        _card_removed()
         _write({"id": req_id, "ok": True, "present": False, "msg": "No smart-card reader detected"})
         return
 
@@ -246,12 +241,7 @@ def _handle_probe(req_id, params):
                 f"[PROBE_CONNECT_ERR] {type(exc_box[0]).__name__}: {exc_box[0]}\n"
             )
             sys.stderr.flush()
-        if _card_present:
-            _card_present = False
-            _session_profile = None
-            _session_pysim_path = ""
-            _session_reader_index = 0
-            _reset_inprocess_session_if_available("card_removed")
+        _card_removed()
         _write({"id": req_id, "ok": True, "present": False, "msg": "No card in reader"})
         return
 
@@ -272,6 +262,25 @@ def _handle_probe(req_id, params):
         "card_gen": _card_gen,
         "session_id": _session_id,
     })
+
+
+def _card_removed() -> None:
+    """Single canonical place for the present-→absent session transition.
+
+    Marks card absent, clears session-profile state, and resets the
+    inprocess session.  Called whenever any handler determines the card
+    is no longer present.
+    """
+    global _card_present, _session_profile, _session_pysim_path, _session_reader_index
+    if not _card_present:
+        return   # already absent — idempotent
+    _card_present = False
+    _session_profile = None
+    _session_pysim_path = ""
+    _session_reader_index = 0
+    _reset_inprocess_session_if_available("card_removed")
+    sys.stderr.write("[CARD-REMOVED] session cleared\n")
+    sys.stderr.flush()
 
 
 def _new_card_generation(atr_hex: str = "") -> None:
@@ -376,10 +385,13 @@ def _handle_detect_inprocess(req_id, params):
                 "msg": str(exc), "worker_error": False})
         return
 
-    # If detect succeeded and we have no session yet (probe never ran),
-    # trigger the canonical absent → present transition.
-    if resp.get("ok") and _session_id is None:
-        _new_card_generation()
+    if resp.get("ok"):
+        # Absent → present transition: new card inserted (or first detect).
+        if not _card_present:
+            _new_card_generation()
+    else:
+        # Card no longer present — mark absent so next insertion is detected.
+        _card_removed()
 
     _write({
         "id": req_id,
