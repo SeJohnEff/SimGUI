@@ -2516,7 +2516,7 @@ class CardManager:
                     except (KeyError, TypeError, AttributeError):
                         continue
                 if plmns:
-                    self.card_info['FPLMN'] = ':'.join(plmns)
+                    self.card_info['FPLMN'] = ';'.join(plmns)
 
     def _parse_pysim_output(self, output: str):
         """Parse pySim-read output for card info.
