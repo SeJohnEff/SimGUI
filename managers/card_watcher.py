@@ -149,6 +149,7 @@ class CardWatcher:
             "CardWatcher started (present_interval=%.1fs insertion_interval=%.2fs)",
             self._poll_interval, self._insertion_poll_interval,
         )
+        print(f"[WATCHER-START] _worker_client={self._worker_client!r}")
 
     def stop(self):
         """Stop the polling thread gracefully."""
