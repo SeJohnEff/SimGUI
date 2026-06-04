@@ -159,6 +159,25 @@ except Exception as e:
 """
 
 
+def _pyscard_with_connection(reader, fn):
+    """Open a PC/SC connection to *reader*, call ``fn(conn)``, then disconnect.
+
+    This is the single canonical place that calls ``conn.connect()`` and
+    ``conn.disconnect()``.  Callers supply the work to perform via *fn* and
+    handle ``_NoCardException`` / ``_CardConnectionException`` themselves.
+
+    ``fn`` receives the live ``CardConnection`` and may return any value;
+    that value is returned to the caller.  Disconnect is guaranteed even if
+    ``fn`` raises.
+    """
+    conn = reader.createConnection()
+    conn.connect()
+    try:
+        return fn(conn)
+    finally:
+        conn.disconnect()
+
+
 @dataclasses.dataclass
 class _ProbeResult:
     """Internal result type for subprocess-based card presence probe."""
@@ -882,11 +901,11 @@ class CardManager:
 
         def _run() -> None:
             try:
-                conn = reader.createConnection()
-                conn.connect()
-                atr = conn.getATR()
-                conn.disconnect()
+                atr = _pyscard_with_connection(
+                    reader, lambda conn: conn.getATR()
+                )
                 result.append((True, ' '.join(f'{b:02X}' for b in atr)))
+                print(f"[PROBE] pyscard_with_connection ok atr={result[-1][1]!r}")
             except _NoCardException:
                 result.append((False, 'No card in reader'))
             except _CardConnectionException as exc:
@@ -1361,14 +1380,14 @@ class CardManager:
                 )
                 return None
             reader = rlist[self._pcsc_reader_index]
-            conn = reader.createConnection()
-            conn.connect()
 
             # VERIFY APDU without data: CLA=00, INS=20, P1=00,
             # P2=key_ref (0x0A for ADM1), no Lc/data.
             apdu = [0x00, 0x20, 0x00, self._ADM1_KEY_REF]
-            data, sw1, sw2 = conn.transmit(apdu)
-            conn.disconnect()
+            data, sw1, sw2 = _pyscard_with_connection(
+                reader, lambda conn: conn.transmit(apdu)
+            )
+            print(f"[ADM1-COUNTER] pyscard_with_connection sw={sw1:02X}{sw2:02X}")
 
             if sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
                 remaining = sw2 & 0x0F
