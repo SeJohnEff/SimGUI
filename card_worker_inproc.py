@@ -293,6 +293,9 @@ def authenticate_inprocess(
             return False, "CARD_BLOCKED:6983"
         if "6982" in s or "SwMatchError" in s:
             return False, "AUTH_FAILED:6982"
+        import sys as _sys
+        _sys.stderr.write(f"[AUTH-TRANSPORT-ERROR] {type(exc).__name__}: {exc!r}\n")
+        _sys.stderr.flush()
         return False, f"TRANSPORT_ERROR:{exc!r}"
 
 
