@@ -489,6 +489,15 @@ class PersistentWorkerClient:
             raise WorkerProtocolError(str(resp))
         return resp
 
+    def release_session(self, timeout: float = 5.0) -> None:
+        """Tell the worker to release the in-process PCSC transport.
+
+        Must be called before spawning any pySim-shell subprocess so the
+        subprocess can open the same reader without hitting PCSC Sharing
+        Violation (0x8010000B).
+        """
+        self.send("release_session", timeout=timeout)
+
     def read_fields(
         self,
         session_id: str,

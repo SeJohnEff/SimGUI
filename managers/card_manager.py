@@ -2107,6 +2107,18 @@ class CardManager:
         logger.info("Programming non-empty card via pySim-shell: fields=%s", fields_written)
         logger.debug("pySim-shell commands:\n%s", cmd_str)
 
+        # Release the in-process PCSC transport before spawning pySim-shell.
+        # The worker holds an exclusive PCSC lock via _session["sl"]; without
+        # releasing it the subprocess hits Sharing Violation (0x8010000B).
+        # The watcher will re-detect the card naturally on its next poll.
+        _wc = getattr(self, "_worker_client", None)
+        if _wc is not None and _wc.is_ready():
+            try:
+                _wc.release_session()
+                logger.info("[PCSC-RELEASE] in-process session released before pySim-shell")
+            except Exception as _exc:
+                logger.warning("[PCSC-RELEASE] release_session failed (non-fatal): %s", _exc)
+
         ok, stdout, stderr = self._run_pysim_shell(
             self._authenticated_adm1_hex, cmd_str, timeout=30)
 

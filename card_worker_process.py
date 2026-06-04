@@ -509,6 +509,18 @@ def _handle_program_delta_capabilities(req_id):
     _write({"id": req_id, "ok": True, "result": fields})
 
 
+def _handle_release_session(req_id):
+    """Release the in-process PCSC transport so a pySim-shell subprocess can
+    open the same reader without a Sharing Violation (0x8010000B).
+    The watcher will re-detect the card naturally on its next poll.
+    """
+    import sys as _sys
+    _reset_inprocess_session_if_available("release_session verb")
+    _sys.stderr.write("[RELEASE-SESSION] in-process PCSC transport released\n")
+    _sys.stderr.flush()
+    _write({"id": req_id, "ok": True})
+
+
 def _handle(line: str) -> bool:
     """Parse one request line and write one response. Returns False to stop."""
     try:
@@ -569,6 +581,8 @@ def _handle(line: str) -> bool:
         _handle_program_delta(req_id, req.get("params"))
     elif verb == "program_delta_capabilities":
         _handle_program_delta_capabilities(req_id)
+    elif verb == "release_session":
+        _handle_release_session(req_id)
     else:
         _write({"id": req_id, "ok": False, "error": "unknown_verb", "verb": verb})
 
