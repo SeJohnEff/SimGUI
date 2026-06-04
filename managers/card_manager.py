@@ -1429,6 +1429,7 @@ class CardManager:
             session_id=self._current_session_id,
             card_gen=self._current_card_gen,
             adm1_hex=adm1_hex,
+            is_gialersim=(self.card_type == CardType.GIALERSIM),
         )
         if result.ok:
             self.authenticated = True

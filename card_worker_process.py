@@ -111,7 +111,6 @@ _last_atr = None        # hex string of last seen ATR
 _card_present = False   # True while card is seated
 
 # --- session profile state ---
-_session_profile = None
 _session_pysim_path = ""
 _session_reader_index = 0
 
@@ -277,11 +276,10 @@ def _card_removed() -> None:
     _new_card_generation (new card inserted — old pySim session must be
     torn down before opening a fresh one).
     """
-    global _card_present, _session_profile, _session_pysim_path, _session_reader_index
+    global _card_present, _session_pysim_path, _session_reader_index
     if not _card_present:
         return   # already absent — idempotent
     _card_present = False
-    _session_profile = None
     _session_pysim_path = ""
     _session_reader_index = 0
     sys.stderr.write("[CARD-REMOVED] card_present cleared\n")
@@ -297,12 +295,11 @@ def _new_card_generation(atr_hex: str = "") -> None:
     transition logic is never duplicated.
     """
     global _card_gen, _session_id, _last_atr, _card_present
-    global _session_profile, _session_pysim_path, _session_reader_index
+    global _session_pysim_path, _session_reader_index
     _card_gen += 1
     _session_id = os.urandom(8).hex()
     _last_atr = atr_hex
     _card_present = True
-    _session_profile = None
     _session_pysim_path = ""
     _session_reader_index = 0
     _reset_inprocess_session_if_available("new_card_generation")
@@ -329,16 +326,22 @@ def _handle_authenticate(req_id, params):
         _write({"id": req_id, "ok": False, "error": "STALE_SESSION"})
         return
 
-    if _session_profile is None:
-        _write({"id": req_id, "ok": False, "error": "NO_PROFILE"})
-        return
-
     adm1_hex = p.get("adm1_hex")
     if not adm1_hex:
         _write({"id": req_id, "ok": False, "error": "INVALID_REQUEST"})
         return
 
-    ok, msg = _session_profile.authenticate(adm1_hex)
+    is_gialersim = bool(p.get("is_gialersim", False))
+
+    try:
+        import card_worker_inproc as _inproc
+    except Exception as exc:
+        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
+        return
+
+    sys.stderr.write(f"[AUTH] authenticate_inprocess adm1_hex=*** is_gialersim={is_gialersim}\n")
+    sys.stderr.flush()
+    ok, msg = _inproc.authenticate_inprocess(adm1_hex, reader_index=_session_reader_index, is_gialersim=is_gialersim)
 
     if ok:
         deferred = msg.startswith("DEFERRED") if msg else False

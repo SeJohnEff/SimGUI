@@ -372,6 +372,7 @@ class PersistentWorkerClient:
         session_id: str,
         card_gen: int,
         adm1_hex: str,
+        is_gialersim: bool = False,
         timeout: float = 15.0,
         request_timeout: Optional[float] = None,
     ) -> AuthResult:
@@ -384,6 +385,7 @@ class PersistentWorkerClient:
                     "session_id": session_id,
                     "card_gen": card_gen,
                     "adm1_hex": adm1_hex,
+                    "is_gialersim": is_gialersim,
                     "timeout": timeout,
                 },
                 timeout=rt,
