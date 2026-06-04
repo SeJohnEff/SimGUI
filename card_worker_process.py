@@ -369,6 +369,7 @@ def _handle_detect_inprocess(req_id, params):
         "stderr": resp.get("stderr", ""),
         "worker_error": bool(resp.get("worker_error")),
         "error": resp.get("error"),
+        "msg": resp.get("msg"),
     })
 
 
