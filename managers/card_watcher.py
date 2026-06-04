@@ -521,10 +521,11 @@ class CardWatcher:
             # Push detect result into card_manager state — single canonical path.
             if hasattr(self._cm, 'apply_worker_detect_result'):
                 self._cm.apply_worker_detect_result(result)
-            print(f"[WATCHER] card detected, notifying session ready session_id='inprocess' card_gen={new_gen}")
+            _session_id = result.session_id or "inprocess"
+            print(f"[WATCHER] card detected, notifying session ready session_id={_session_id!r} card_gen={new_gen}")
             if self.on_worker_session_ready:
                 try:
-                    self.on_worker_session_ready("inprocess", new_gen)
+                    self.on_worker_session_ready(_session_id, new_gen)
                 except Exception as exc:
                     logger.warning("on_worker_session_ready failed: %s", exc)
             logger.info("[DIAG] card detected via detect_inprocess (card_gen=%s)", new_gen)

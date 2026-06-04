@@ -370,6 +370,10 @@ def _handle_detect_inprocess(req_id, params):
         "worker_error": bool(resp.get("worker_error")),
         "error": resp.get("error"),
         "msg": resp.get("msg"),
+        # Include worker-level session tracking so client can pass correct
+        # session_id/card_gen back on authenticate/program calls.
+        "session_id": _session_id if resp.get("ok") else None,
+        "card_gen": _card_gen if resp.get("ok") else None,
     })
 
 
