@@ -859,12 +859,15 @@ class SimGUIApp(QMainWindow):
     # ---- Window close -------------------------------------------------
 
     def closeEvent(self, event) -> None:
-        self._card_watcher.stop()
+        # Terminate the worker subprocess BEFORE joining the watcher poll
+        # thread — killing the process closes its stdout pipe, which unblocks
+        # any in-flight IPC readline, letting the poll thread exit immediately.
         if self._worker_client is not None:
             try:
                 self._worker_client.stop()
             except Exception as exc:
                 logging.warning("Worker stop error: %s", exc)
+        self._card_watcher.stop()
         self._shutdown_worker()
         self._settings.set("window_geometry",
                            f"{self.width()}x{self.height()}")
