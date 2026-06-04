@@ -358,6 +358,8 @@ class PersistentWorkerClient:
                 card_type=resp.get("card_type"),
                 blank=bool(resp.get("blank", False)),
                 fields=resp.get("fields") or {},
+                session_id=resp.get("session_id"),
+                card_gen=resp.get("card_gen"),
             )
         return DetectResult(
             ok=False,
