@@ -518,6 +518,9 @@ class CardWatcher:
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             self._card_present = True
+            # Push detect result into card_manager state — single canonical path.
+            if hasattr(self._cm, 'apply_worker_detect_result'):
+                self._cm.apply_worker_detect_result(result)
             print(f"[WATCHER] card detected, notifying session ready session_id='inprocess' card_gen={new_gen}")
             if self.on_worker_session_ready:
                 try:
