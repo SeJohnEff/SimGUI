@@ -230,10 +230,16 @@ def _ensure_session(rt: Any, reader_index: int) -> None:
         except Exception as exc:
             exc_name = type(exc).__name__
             exc_str = str(exc).lower()
+            # SystemError: SCardDisconnect NULL — stale PCSC handle, treat as no-card
+            # and tear sl down so next call gets a fresh init_reader.
             if exc_name in ("NoCardException", "CardConnectionException",
-                            "NoCardError") or any(
-                s in exc_str for s in ("no card", "no smart card", "unable to connect")
+                            "NoCardError", "SystemError") or any(
+                s in exc_str for s in ("no card", "no smart card", "unable to connect",
+                                       "scardisconnect", "returned null")
             ):
+                _session["sl"] = None
+                _session["scc"] = None
+                _session["card_connected"] = False
                 raise _NoCardError() from exc
             raise
 
@@ -403,8 +409,10 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             _session["sl"] = None
             _session["scc"] = None
             _session["card_connected"] = False
-            if exc_name in ("NoCardException", "CardConnectionException", "NoCardError") or \
-                    any(s in exc_str for s in ("no card", "no smart card", "unable to connect")):
+            if exc_name in ("NoCardException", "CardConnectionException", "NoCardError",
+                            "SystemError") or \
+                    any(s in exc_str for s in ("no card", "no smart card", "unable to connect",
+                                               "scardisconnect", "returned null")):
                 _sys.stderr.write(f"[DETECT] no card ({exc_name}) — sl torn down, fresh init on next poll\n")
                 _sys.stderr.flush()
                 return {"ok": False, "blank": False, "card_type": "", "fields": {},
@@ -434,12 +442,17 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     try:
         card = rt.card_detect("auto", scc)
     except Exception as exc:
+        # Tear sl down completely — any exception here means the PCSC handle
+        # is corrupt (card pulled mid-read). Keeping sl alive causes
+        # SCardDisconnect NULL on the next sl.connect() call.
+        _session["sl"] = None
+        _session["scc"] = None
         _session["card_connected"] = False
         exc_full = f"{type(exc).__name__}: {exc}"
-        _sys.stderr.write(f"[DETECT] card_detect exc: {exc_full}\n")
+        _sys.stderr.write(f"[DETECT] card_detect exc: {exc_full} — sl torn down\n")
         _sys.stderr.flush()
         return {"ok": False, "blank": False, "card_type": "", "fields": {},
-                "error": "DETECT_FAILED", "stderr": exc_full}
+                "error": "NO_CARD"}
 
     if card is None:
         _session["card_connected"] = False
