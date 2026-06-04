@@ -99,7 +99,8 @@ def program_delta(
         return result
 
     # Authenticate before writes.
-    scc.verify_chv(0x0A, adm1_hex)
+    # verify_chv expects bytes — convert hex string to bytes.
+    scc.verify_chv(0x0A, bytes.fromhex(adm1_hex))
 
     result["write_started"] = True
     for field, value in changed.items():
@@ -291,7 +292,8 @@ def authenticate_inprocess(
     rt = _load_pysim()
     try:
         _ensure_session(rt, reader_index)
-        _session["scc"].verify_chv(0x0A, adm1_hex)
+        # verify_chv expects bytes — convert hex string to bytes.
+        _session["scc"].verify_chv(0x0A, bytes.fromhex(adm1_hex))
         return True, ""
     except Exception as exc:
         s = str(exc)
