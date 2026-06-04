@@ -243,7 +243,14 @@ def _map_watcher_error(
         return
 
     is_no_reader = "No smart-card reader" in msg or "No card reader connected" in msg
-    if is_no_reader or (
+    if is_no_reader:
+        # No reader connected — not an error, just waiting. Use NO_CARD state.
+        state_manager.card_state = CardState.NO_CARD
+        state_manager.status_text = "No card reader connected"
+        state_manager.report_error(msg)
+        return
+
+    if (
         current_state
         not in (CardState.BLANK, CardState.DETECTED, CardState.AUTHENTICATED,
                 CardState.NOT_POWERED)
