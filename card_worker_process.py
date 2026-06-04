@@ -359,6 +359,17 @@ def _handle_detect_inprocess(req_id, params):
                 "msg": str(exc), "worker_error": False})
         return
 
+    # If detect succeeded and we have no session yet (probe never ran),
+    # generate a session_id now — absent → present transition for this path.
+    if resp.get("ok") and _session_id is None:
+        _card_gen += 1
+        _session_id = os.urandom(8).hex()
+        _card_present = True
+        sys.stderr.write(
+            f"[DETECT-SESSION] new session session_id={_session_id!r} card_gen={_card_gen}\n"
+        )
+        sys.stderr.flush()
+
     _write({
         "id": req_id,
         "ok": bool(resp.get("ok")),
