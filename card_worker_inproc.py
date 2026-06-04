@@ -386,7 +386,7 @@ def detect_inprocess(reader_index: int = 0) -> dict:
 
         _t = threading.Thread(target=_do_connect, daemon=True)
         _t.start()
-        _completed = _connect_done.wait(timeout=3.0)
+        _completed = _connect_done.wait(timeout=1.0)
 
         if not _completed:
             # sl.connect() is stuck — the existing transport context is poisoned.
