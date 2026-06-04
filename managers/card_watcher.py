@@ -241,7 +241,14 @@ class CardWatcher:
                                     pass
 
             # Fast poll while waiting for insertion; slow poll once present.
-            interval = self._poll_interval if self._card_present else self._insertion_poll_interval
+            # Fast poll only when reader is present but no card yet.
+            # No reader (DETECT_FAILED) uses slow interval to avoid hammering.
+            reader_present = (self._no_reader_poll_count == 0)
+            interval = (
+                self._insertion_poll_interval
+                if reader_present and not self._card_present
+                else self._poll_interval
+            )
             self._stop_event.wait(interval)
 
     def _check_once(self):
@@ -538,6 +545,10 @@ class CardWatcher:
                             pass
         else:
             self._last_read_failed = True
+            if not hasattr(self, "_no_reader_poll_count"):
+                self._no_reader_poll_count = 0
+            self._no_reader_poll_count += 1
+            print(f"[DETECT_FAILED] no_reader_poll_count={self._no_reader_poll_count}")
             if self.on_error:
                 try:
                     self.on_error(result.msg or "worker detect failed")
