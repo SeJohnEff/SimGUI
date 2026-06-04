@@ -267,9 +267,15 @@ def _handle_probe(req_id, params):
 def _card_removed() -> None:
     """Single canonical place for the present-→absent session transition.
 
-    Marks card absent, clears session-profile state, and resets the
-    inprocess session.  Called whenever any handler determines the card
-    is no longer present.
+    Marks card absent and clears session-profile state.  Does NOT reset
+    the card_worker_inproc transport (“sl”) — card_worker_inproc manages
+    its own reconnect via the card_connected flag and must keep the reader
+    handle open across NO_CARD polls.  Resetting sl here would force a new
+    init_reader() call on every NO_CARD response, which blocks on macOS PCSC.
+
+    _reset_inprocess_session_if_available is called only from
+    _new_card_generation (new card inserted — old pySim session must be
+    torn down before opening a fresh one).
     """
     global _card_present, _session_profile, _session_pysim_path, _session_reader_index
     if not _card_present:
@@ -278,8 +284,7 @@ def _card_removed() -> None:
     _session_profile = None
     _session_pysim_path = ""
     _session_reader_index = 0
-    _reset_inprocess_session_if_available("card_removed")
-    sys.stderr.write("[CARD-REMOVED] session cleared\n")
+    sys.stderr.write("[CARD-REMOVED] card_present cleared\n")
     sys.stderr.flush()
 
 
