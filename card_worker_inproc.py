@@ -19,6 +19,7 @@ Test hook: tests may set ``_pysim_runtime`` to a fake object exposing the same
 attributes used here, bypassing the real lazy import.
 """
 
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -363,12 +364,29 @@ def detect_inprocess(reader_index: int = 0) -> dict:
 
     # --- connect card when not already connected ---
     if not _session["card_connected"]:
-        try:
-            _session["sl"].connect()
-            _session["card_connected"] = True
-            _sys.stderr.write("[DETECT] card connected\n")
+        _connect_exc: list = []
+        _connect_done = threading.Event()
+
+        def _do_connect():
+            try:
+                _session["sl"].connect()
+            except Exception as _exc:
+                _connect_exc.append(_exc)
+            finally:
+                _connect_done.set()
+
+        _t = threading.Thread(target=_do_connect, daemon=True)
+        _t.start()
+        _completed = _connect_done.wait(timeout=3.0)
+
+        if not _completed:
+            _sys.stderr.write("[DETECT-CONNECT-TIMEOUT] sl.connect() blocked >3s — returning NO_CARD, sl kept\n")
             _sys.stderr.flush()
-        except Exception as exc:
+            return {"ok": False, "blank": False, "card_type": "", "fields": {},
+                    "error": "NO_CARD"}
+
+        if _connect_exc:
+            exc = _connect_exc[0]
             exc_name = type(exc).__name__
             exc_str = str(exc).lower()
             if exc_name in ("NoCardException", "CardConnectionException", "NoCardError") or \
@@ -382,6 +400,10 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             _sys.stderr.flush()
             return {"ok": False, "blank": False, "card_type": "", "fields": {},
                     "error": "DETECT_FAILED", "stderr": exc_full}
+
+        _session["card_connected"] = True
+        _sys.stderr.write("[DETECT] card connected\n")
+        _sys.stderr.flush()
 
     # --- ATR guard ---
     try:
