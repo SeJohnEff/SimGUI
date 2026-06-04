@@ -262,14 +262,7 @@ def _handle_probe(req_id, params):
         sys.stderr.flush()
     atr_hex = bytes(atr_raw).hex()
     if not _card_present:
-        _card_gen += 1
-        _session_id = os.urandom(8).hex()
-        _last_atr = atr_hex
-        _card_present = True
-        _session_profile = None
-        _session_pysim_path = ""
-        _session_reader_index = 0
-        _reset_inprocess_session_if_available("new_card_generation")
+        _new_card_generation(atr_hex)
 
     _write({
         "id": req_id,
@@ -279,6 +272,30 @@ def _handle_probe(req_id, params):
         "card_gen": _card_gen,
         "session_id": _session_id,
     })
+
+
+def _new_card_generation(atr_hex: str = "") -> None:
+    """Single canonical place for the absent-→present session transition.
+
+    Increments _card_gen, mints a new _session_id, marks card present,
+    clears all session-profile state, and resets the inprocess session.
+    Called by both _handle_probe and _handle_detect_inprocess so the
+    transition logic is never duplicated.
+    """
+    global _card_gen, _session_id, _last_atr, _card_present
+    global _session_profile, _session_pysim_path, _session_reader_index
+    _card_gen += 1
+    _session_id = os.urandom(8).hex()
+    _last_atr = atr_hex
+    _card_present = True
+    _session_profile = None
+    _session_pysim_path = ""
+    _session_reader_index = 0
+    _reset_inprocess_session_if_available("new_card_generation")
+    sys.stderr.write(
+        f"[NEW-CARD-GEN] session_id={_session_id!r} card_gen={_card_gen}\n"
+    )
+    sys.stderr.flush()
 
 
 def _detect_error(req_id, error, worker_error, stdout="", stderr=""):
@@ -360,15 +377,9 @@ def _handle_detect_inprocess(req_id, params):
         return
 
     # If detect succeeded and we have no session yet (probe never ran),
-    # generate a session_id now — absent → present transition for this path.
+    # trigger the canonical absent → present transition.
     if resp.get("ok") and _session_id is None:
-        _card_gen += 1
-        _session_id = os.urandom(8).hex()
-        _card_present = True
-        sys.stderr.write(
-            f"[DETECT-SESSION] new session session_id={_session_id!r} card_gen={_card_gen}\n"
-        )
-        sys.stderr.flush()
+        _new_card_generation()
 
     _write({
         "id": req_id,
