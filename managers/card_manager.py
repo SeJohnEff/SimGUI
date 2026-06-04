@@ -1452,7 +1452,7 @@ class CardManager:
 
     def _authenticate_via_worker(self, adm1_hex: str) -> Tuple[bool, str]:
         """Route authentication through the card worker subprocess."""
-        if not self._current_session_id or self._current_card_gen is None:
+        if not self._current_session_id:
             return False, (
                 "Worker session not ready — card may have been removed. Re-detect."
             )

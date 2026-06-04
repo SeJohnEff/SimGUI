@@ -516,6 +516,12 @@ class CardWatcher:
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             self._card_present = True
+            print(f"[WATCHER] card detected, notifying session ready session_id='inprocess' card_gen={new_gen}")
+            if self.on_worker_session_ready:
+                try:
+                    self.on_worker_session_ready("inprocess", new_gen)
+                except Exception as exc:
+                    logger.warning("on_worker_session_ready failed: %s", exc)
             logger.info("[DIAG] card detected via detect_inprocess (card_gen=%s)", new_gen)
             if self.on_reading:
                 try:
