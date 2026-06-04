@@ -26,6 +26,22 @@ from managers.network_storage_manager import StorageProfile, NetworkStorageManag
 logger = logging.getLogger(__name__)
 
 
+class _MountWorker(QThread):
+    """Run mount in a background thread so the UI stays responsive."""
+
+    result_ready = pyqtSignal(bool, str)
+
+    def __init__(self, ns_manager, profile):
+        super().__init__()
+        self._ns_manager = ns_manager
+        self._profile = profile
+
+    def run(self):
+        ok, msg = self._ns_manager.mount(self._profile)
+        print(f"[MOUNT-WORKER] ok={ok} msg={msg!r}")
+        self.result_ready.emit(ok, msg)
+
+
 class _TestConnectionWorker(QThread):
     """Run test_connection in a background thread so the UI stays responsive."""
 
@@ -60,6 +76,8 @@ class NetworkStorageDialogQt(QDialog):
         # _on_form_edited() ignores changes made during prefill so it does not
         # incorrectly clear the Saved selection the moment it is applied.
         self._prefilling_profile: bool = False
+        self._mount_worker: _MountWorker = None
+        self._mount_profile: StorageProfile = None
         self._build_ui()
         self._prefill_from_saved()
         # Connect form-edit detection AFTER prefill so the initial programmatic
@@ -327,7 +345,7 @@ class NetworkStorageDialogQt(QDialog):
             QMessageBox.warning(self, "Connection Failed", msg)
 
     def _on_connect(self):
-        """Save and mount the share."""
+        """Validate then mount the share in a background thread."""
         if not self.ns_manager:
             QMessageBox.warning(self, "Error", "Network Storage Manager not available")
             return
@@ -342,19 +360,37 @@ class NetworkStorageDialogQt(QDialog):
             QMessageBox.warning(self, "Label Error", err)
             return
 
-        # Mount the profile
-        ok, msg = self.ns_manager.mount(profile)
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setText("Connecting…")
+        self.test_btn.setEnabled(False)
+
+        self._mount_profile = profile
+        self._mount_worker = _MountWorker(self.ns_manager, profile)
+        self._mount_worker.result_ready.connect(self._on_mount_result)
+        self._mount_worker.finished.connect(self._on_mount_worker_done)
+        self._mount_worker.start()
+        print("[MOUNT] background mount started")
+
+    def _on_mount_worker_done(self) -> None:
+        """Release the worker reference once the thread has exited."""
+        self._mount_worker = None
+
+    def _on_mount_result(self, ok: bool, msg: str) -> None:
+        """Slot: called by _MountWorker when mount completes."""
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setText("Save & Connect")
+        self.test_btn.setEnabled(True)
         if ok:
             # Save the profile — update in-place if label exists, else append
             profiles = self.ns_manager.load_profiles()
-            idx = next((i for i, p in enumerate(profiles) if p.label == profile.label), -1)
+            idx = next((i for i, p in enumerate(profiles)
+                        if p.label == self._mount_profile.label), -1)
             if idx >= 0:
-                profiles[idx] = profile
+                profiles[idx] = self._mount_profile
             else:
-                profiles.append(profile)
+                profiles.append(self._mount_profile)
             self.ns_manager.save_profiles(profiles)
-            # Record as last-used so startup auto-connect prefers this profile
-            self.ns_manager.mark_last_used(profile.label)
+            self.ns_manager.mark_last_used(self._mount_profile.label)
             QMessageBox.information(self, "Success", f"Share mounted and saved:\n{msg}")
             self.accept()
         else:
