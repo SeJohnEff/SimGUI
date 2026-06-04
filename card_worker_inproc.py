@@ -351,8 +351,9 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             _sys.stderr.flush()
             _session["sl"] = None
             _session["card_connected"] = False
+            _msg = "No card reader connected" if "No reader found" in exc_str else f"Reader error: {exc_str}"
             return {"ok": False, "blank": False, "card_type": "", "fields": {},
-                    "error": "DETECT_FAILED", "stderr": exc_str}
+                    "error": "DETECT_FAILED", "msg": _msg, "stderr": exc_str}
         _session["sl"] = sl
         _session["scc"] = rt.SimCardCommands(transport=sl)
         _session["reader_index"] = reader_index
