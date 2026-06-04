@@ -380,7 +380,13 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         _completed = _connect_done.wait(timeout=3.0)
 
         if not _completed:
-            _sys.stderr.write("[DETECT-CONNECT-TIMEOUT] sl.connect() blocked >3s — returning NO_CARD, sl kept\n")
+            # sl.connect() is stuck — the existing transport context is poisoned.
+            # Tear it down so the next poll opens a fresh PcscSimLink via init_reader.
+            # (init_reader alone is fast; only sl.connect() on a stale object blocks.)
+            _session["sl"] = None
+            _session["scc"] = None
+            _session["card_connected"] = False
+            _sys.stderr.write("[DETECT-CONNECT-TIMEOUT] sl.connect() blocked >3s — sl torn down, fresh init on next poll\n")
             _sys.stderr.flush()
             return {"ok": False, "blank": False, "card_type": "", "fields": {},
                     "error": "NO_CARD"}
