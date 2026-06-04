@@ -332,16 +332,10 @@ def _handle_authenticate(req_id, params):
         return
 
     is_gialersim = bool(p.get("is_gialersim", False))
-
-    try:
-        import card_worker_inproc as _inproc
-    except Exception as exc:
-        _write({"id": req_id, "ok": False, "error": "PYSIM_IMPORT_FAILED", "msg": str(exc)})
-        return
-
-    sys.stderr.write(f"[AUTH] authenticate_inprocess adm1_hex=*** is_gialersim={is_gialersim}\n")
+    delegate = WorkerAuthDelegate(_session_pysim_path, _session_reader_index, is_gialersim)
+    sys.stderr.write(f"[AUTH] delegate.authenticate_adm is_gialersim={is_gialersim}\n")
     sys.stderr.flush()
-    ok, msg = _inproc.authenticate_inprocess(adm1_hex, reader_index=_session_reader_index, is_gialersim=is_gialersim)
+    ok, msg = delegate.authenticate_adm(adm1_hex)
 
     if ok:
         deferred = msg.startswith("DEFERRED") if msg else False
