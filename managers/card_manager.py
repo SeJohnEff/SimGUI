@@ -514,10 +514,6 @@ class CardManager:
         self._worker_client = client
         self._cached_worker_capabilities = None
 
-    def set_worker_session(self, session_id, card_gen) -> None:
-        self._current_session_id = session_id
-        self._current_card_gen = card_gen
-
     def _get_worker_capabilities(self) -> List[str]:
         if getattr(self, "_cached_worker_capabilities", None) is not None:
             return self._cached_worker_capabilities
@@ -677,9 +673,10 @@ class CardManager:
     def apply_worker_detect_result(self, result) -> None:
         """Apply a worker DetectResult to CardManager state.
 
-        Maps result.card_type via _PYSIM_CARD_TYPE_MAP, populates card_info
-        from result.fields, and snapshots _original_card_data. All worker
-        result field mapping is centralised here.
+        Maps result.card_type, populates card_info, snapshots original data,
+        and records the worker session_id/card_gen for subsequent authenticate
+        and program calls. Single canonical entry point for all worker detect
+        results — no caller should set _current_session_id directly.
         """
         if result.card_type:
             self.card_type = self._PYSIM_CARD_TYPE_MAP.get(
@@ -687,6 +684,11 @@ class CardManager:
             )
         self.card_info = dict(result.fields) if result.fields else {}
         self._original_card_data = dict(self.card_info)
+        # Session tracking — required for authenticate/program IPC calls.
+        if result.session_id is not None:
+            self._current_session_id = result.session_id
+            self._current_card_gen = result.card_gen
+            print(f"[CM] session updated session_id={result.session_id!r} card_gen={result.card_gen!r}")
 
     def get_last_program_result(self) -> ProgramResult:
         """Return the result of the most recent programming attempt.

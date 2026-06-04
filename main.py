@@ -338,7 +338,6 @@ class SimGUIApp(QMainWindow):
             self._card_manager, self._iccid_index, poll_interval=1.5,
             worker_client=self._worker_client,
             pysim_path=self._card_manager.cli_path)
-        self._card_watcher.on_worker_session_ready = self._card_manager.set_worker_session
 
         # Shared state
         self.last_read_data: dict[str, str] = {}

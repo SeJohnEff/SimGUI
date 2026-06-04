@@ -118,7 +118,6 @@ class CardWatcher:
         self.on_reader_ready: Optional[Callable[[], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
         self.on_reading: Optional[Callable[[], None]] = None
-        self.on_worker_session_ready: Optional[Callable] = None
 
     @property
     def index(self):
@@ -518,16 +517,11 @@ class CardWatcher:
             self._no_card_streak = 0
             self._no_reader_poll_count = 0
             self._card_present = True
-            # Push detect result into card_manager state — single canonical path.
+            # Push detect result into card_manager — single canonical path.
+            # apply_worker_detect_result owns session_id/card_gen update.
             if hasattr(self._cm, 'apply_worker_detect_result'):
                 self._cm.apply_worker_detect_result(result)
-            _session_id = result.session_id or "inprocess"
-            print(f"[WATCHER] card detected, notifying session ready session_id={_session_id!r} card_gen={new_gen}")
-            if self.on_worker_session_ready:
-                try:
-                    self.on_worker_session_ready(_session_id, new_gen)
-                except Exception as exc:
-                    logger.warning("on_worker_session_ready failed: %s", exc)
+            print(f"[WATCHER] card detected card_gen={new_gen}")
             logger.info("[DIAG] card detected via detect_inprocess (card_gen=%s)", new_gen)
             if self.on_reading:
                 try:
