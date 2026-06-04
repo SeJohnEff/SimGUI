@@ -395,14 +395,19 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             exc = _connect_exc[0]
             exc_name = type(exc).__name__
             exc_str = str(exc).lower()
+            # Always tear down sl on any connect failure — stale PCSC context
+            # must not persist. Next poll will fresh init_reader.
+            _session["sl"] = None
+            _session["scc"] = None
+            _session["card_connected"] = False
             if exc_name in ("NoCardException", "CardConnectionException", "NoCardError") or \
                     any(s in exc_str for s in ("no card", "no smart card", "unable to connect")):
+                _sys.stderr.write(f"[DETECT] no card ({exc_name}) — sl torn down, fresh init on next poll\n")
+                _sys.stderr.flush()
                 return {"ok": False, "blank": False, "card_type": "", "fields": {},
                         "error": "NO_CARD"}
-            _session["sl"] = None
-            _session["card_connected"] = False
             exc_full = f"{exc_name}: {exc}"
-            _sys.stderr.write(f"[DETECT] connect failed: {exc_full}\n")
+            _sys.stderr.write(f"[DETECT] connect failed: {exc_full} — sl torn down\n")
             _sys.stderr.flush()
             return {"ok": False, "blank": False, "card_type": "", "fields": {},
                     "error": "DETECT_FAILED", "stderr": exc_full}
