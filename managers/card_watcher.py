@@ -316,6 +316,7 @@ class CardWatcher:
                         return
                 # Card confirmed removed
                 self._no_card_streak = 0
+                import traceback; print("[RESET] _card_present=False at line 319"); traceback.print_stack()
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
@@ -355,6 +356,7 @@ class CardWatcher:
                         pass
                 return
             if self._card_present:
+                import traceback; print("[RESET] _card_present=False at line 358"); traceback.print_stack()
                 self._card_present = False
                 self._last_iccid = None
                 self._last_atr = None
@@ -575,6 +577,7 @@ class CardWatcher:
                 # Card was removed or became unreachable
                 self._no_card_streak = 0
                 self._last_iccid = None
+                import traceback; print("[RESET] _card_present=False at line 578"); traceback.print_stack()
                 self._card_present = False
                 if not hasattr(self, "_atr_iccid_cache"):
                     self._atr_iccid_cache = {}
