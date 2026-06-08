@@ -1,3 +1,11 @@
+simgui (0.5.73) unstable; urgency=medium
+
+  * refactor: consolidate worker probe into detect_inprocess; remove redundant
+    probe() from worker protocol (fast probe path replaced by detect_inprocess
+    with session_id=None for stateless card-presence checks)
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+
 simgui (0.5.72) unstable; urgency=medium
 
   * fix: treat empty ATR list from getATR() as no card present — getATR()

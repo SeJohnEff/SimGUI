@@ -2014,7 +2014,7 @@ class CardManager:
         if not fplmn_str:
             return frozenset()
         return frozenset(
-            p.strip() for p in fplmn_str.replace(',', ';').split(';') if p.strip()
+            p.strip().upper().replace('F', '').replace(':', '') for p in fplmn_str.replace(',', ';').split(';') if p.strip()
         )
 
     @staticmethod
