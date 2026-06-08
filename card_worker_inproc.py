@@ -498,6 +498,7 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             # Parse raw hex output: extract MCC+MNC from comment lines
             plmns = []
             for line in fplmn_val.split('\n'):
+                print(f"[DEBUG-FPLMN-LINE] line={line!r}, has_mcc={'# MCC:' in line}, has_mnc={'# MNC:' in line}", file=__import__('sys').stderr)
                 # Extract "# MCC: XXX MNC: YY" comment
                 if '# MCC:' in line and '# MNC:' in line:
                     parts = line.split('#')[1]  # get comment part
