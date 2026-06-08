@@ -494,7 +494,17 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     try:
         fplmn_val, sw = card.read_fplmn()
         if sw == "9000" and fplmn_val:
-            fields["FPLMN"] = fplmn_val
+            # Parse raw hex output: extract MCC+MNC from comment lines
+            plmns = []
+            for line in fplmn_val.split('\n'):
+                # Extract "# MCC: XXX MNC: YY" comment
+                if '# MCC:' in line and '# MNC:' in line:
+                    parts = line.split('#')[1]  # get comment part
+                    mcc = parts.split('MCC:')[1].split()[0].strip()
+                    mnc = parts.split('MNC:')[1].split()[0].strip()
+                    plmns.append(f"{mcc}{mnc}")
+            if plmns:
+                fields["FPLMN"] = ';'.join(plmns)
     except Exception:
         pass
 
