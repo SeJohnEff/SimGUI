@@ -149,7 +149,7 @@ echo "GITHASH: $(cat "$PROJECT_ROOT/GITHASH")"
 #   existing .pyc bytecache. PyInstaller picks the .pyc, bundling stale code.
 #   Removing __pycache__ forces recompilation from the current .py sources.
 echo "Removing stale dist/ and __pycache__ before build..."
-rm -rf "$PROJECT_ROOT/dist"
+rm -rf "$PROJECT_ROOT/dist" 2>/dev/null || true
 find "$PROJECT_ROOT" -name '__pycache__' -not -path '*/.venv*' -type d -exec rm -rf {} + 2>/dev/null || true
 echo "Running PyInstaller with SimGUI.spec..."
 "$VENV_PYTHON" -m PyInstaller SimGUI.spec --clean -y

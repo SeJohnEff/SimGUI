@@ -705,7 +705,7 @@ class SimGUIApp(QMainWindow):
         logger.info("Index refreshed: watcher.index is iccid_index=%s",
                     self._card_watcher.index is self._iccid_index)
         self.state_manager.notify_index_updated()
-        self._batch_panel.refresh_standards()
+#        self._batch_panel.refresh_standards()
 
     def _on_thread_finished(self) -> None:
         self._startup_worker_thread = None
@@ -730,7 +730,7 @@ class SimGUIApp(QMainWindow):
         if path:
             result = self._iccid_index.scan_directory(path)
             self._standards_mgr.load_from_directory(path)
-            self._batch_panel.refresh_standards()
+#            self._batch_panel.refresh_standards()
             self.state_manager.status_text = (
                 f"Scanned: {result.total_cards} cards in {result.files_scanned} file(s)")
             self.state_manager.notify_index_updated()
