@@ -16,7 +16,7 @@ import sys
 # Without this, a logger writing to the root StreamHandler (which defaults to
 # sys.stderr but may be reconfigured to sys.stdout in a PyInstaller bundle)
 # can pollute the JSON-only stdout protocol channel.
-logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
+logging.basicConfig(stream=sys.stderr, level=logging.ERROR, force=True)
 
 
 class _JsonOnlyStdout:

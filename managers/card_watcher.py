@@ -466,7 +466,6 @@ class CardWatcher:
                     pass
             return
 
-        logger.info("[DIAG] detect_inprocess call card_gen=%s", self._last_card_gen)
         try:
             result = self._worker_client.detect_inprocess(
                 session_id=None,
@@ -485,8 +484,6 @@ class CardWatcher:
                     pass
             return
 
-        logger.info("[DIAG] detect_inprocess returned ok=%s error=%s blank=%s card_gen=%s",
-                    result.ok, result.error, result.blank, result.card_gen)
 
         if result.error == 'STALE_SESSION':
             self._last_card_gen = None
