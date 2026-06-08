@@ -437,8 +437,7 @@ class SimGUIApp(QMainWindow):
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
- #       self._tabs.addTab(self._read_panel, "Read SIM")
- # Hide the Read SIM panel until fully tested
+        self._tabs.addTab(self._read_panel, "Read SIM")
 
         self._program_panel = ProgramSIMPanel(
             self._tabs,
