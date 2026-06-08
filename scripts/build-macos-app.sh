@@ -39,7 +39,7 @@ fi
 
 # Cleanup function — remove staging dirs created by this script
 cleanup() {
-    rm -rf "$PROJECT_ROOT/pysim-bundle" "$PROJECT_ROOT/pysim-site-packages"
+    rm -rf "$PROJECT_ROOT/pysim-bundle" "$PROJECT_ROOT/pysim-site-packages" 2>/dev/null || true
 }
 trap cleanup EXIT
 
