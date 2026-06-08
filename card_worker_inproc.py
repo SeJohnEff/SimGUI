@@ -498,6 +498,7 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         if sw == "9000" and fplmn_val:
             # Parse raw hex output: extract MCC+MNC from comment lines
             plmns = []
+            print(f"[DEBUG-FPLMN-ENTER-IF] entering if block, about to loop", file=__import__('sys').stderr)
             for line in fplmn_val.split('\n'):
                 print(f"[DEBUG-FPLMN-LINE] line={line!r}, has_mcc={'# MCC:' in line}, has_mnc={'# MNC:' in line}", file=__import__('sys').stderr)
                 # Extract "# MCC: XXX MNC: YY" comment
