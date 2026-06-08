@@ -2332,9 +2332,6 @@ class CardManager:
 
             # Verify FPLMN when written — compare as order-independent sets
             if written_data.get('FPLMN'):
-                fplmn_readback = readback.get('FPLMN', '')
-                print(f"DEBUG FPLMN readback: {fplmn_readback!r}")
-                print(f"DEBUG FPLMN written: {written_data['FPLMN']!r}")
                 expected_set = self._normalize_fplmn(written_data['FPLMN'])
                 actual_set = self._normalize_fplmn(readback.get('FPLMN', ''))
                 if expected_set != actual_set:
