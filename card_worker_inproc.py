@@ -493,6 +493,7 @@ def detect_inprocess(reader_index: int = 0) -> dict:
         pass
     try:
         fplmn_val, sw = card.read_fplmn()
+        print(f"[DEBUG-FPLMN-RAW] fplmn_val={fplmn_val!r}", file=__import__('sys').stderr)
         if sw == "9000" and fplmn_val:
             # Parse raw hex output: extract MCC+MNC from comment lines
             plmns = []
