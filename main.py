@@ -430,13 +430,13 @@ class SimGUIApp(QMainWindow):
         # Tab widget
         self._tabs = QTabWidget()
 
-        self._read_panel = ReadSIMPanel(
-            self._tabs,
-            card_manager=self._card_manager,
-            state_manager=self.state_manager,
-            last_read_data=self.last_read_data,
-            ns_manager=self._ns_manager,
-            card_watcher=self._card_watcher)
+#        self._read_panel = ReadSIMPanel(
+#            self._tabs,
+#            card_manager=self._card_manager,
+#            state_manager=self.state_manager,
+#            last_read_data=self.last_read_data,
+#            ns_manager=self._ns_manager,
+#            card_watcher=self._card_watcher)
 #        self._tabs.addTab(self._read_panel, "Read SIM")
 
         self._program_panel = ProgramSIMPanel(
@@ -449,28 +449,28 @@ class SimGUIApp(QMainWindow):
         self._program_panel.on_card_programmed_callback = self._on_card_programmed
         self._tabs.addTab(self._program_panel, "Program SIM")
 
-        self._batch_panel = BatchProgramPanel(
-            self._tabs,
-            card_manager=self._card_manager,
-            state_manager=self.state_manager,
-            settings=self._settings,
-            ns_manager=self._ns_manager,
-            card_watcher=self._card_watcher,
-            iccid_index=self._iccid_index,
-            auto_artifact_manager=self._auto_artifact)
-        self._batch_panel.set_standards_manager(self._standards_mgr)
- #       self._tabs.addTab(self._batch_panel, "Batch Program")
+#        self._batch_panel = BatchProgramPanel(
+#            self._tabs,
+#            card_manager=self._card_manager,
+#            state_manager=self.state_manager,
+#            settings=self._settings,
+#            ns_manager=self._ns_manager,
+#            card_watcher=self._card_watcher,
+#            iccid_index=self._iccid_index,
+#            auto_artifact_manager=self._auto_artifact)
+#        self._batch_panel.set_standards_manager(self._standards_mgr)
+#        self._tabs.addTab(self._batch_panel, "Batch Program")
 
-        self._csv_panel = CSVEditorPanel(
-            self._tabs,
-            state_manager=self.state_manager,
-            ns_manager=self._ns_manager)
+#        self._csv_panel = CSVEditorPanel(
+#            self._tabs,
+#            state_manager=self.state_manager,
+#            ns_manager=self._ns_manager)
 #        self._tabs.addTab(self._csv_panel, "CSV Editor")
 
-        self._progress_panel = ProgressPanel(
-            self._tabs,
-            state_manager=self.state_manager)
- #       self._tabs.addTab(self._progress_panel, "Progress")
+#        self._progress_panel = ProgressPanel(
+#            self._tabs,
+#            state_manager=self.state_manager)
+#        self._tabs.addTab(self._progress_panel, "Progress")
 
         self._tabs.setCurrentWidget(self._program_panel)
         root_layout.addWidget(self._tabs)
