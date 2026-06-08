@@ -437,7 +437,7 @@ class SimGUIApp(QMainWindow):
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
             card_watcher=self._card_watcher)
-        self._tabs.addTab(self._read_panel, "Read SIM")
+#        self._tabs.addTab(self._read_panel, "Read SIM")
 
         self._program_panel = ProgramSIMPanel(
             self._tabs,
@@ -459,18 +459,18 @@ class SimGUIApp(QMainWindow):
             iccid_index=self._iccid_index,
             auto_artifact_manager=self._auto_artifact)
         self._batch_panel.set_standards_manager(self._standards_mgr)
-        self._tabs.addTab(self._batch_panel, "Batch Program")
+ #       self._tabs.addTab(self._batch_panel, "Batch Program")
 
         self._csv_panel = CSVEditorPanel(
             self._tabs,
             state_manager=self.state_manager,
             ns_manager=self._ns_manager)
-        self._tabs.addTab(self._csv_panel, "CSV Editor")
+#        self._tabs.addTab(self._csv_panel, "CSV Editor")
 
         self._progress_panel = ProgressPanel(
             self._tabs,
             state_manager=self.state_manager)
-        self._tabs.addTab(self._progress_panel, "Progress")
+ #       self._tabs.addTab(self._progress_panel, "Progress")
 
         self._tabs.setCurrentWidget(self._program_panel)
         root_layout.addWidget(self._tabs)
