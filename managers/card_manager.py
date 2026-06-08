@@ -2291,9 +2291,11 @@ class CardManager:
 
             worker_fields = self._try_worker_readback_fields()
             if worker_fields is not None:
+                print(f"DEBUG: readback from WORKER")
                 logger.info("Verify read-back (attempt %d): using in-process worker", attempt)
                 readback = worker_fields
             else:
+                print(f"DEBUG: readback from PYSIM-READ")
                 ok, stdout, stderr = self._run_cli('pySim-read.py', f'-p{self._pcsc_reader_index}')
                 logger.info("Verify read-back (attempt %d): ok=%s, "
                             "stdout_lines=%d, stderr_lines=%d",
