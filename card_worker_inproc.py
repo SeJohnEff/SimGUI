@@ -500,9 +500,9 @@ def detect_inprocess(reader_index: int = 0) -> dict:
             plmns = []
             print(f"[DEBUG-FPLMN-ENTER-IF] entering if block, about to loop", file=__import__('sys').stderr)
             for line in fplmn_val.split('\n'):
-                print(f"[DEBUG-FPLMN-LINE] line={line!r}, has_mcc={'# MCC:' in line}, has_mnc={'# MNC:' in line}", file=__import__('sys').stderr)
+                print(f"[DEBUG-FPLMN-LINE] line={line!r}, has_mcc={'MCC:' in line}, has_mnc={'MNC:' in line}", file=__import__('sys').stderr)
                 # Extract "# MCC: XXX MNC: YY" comment
-                if '# MCC:' in line and '# MNC:' in line:
+                if 'MCC:' in line and 'MNC:' in line:
                     parts = line.split('#')[1]  # get comment part
                     mcc = parts.split('MCC:')[1].split()[0].strip()
                     mnc = parts.split('MNC:')[1].split()[0].strip()
