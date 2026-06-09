@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QCheckBox,
     QGroupBox,
     QTableWidget,
     QTableWidgetItem,
@@ -62,7 +63,7 @@ _KNOWN_FIELD_NAMES = {
     'kic1': 'KIC1', 'kid1': 'KID1', 'kik1': 'KIK1',
     'kic2': 'KIC2', 'kid2': 'KID2', 'kik2': 'KIK2',
     'kic3': 'KIC3', 'kid3': 'KID3', 'kik3': 'KIK3',
-    'spn': 'SPN', 'fplmn': 'FPLMN',
+    'spn': 'SPN', 'fplmn': 'FPLMN', 'suci': 'SUCI',
 }
 
 _FORM_FIELD_KEYS = frozenset(k for k, _, _ in _FORM_FIELDS)
@@ -93,6 +94,7 @@ class ProgramSIMPanel(QWidget):
         'acc': 'ACC',
         'spn': 'SPN',
         'fplmn': 'FPLMN',
+        'suci': 'SUCI',
     }
 
     def __init__(self, parent=None, card_manager: CardManager = None, *,
@@ -187,10 +189,16 @@ class ProgramSIMPanel(QWidget):
         actions_group = QGroupBox("Actions")
         actions_layout = QVBoxLayout(actions_group)
 
+        prog_btn_layout = QHBoxLayout()
         self._prog_btn = QPushButton("Program Card")
         self._prog_btn.clicked.connect(self._on_program)
         self._prog_btn.setEnabled(False)
-        actions_layout.addWidget(self._prog_btn)
+        prog_btn_layout.addWidget(self._prog_btn)
+
+        self._suci_checkbox = QCheckBox("Enable 5G SUCI")
+        prog_btn_layout.addWidget(self._suci_checkbox)
+        prog_btn_layout.addStretch()
+        actions_layout.addLayout(prog_btn_layout)
 
         self._action_status = QPlainTextEdit()
         self._action_status.setPlainText("Insert a SIM card...")
@@ -478,6 +486,7 @@ class ProgramSIMPanel(QWidget):
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_entries[key].setText("")
+        self._suci_checkbox.setChecked(False)
         self._field_entries["ICCID"].setReadOnly(False)
 
     def _on_browse_csv(self):
@@ -546,6 +555,10 @@ class ProgramSIMPanel(QWidget):
         # Preserve extra fields (PIN1/PUK1, KIC/KID/KIK, etc.) from CSV row
         self._extra_card_data = normalized
 
+        # Update SUCI checkbox from CSV
+        suci_val = normalized.get('SUCI', '').lower()
+        self._suci_checkbox.setChecked(suci_val in ('true', 'yes', '1', 'enabled'))
+
         # Re-evaluate button state after CSV row is selected
         self._update_program_btn_state()
         if self.state_manager and self.state_manager.card_state in (
@@ -571,6 +584,11 @@ class ProgramSIMPanel(QWidget):
         card_data.update({k: self._field_entries[k].text().strip()
                           for k, _, _ in _FORM_FIELDS})
         card_data.pop('SPN', None)
+        # Add SUCI from checkbox
+        if self._suci_checkbox.isChecked():
+            card_data['SUCI'] = 'true'
+        else:
+            card_data.pop('SUCI', None)
 
         if self._card_watcher:
             self._card_watcher.pause()
