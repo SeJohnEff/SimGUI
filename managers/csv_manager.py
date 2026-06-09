@@ -24,7 +24,7 @@ SIM_SCHEMA = (
     'KIC1', 'KID1', 'KIK1',
     'KIC2', 'KID2', 'KIK2',
     'KIC3', 'KID3', 'KIK3',
-    'SPN', 'FPLMN',
+    'SPN', 'FPLMN', 'SUCI',
 )
 
 # Standard CSV columns for SIM card programming (alias for backward compat)
@@ -39,6 +39,8 @@ _COLUMN_NORMALIZE = {
     'fplmn': 'FPLMN',
     'service_provider_name': 'SPN',
     'forbidden_plmn': 'FPLMN',
+    'suci': 'SUCI',
+    'suci_enabled': 'SUCI',
 }
 
 # File dialog filter for SIM data files

@@ -2026,13 +2026,73 @@ class CardManager:
             f'update_binary {acc_hex}',
         ]
 
+    @staticmethod
+    def _pysim_write_suci(suci_enabled: bool) -> List[str]:
+        """Commands to set SUCI service flag via pySim-shell.
+
+        Enables: activate service 124, deactivate service 125
+        Disables: deactivate service 124, activate service 125
+        """
+        if suci_enabled:
+            return [
+                'select MF',
+                'select ADF.USIM',
+                'select EF.UST',
+                'ust_service_activate 124',
+                'ust_service_deactivate 125',
+            ]
+        else:
+            return [
+                'select MF',
+                'select ADF.USIM',
+                'select EF.UST',
+                'ust_service_deactivate 124',
+                'ust_service_activate 125',
+            ]
+
+    @staticmethod
+    def _pysim_read_suci() -> List[str]:
+        """Commands to read SUCI service states from EF.UST for verification."""
+        return [
+            'select MF',
+            'select ADF.USIM',
+            'select EF.UST',
+            'read_binary_decoded',
+        ]
+
+    @staticmethod
+    def _parse_suci_readback(output: str) -> bool:
+        """Parse EF.UST read_binary_decoded output to extract SUCI service state.
+
+        Returns True if service 124 is active AND service 125 is inactive.
+        Returns False if parsing fails or services are not in expected state.
+        """
+        if not output:
+            return False
+        try:
+            import json as _json
+            for line in output.splitlines():
+                line = line.strip()
+                if not line.startswith('{'):
+                    continue
+                data = _json.loads(line)
+                if isinstance(data, dict):
+                    service_124 = data.get(124) or data.get('124')
+                    service_125 = data.get(125) or data.get('125')
+                    if service_124 is not None and service_125 is not None:
+                        return bool(service_124) and not bool(service_125)
+        except (ValueError, TypeError, KeyError):
+            pass
+        return False
+
     def _program_nonempty_card(self, card_data: Dict[str, str],
                                changed: Dict[str, str]
                                ) -> Tuple[bool, str]:
-        """Delta-write to a non-empty (SJA5/SJA2) card via pySim-shell.py.
+        """Delta-write to a non-empty (SJA5/SJA2) card via pySim-shell.
 
-        Only IMSI and FPLMN are written.  Ki/OPc, ACC, and SPN are not
-        programmed in this flow \u2014 Ki/OPc require card replacement.
+        Attempts worker path first (lines 2096\u20132144; supports multiple fields).
+        Legacy path (lines 2146+) writes IMSI, FPLMN, and SUCI.
+        Ki/OPc and ACC are not programmable on non-empty cards.
         """
         worker_result = self._try_worker_program_delta(changed)
         if worker_result is not None:
@@ -2094,6 +2154,11 @@ class CardManager:
         if 'FPLMN' in changed:
             commands.extend(self._pysim_write_fplmn(changed['FPLMN']))
             fields_written.append('FPLMN')
+
+        if 'SUCI' in changed:
+            suci_enabled = changed['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
+            commands.extend(self._pysim_write_suci(suci_enabled))
+            fields_written.append('SUCI')
 
         if not commands:
             msg = "No programmable fields changed"
@@ -2338,6 +2403,20 @@ class CardManager:
                     last_mismatches.append(
                         f"FPLMN: wrote {written_data['FPLMN']!r}, "
                         f"read back {readback.get('FPLMN', '(none)')!r}")
+
+            # Verify SUCI when written — read EF.UST and check service states
+            if written_data.get('SUCI'):
+                expected_suci = written_data['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
+                ok_suci, stdout_suci, _stderr_suci = self._run_pysim_shell(
+                    self._authenticated_adm1_hex, '\n'.join(self._pysim_read_suci()), timeout=10)
+                if ok_suci and stdout_suci:
+                    actual_suci = self._parse_suci_readback(stdout_suci)
+                    if actual_suci != expected_suci:
+                        last_mismatches.append(
+                            f"SUCI: wrote {expected_suci}, read back {actual_suci}")
+                elif not ok_suci:
+                    last_mismatches.append(
+                        f"SUCI: verification read failed")
 
             if not last_mismatches:
                 logger.info("Post-program verification OK: %s", readback)
