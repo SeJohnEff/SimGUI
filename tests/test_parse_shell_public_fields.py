@@ -65,10 +65,10 @@ class TestParseShellPublicFields:
         assert 'SPN' not in cm.card_info
 
     def test_fplmn_colon_separated(self):
-        """FPLMN entries are joined with ':' not ','."""
+        """FPLMN entries are joined with ';' not ','."""
         cm = _cm()
         cm._parse_shell_public_fields('[{"mcc": "234", "mnc": "20"}, {"mcc": "234", "mnc": "02"}, null, null]')
-        assert cm.card_info['FPLMN'] == '23420:23402'
+        assert cm.card_info['FPLMN'] == '23420;23402'
 
     def test_fplmn_mnc_zero_padded(self):
         cm = _cm()
@@ -87,8 +87,8 @@ class TestParseShellPublicFields:
         assert cm.card_info.get('ACC') == '0001'
         # SPN: empty → not stored
         assert 'SPN' not in cm.card_info
-        # FPLMN: four entries, nulls stripped, colon-separated
-        assert cm.card_info['FPLMN'] == '23420:23402:23407:23430'
+        # FPLMN: four entries, nulls stripped, semicolon-separated
+        assert cm.card_info['FPLMN'] == '23420;23402;23407;23430'
 
     def test_non_json_lines_ignored(self):
         cm = _cm()

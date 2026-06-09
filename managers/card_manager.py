@@ -2527,7 +2527,7 @@ class CardManager:
                     if entry is None:
                         continue
                     try:
-                        plmns.append(f"{entry['mcc']}{entry['mnc'].zfill(3)}")
+                        plmns.append(f"{entry['mcc']}{entry['mnc'].zfill(2)}")
                     except (KeyError, TypeError, AttributeError):
                         continue
                 if plmns:

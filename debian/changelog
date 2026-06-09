@@ -1,10 +1,16 @@
-simgui (0.5.73) unstable; urgency=medium
+simgui (0.6.0) stable; urgency=medium
 
-  * refactor: consolidate worker probe into detect_inprocess; remove redundant
-    probe() from worker protocol (fast probe path replaced by detect_inprocess
-    with session_id=None for stateless card-presence checks)
+  * Runs on macOS and Ubuntu (x86-64 and ARM/aarch64)
+  * Programs both Gialersim and Sysmocom (SJA5/SJA2) SIM cards with full
+    verification and artifact file generation
+  * Batch programming workflow from CSV files with automatic indexing
+  * SMB network share support for CSV storage and artifact export
+  * Post-program verification with readback validation
+  * Persistent pySim worker for reliable card detection and operations
+  * FPLMN (Frequency Band Plan) support with format normalization
+  * Todo: SUCI (5G privacy) service enable/disable and HN public key write
 
- -- John Fornehed <john.fornehed@gmail.com>  Tue, 03 Jun 2026 00:00:00 +0000
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 09 Jun 2026 00:00:00 +0000
 
 simgui (0.5.72) unstable; urgency=medium
 

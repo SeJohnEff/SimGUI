@@ -101,6 +101,12 @@ class SIMStandard:
     default_spn: str = ""
     adm1_empty_cards: str = "3838383838383838"
 
+    # SUCI defaults (for SIM type 1: USIM+SUCI)
+    suci_enabled: bool = True
+    suci_protection_scheme: str = "null"
+    suci_routing_indicator: str = "00"
+    suci_hn_pubkey: str = ""
+
     # Key generation config
     key_method: str = "random"
     key_note: str = ""
@@ -311,6 +317,13 @@ def _parse_standard(data: dict, source_path: str) -> SIMStandard:
     std.default_ehplmn = profile.get("ehplmn", ["99988", "99989"])
     std.default_spn = profile.get("spn", "")
     std.adm1_empty_cards = profile.get("adm1_empty_cards", "3838383838383838")
+
+    # SUCI defaults
+    suci = profile.get("suci", {})
+    std.suci_enabled = suci.get("enabled", True)
+    std.suci_protection_scheme = suci.get("protection_scheme", "null")
+    std.suci_routing_indicator = suci.get("routing_indicator", "00")
+    std.suci_hn_pubkey = suci.get("hn_pubkey", "")
 
     # Key generation
     keygen = data.get("key_generation", {})

@@ -91,7 +91,13 @@
     "algo_3g": "MILENAGE",
     "algo_4g5g": "MILENAGE",
     "use_opc": true,
-    "adm1_empty_cards": "3838383838383838"
+    "adm1_empty_cards": "3838383838383838",
+    "suci": {
+      "enabled": true,
+      "protection_scheme": "null",
+      "routing_indicator": "00",
+      "hn_pubkey": ""
+    }
   },
 
   "numbering": {

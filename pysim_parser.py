@@ -26,7 +26,7 @@ def parse_pysim_output(output: str) -> dict:
                 try:
                     mcc = line.split('MCC:')[1].split()[0].strip()
                     mnc = line.split('MNC:')[1].split()[0].strip()
-                    fplmn_values.append(f"{mcc}{mnc.zfill(3)}")
+                    fplmn_values.append(f"{mcc}{mnc.zfill(2)}")
                 except (IndexError, ValueError):
                     pass
             continue

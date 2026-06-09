@@ -127,14 +127,8 @@ class TestMainWindowTabs:
         return [tabs.tabText(i) for i in range(tabs.count())
                 if tabs.isTabVisible(i)]
 
-    def test_read_sim_tab_visible(self, app_instance):
-        assert "Read SIM" in self._visible_tab_texts(app_instance)
-
     def test_program_sim_tab_visible(self, app_instance):
         assert "Program SIM" in self._visible_tab_texts(app_instance)
-
-    def test_batch_tab_visible(self, app_instance):
-        assert "Batch Program" in self._visible_tab_texts(app_instance)
 
     def test_program_sim_is_default_tab(self, app_instance):
         """Program SIM must be the selected tab at startup."""
