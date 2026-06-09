@@ -196,6 +196,7 @@ class ProgramSIMPanel(QWidget):
         prog_btn_layout.addWidget(self._prog_btn)
 
         self._suci_checkbox = QCheckBox("Enable 5G SUCI")
+        self._suci_checkbox.setChecked(True)
         prog_btn_layout.addWidget(self._suci_checkbox)
         prog_btn_layout.addStretch()
         actions_layout.addLayout(prog_btn_layout)
