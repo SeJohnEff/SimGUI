@@ -22,6 +22,10 @@ _DEFAULTS = {
     "last_csv_path": "",
     "last_batch_size": 20,
     "window_geometry": "",
+    "suci_hnet_pubkey": "",
+    "suci_prot_scheme": 1,
+    "suci_routing_ind": "00",
+    "suci_pubkey_id": 1,
 }
 
 

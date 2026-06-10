@@ -514,6 +514,10 @@ class SimGUIApp(QMainWindow):
         ns_act.triggered.connect(self._on_network_storage)
         file_menu.addAction(ns_act)
 
+        suci_act = QAction("SUCI Configuration...", self)
+        suci_act.triggered.connect(self._on_suci_configuration)
+        file_menu.addAction(suci_act)
+
         export_act = QAction("Export Artifacts...", self)
         export_act.triggered.connect(self._on_export_artifacts)
         file_menu.addAction(export_act)
@@ -754,6 +758,13 @@ class SimGUIApp(QMainWindow):
         dlg.exec()
         # Rescan any newly mounted shares for SIM data and standards
         self._rescan_shares_background()
+
+    def _on_suci_configuration(self):
+        """Open the SUCI Configuration dialog."""
+        from dialogs.suci_settings_dialog import SUCISettingsDialog
+        dlg = SUCISettingsDialog(self.settings_manager, self)
+        if dlg.exec():
+            dlg.save_settings()
 
     def _rescan_shares_background(self) -> None:
         """Scan all mounted share directories in a background thread."""

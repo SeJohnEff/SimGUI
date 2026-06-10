@@ -300,6 +300,7 @@ class ProgramSIMPanel(QWidget):
             if incoming != self._sticky_result_iccid:
                 self._clear_sticky_result()
         self._update_program_btn_state()
+        self._handle_suci_for_card_type(card_info)
 
         if not card_info.iccid:
             return
@@ -327,6 +328,34 @@ class ProgramSIMPanel(QWidget):
 
     def _clear_sticky_result(self) -> None:
         self._sticky_result_iccid = None
+
+    def _handle_suci_for_card_type(self, card_info: CardInfo) -> None:
+        """Show SUCI warnings and update UI based on detected card type."""
+        from managers.card_manager import CardType
+        from dialogs.suci_suggested_dialog import SUCISuggestedDialog
+        from dialogs.suci_unsupported_dialog import SUCIUnsupportedDialog
+
+        card_type = card_info.card_type
+        suci_checked = self._suci_checkbox.isChecked()
+
+        if card_type == CardType.GIALERSIM:
+            # Gialersim doesn't support SUCI
+            self._suci_checkbox.setEnabled(False)
+            if suci_checked:
+                dlg = SUCIUnsupportedDialog(self)
+                dlg.exec()
+                self._suci_checkbox.setChecked(False)
+        elif card_type == CardType.SJA5:
+            # SJA5 supports SUCI - suggest if not checked
+            self._suci_checkbox.setEnabled(True)
+            if not suci_checked:
+                dlg = SUCISuggestedDialog(self)
+                result = dlg.exec()
+                if result == SUCISuggestedDialog.RESULT_CHECK:
+                    self._suci_checkbox.setChecked(True)
+        else:
+            # Other card types - enable SUCI checkbox but don't force
+            self._suci_checkbox.setEnabled(True)
 
     def _set_action_status(self, text: str, style: str = "normal"):
         self._action_status.setPlainText(text)
@@ -559,6 +588,14 @@ class ProgramSIMPanel(QWidget):
         # Update SUCI checkbox from CSV
         suci_val = normalized.get('SUCI', '').lower()
         self._suci_checkbox.setChecked(suci_val in ('true', 'yes', '1', 'enabled'))
+
+        # Auto-fill HNET_PUBKEY from settings if not in CSV
+        if not normalized.get('HNET_PUBKEY') and hasattr(self, '_cm') and self._cm:
+            settings_mgr = getattr(self._cm, 'settings_manager', None)
+            if settings_mgr:
+                hnet_pubkey = settings_mgr.get('suci_hnet_pubkey', '')
+                if hnet_pubkey:
+                    self._extra_card_data['HNET_PUBKEY'] = hnet_pubkey
 
         # Re-evaluate button state after CSV row is selected
         self._update_program_btn_state()

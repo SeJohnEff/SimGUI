@@ -2085,6 +2085,75 @@ class CardManager:
             pass
         return False
 
+    @staticmethod
+    def _pysim_write_suci_calc_info(
+            hnet_pubkey: str,
+            prot_scheme: int = 1,
+            routing_ind: str = "00",
+            pubkey_id: int = 1
+    ) -> List[str]:
+        """Commands to write SUCI Calc Info via pySim-shell (SJA5 only).
+
+        Writes hnet_pubkey_list with protection scheme and routing indicator.
+        """
+        import json as _json
+        payload = _json.dumps({
+            "prot_scheme_id_list": [
+                {"priority": 0, "identifier": prot_scheme, "key_index": pubkey_id}
+            ],
+            "hnet_pubkey_list": [
+                {"hnet_pubkey_identifier": pubkey_id, "hnet_pubkey": hnet_pubkey}
+            ]
+        })
+        return [
+            'select MF',
+            'select ADF.USIM',
+            'select DF.5GS',
+            'select EF.SUCI_Calc_Info',
+            f"update_binary_decoded '{payload}'",
+        ]
+
+    @staticmethod
+    def _pysim_read_suci_calc_info() -> List[str]:
+        """Commands to read SUCI Calc Info for verification (SJA5 only)."""
+        return [
+            'select MF',
+            'select ADF.USIM',
+            'select DF.5GS',
+            'select EF.SUCI_Calc_Info',
+            'read_binary_decoded',
+        ]
+
+    @staticmethod
+    def _parse_suci_calc_info(output: str) -> str:
+        """Parse SUCI Calc Info read_binary_decoded output to extract hnet_pubkey.
+
+        Returns the hnet_pubkey (hex string) if found, empty string otherwise.
+        """
+        if not output:
+            return ""
+        try:
+            import json as _json
+            # Try parsing the entire output as JSON first (multi-line)
+            data = _json.loads(output)
+            if isinstance(data, dict):
+                pubkey_list = data.get('hnet_pubkey_list', [])
+                if isinstance(pubkey_list, list) and len(pubkey_list) > 0:
+                    return pubkey_list[0].get('hnet_pubkey', '')
+            # Fallback: try line-by-line parsing for single-line JSON
+            for line in output.splitlines():
+                line = line.strip()
+                if not line.startswith('{'):
+                    continue
+                data = _json.loads(line)
+                if isinstance(data, dict):
+                    pubkey_list = data.get('hnet_pubkey_list', [])
+                    if isinstance(pubkey_list, list) and len(pubkey_list) > 0:
+                        return pubkey_list[0].get('hnet_pubkey', '')
+        except (ValueError, TypeError, KeyError):
+            pass
+        return ""
+
     def _program_nonempty_card(self, card_data: Dict[str, str],
                                changed: Dict[str, str]
                                ) -> Tuple[bool, str]:
@@ -2159,6 +2228,16 @@ class CardManager:
             suci_enabled = changed['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
             commands.extend(self._pysim_write_suci(suci_enabled))
             fields_written.append('SUCI')
+
+        if 'HNET_PUBKEY' in changed and self.card_type == CardType.SJA5:
+            hnet_pubkey = changed['HNET_PUBKEY'].strip()
+            if hnet_pubkey:
+                prot_scheme = int(changed.get('SUCI_PROT_SCHEME', 1))
+                routing_ind = changed.get('SUCI_ROUTING_IND', '00').strip()
+                pubkey_id = int(changed.get('SUCI_PUBKEY_ID', 1))
+                commands.extend(self._pysim_write_suci_calc_info(
+                    hnet_pubkey, prot_scheme, routing_ind, pubkey_id))
+                fields_written.append('HNET_PUBKEY')
 
         if not commands:
             msg = "No programmable fields changed"
@@ -2417,6 +2496,20 @@ class CardManager:
                 elif not ok_suci:
                     last_mismatches.append(
                         f"SUCI: verification read failed")
+
+            # Verify HNET_PUBKEY when written (SJA5 only)
+            if written_data.get('HNET_PUBKEY') and self.card_type == CardType.SJA5:
+                expected_pubkey = written_data['HNET_PUBKEY'].strip().lower()
+                ok_pubkey, stdout_pubkey, _stderr_pubkey = self._run_pysim_shell(
+                    self._authenticated_adm1_hex, '\n'.join(self._pysim_read_suci_calc_info()), timeout=10)
+                if ok_pubkey and stdout_pubkey:
+                    actual_pubkey = self._parse_suci_calc_info(stdout_pubkey).lower()
+                    if actual_pubkey and actual_pubkey != expected_pubkey:
+                        last_mismatches.append(
+                            f"HNET_PUBKEY: wrote {expected_pubkey}, read back {actual_pubkey}")
+                elif not ok_pubkey:
+                    last_mismatches.append(
+                        f"HNET_PUBKEY: verification read failed")
 
             if not last_mismatches:
                 logger.info("Post-program verification OK: %s", readback)
