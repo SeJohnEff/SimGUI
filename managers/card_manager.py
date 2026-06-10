@@ -2385,7 +2385,7 @@ class CardManager:
         are verified via verify_after_program; results are binned into
         verified_fields, failed_fields, or verification_error.
         """
-        _UNREADABLE = {'Ki', 'OPc', 'HNET_PUBKEY'}
+        _UNREADABLE = {'Ki', 'OPc', 'HNET_PUBKEY', 'SUCI'}
         unreadable = tuple(f for f in _UNREADABLE if f in intended)
         readable_intended = {k: v for k, v in intended.items() if k not in _UNREADABLE}
 
