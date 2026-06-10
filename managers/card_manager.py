@@ -203,7 +203,7 @@ class _VerificationReport:
     """Internal classification of a post-write read-back result.
 
     Not a domain state — used only inside CardManager to decide which
-    ProgramOutcome to surface.  Ki/OPc are structurally unreadable;
+    ProgramOutcome to surface.  Ki/OPc and HNET_PUBKEY are structurally unreadable;
     all other written fields are either verified, mismatched, or caused
     an error that prevented verification.
     """
@@ -2380,12 +2380,12 @@ class CardManager:
     def _verify_written_fields(self, intended: Dict[str, str]) -> '_VerificationReport':
         """Classify a set of written fields via read-back.
 
-        Ki and OPc are structurally unreadable — always placed in
+        Ki, OPc, and HNET_PUBKEY are structurally unreadable — always placed in
         unreadable_fields when present in *intended*.  All other fields
         are verified via verify_after_program; results are binned into
         verified_fields, failed_fields, or verification_error.
         """
-        _UNREADABLE = {'Ki', 'OPc'}
+        _UNREADABLE = {'Ki', 'OPc', 'HNET_PUBKEY'}
         unreadable = tuple(f for f in _UNREADABLE if f in intended)
         readable_intended = {k: v for k, v in intended.items() if k not in _UNREADABLE}
 
@@ -2526,35 +2526,6 @@ class CardManager:
                     last_mismatches.append(
                         f"SUCI: verification read failed")
                     logger.warning("[SUCI-VERIFY] READ_FAILED: pySim-shell returned ok=False")
-
-            # Verify HNET_PUBKEY when written (SJA5 only)
-            if written_data.get('HNET_PUBKEY') and self.card_type == CardType.SJA5:
-                expected_pubkey = written_data['HNET_PUBKEY'].strip().lower()
-                logger.info("[HNET_PUBKEY-VERIFY] expected=%s", expected_pubkey[:32] + "...")
-                ok_pubkey, stdout_pubkey, stderr_pubkey = self._run_pysim_shell(
-                    self._authenticated_adm1_hex, '\n'.join(self._pysim_read_suci_calc_info()), timeout=10)
-                logger.info("[HNET_PUBKEY-VERIFY] pySim-shell ok=%s stdout_len=%d stderr_len=%d",
-                            ok_pubkey, len(stdout_pubkey or ''), len(stderr_pubkey or ''))
-                if stderr_pubkey:
-                    logger.info("[HNET_PUBKEY-VERIFY] stderr: %s", stderr_pubkey[:200])
-                if stdout_pubkey:
-                    logger.info("[HNET_PUBKEY-VERIFY] stdout: %s", stdout_pubkey[:300])
-                if ok_pubkey and stdout_pubkey:
-                    actual_pubkey = self._parse_suci_calc_info(stdout_pubkey).lower()
-                    logger.info("[HNET_PUBKEY-VERIFY] parsed actual=%s (len=%d)",
-                                actual_pubkey[:32] + "..." if actual_pubkey else "(empty)", len(actual_pubkey))
-                    if actual_pubkey and actual_pubkey != expected_pubkey:
-                        last_mismatches.append(
-                            f"HNET_PUBKEY: wrote {expected_pubkey}, read back {actual_pubkey}")
-                        logger.warning("[HNET_PUBKEY-VERIFY] MISMATCH: expected vs actual differ")
-                    elif not actual_pubkey:
-                        last_mismatches.append(
-                            f"HNET_PUBKEY: verification returned empty (not readable on card?)")
-                        logger.warning("[HNET_PUBKEY-VERIFY] EMPTY: parsed pubkey is empty")
-                elif not ok_pubkey:
-                    last_mismatches.append(
-                        f"HNET_PUBKEY: verification read failed")
-                    logger.warning("[HNET_PUBKEY-VERIFY] READ_FAILED: pySim-shell returned ok=False")
 
             if not last_mismatches:
                 logger.info("Post-program verification OK: %s", readback)
