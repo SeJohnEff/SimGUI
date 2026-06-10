@@ -1,3 +1,17 @@
+simgui (0.7.0) stable; urgency=medium
+
+  * SUCI (Subscription Concealed Identifier) support for 5G privacy on
+    Sysmocom SJA5 cards: write protection scheme, home network public key,
+    and service table activation
+  * Fixed: SUCI verification no longer attempts PCSC readback (write-only
+    field, structurally unreadable); eliminates "sharing violation" errors
+  * Ki, OPc, HNET_PUBKEY, and SUCI now treated as cryptographic keys
+    (write succeeds, post-write verification skipped to avoid PCSC contention)
+  * Architecture: all three cryptographic fields share same write-only
+    semantics pattern to prevent reader lock conflicts
+
+ -- John Fornehed <john.fornehed@gmail.com>  Tue, 10 Jun 2026 00:00:00 +0000
+
 simgui (0.6.0) stable; urgency=medium
 
   * Runs on macOS and Ubuntu (x86-64 and ARM/aarch64)
