@@ -1,0 +1,26 @@
+Metadata-Version: 2.1
+Name: smpp.pdu3
+Version: 0.6
+Summary: Python3 Library for parsing Protocol Data Units (PDUs) in SMPP protocol
+Home-page: https://github.com/jookies/smpp.pdu
+Author: Roger Hoover
+Author-email: roger.hoover@gmail.com
+License: Apache License 2.0
+Keywords: smpp pdu
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Topic :: System :: Networking
+Classifier: Operating System :: OS Independent
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+
+UNKNOWN
+
+

@@ -1,0 +1,37 @@
+Metadata-Version: 2.4
+Name: pyosmocom
+Version: 0.0.12
+Summary: Python implementation of core osmocom utilities / protocols
+Maintainer-email: openbsc@lists.osmocom.org
+License-Expression: GPL-2.0-or-later
+Project-URL: Homepage, https://osmocom.org/projects/pyosmocom/wiki
+Project-URL: Repository, https://gitea.osmocom.org/osmocom/pyosmocom
+Project-URL: Bug Tracker, https://osmocom.org/projects/pyosmocom/issues
+Keywords: telecom,gsm,3gpp,cellular
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Programming Language :: Python
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: COPYING
+Requires-Dist: gsm0338
+Requires-Dist: construct>=2.9.51
+Dynamic: license-file
+
+pyosmocom - python implementation of key Osmocom protocols/interfaces
+=====================================================================
+
+Within the Osmocom (Open Source Mobile Communciations) project family, there have been a number
+of implementations of key protocols or interfaces in the C language, and occasionally also Erlang.
+
+This repository contains python implementation of key Osmocom related library code,
+like
+
+* utilities for common problems found in mobile communications
+* TLV parsers/encoders
+* helpers for 'construct' based encoders/decoders
+
+Releases get published to [pypi](https://pypi.org/project/pyosmocom/) and can
+be installed with:
+```
+$ pip install pyosmocom
+```

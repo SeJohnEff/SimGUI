@@ -2068,6 +2068,7 @@ class CardManager:
         Returns False if parsing fails or services are not in expected state.
         """
         if not output:
+            logger.info("[SUCI-PARSE] output is empty")
             return False
         try:
             import json as _json
@@ -2079,10 +2080,16 @@ class CardManager:
                 if isinstance(data, dict):
                     service_124 = data.get(124) or data.get('124')
                     service_125 = data.get(125) or data.get('125')
+                    logger.info("[SUCI-PARSE] service_124=%s service_125=%s", service_124, service_125)
                     if service_124 is not None and service_125 is not None:
-                        return bool(service_124) and not bool(service_125)
-        except (ValueError, TypeError, KeyError):
+                        result = bool(service_124) and not bool(service_125)
+                        logger.info("[SUCI-PARSE] result: bool(124)=%s and not bool(125)=%s -> %s",
+                                    bool(service_124), not bool(service_125), result)
+                        return result
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning("[SUCI-PARSE] parse error: %s", e)
             pass
+        logger.warning("[SUCI-PARSE] no valid service data found, returning False")
         return False
 
     @staticmethod
@@ -2265,6 +2272,19 @@ class CardManager:
 
         ok, stdout, stderr = self._run_pysim_shell(
             self._authenticated_adm1_hex, cmd_str, timeout=30)
+
+        logger.info("[PROGRAM-SHELL] pySim-shell returned ok=%s stdout_len=%d stderr_len=%d",
+                    ok, len(stdout or ''), len(stderr or ''))
+        if 'HNET_PUBKEY' in fields_written:
+            # Look for the update_binary_decoded response in stdout
+            if stdout:
+                logger.info("[PROGRAM-SHELL-SUCI] stdout (first 500 chars):\n%s", stdout[:500])
+            if stderr:
+                logger.info("[PROGRAM-SHELL-SUCI] stderr (first 500 chars):\n%s", stderr[:500])
+            # Check for common error patterns
+            combined_lower = (stdout + stderr).lower() if (stdout or stderr) else ''
+            if 'error' in combined_lower or 'failed' in combined_lower or 'exception' in combined_lower:
+                logger.warning("[PROGRAM-SHELL-SUCI] ERROR PATTERN DETECTED in output")
 
         if ok:
             summary = ', '.join(fields_written)
@@ -2486,30 +2506,55 @@ class CardManager:
             # Verify SUCI when written — read EF.UST and check service states
             if written_data.get('SUCI'):
                 expected_suci = written_data['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
-                ok_suci, stdout_suci, _stderr_suci = self._run_pysim_shell(
+                logger.info("[SUCI-VERIFY] expected=%s", expected_suci)
+                ok_suci, stdout_suci, stderr_suci = self._run_pysim_shell(
                     self._authenticated_adm1_hex, '\n'.join(self._pysim_read_suci()), timeout=10)
+                logger.info("[SUCI-VERIFY] pySim-shell ok=%s stdout_len=%d stderr_len=%d",
+                            ok_suci, len(stdout_suci or ''), len(stderr_suci or ''))
+                if stdout_suci:
+                    logger.info("[SUCI-VERIFY] stdout (first 300 chars): %s", stdout_suci[:300])
+                if stderr_suci:
+                    logger.info("[SUCI-VERIFY] stderr (first 300 chars): %s", stderr_suci[:300])
                 if ok_suci and stdout_suci:
                     actual_suci = self._parse_suci_readback(stdout_suci)
+                    logger.info("[SUCI-VERIFY] actual=%s", actual_suci)
                     if actual_suci != expected_suci:
                         last_mismatches.append(
                             f"SUCI: wrote {expected_suci}, read back {actual_suci}")
+                        logger.warning("[SUCI-VERIFY] MISMATCH: expected %s but got %s", expected_suci, actual_suci)
                 elif not ok_suci:
                     last_mismatches.append(
                         f"SUCI: verification read failed")
+                    logger.warning("[SUCI-VERIFY] READ_FAILED: pySim-shell returned ok=False")
 
             # Verify HNET_PUBKEY when written (SJA5 only)
             if written_data.get('HNET_PUBKEY') and self.card_type == CardType.SJA5:
                 expected_pubkey = written_data['HNET_PUBKEY'].strip().lower()
-                ok_pubkey, stdout_pubkey, _stderr_pubkey = self._run_pysim_shell(
+                logger.info("[HNET_PUBKEY-VERIFY] expected=%s", expected_pubkey[:32] + "...")
+                ok_pubkey, stdout_pubkey, stderr_pubkey = self._run_pysim_shell(
                     self._authenticated_adm1_hex, '\n'.join(self._pysim_read_suci_calc_info()), timeout=10)
+                logger.info("[HNET_PUBKEY-VERIFY] pySim-shell ok=%s stdout_len=%d stderr_len=%d",
+                            ok_pubkey, len(stdout_pubkey or ''), len(stderr_pubkey or ''))
+                if stderr_pubkey:
+                    logger.info("[HNET_PUBKEY-VERIFY] stderr: %s", stderr_pubkey[:200])
+                if stdout_pubkey:
+                    logger.info("[HNET_PUBKEY-VERIFY] stdout: %s", stdout_pubkey[:300])
                 if ok_pubkey and stdout_pubkey:
                     actual_pubkey = self._parse_suci_calc_info(stdout_pubkey).lower()
+                    logger.info("[HNET_PUBKEY-VERIFY] parsed actual=%s (len=%d)",
+                                actual_pubkey[:32] + "..." if actual_pubkey else "(empty)", len(actual_pubkey))
                     if actual_pubkey and actual_pubkey != expected_pubkey:
                         last_mismatches.append(
                             f"HNET_PUBKEY: wrote {expected_pubkey}, read back {actual_pubkey}")
+                        logger.warning("[HNET_PUBKEY-VERIFY] MISMATCH: expected vs actual differ")
+                    elif not actual_pubkey:
+                        last_mismatches.append(
+                            f"HNET_PUBKEY: verification returned empty (not readable on card?)")
+                        logger.warning("[HNET_PUBKEY-VERIFY] EMPTY: parsed pubkey is empty")
                 elif not ok_pubkey:
                     last_mismatches.append(
                         f"HNET_PUBKEY: verification read failed")
+                    logger.warning("[HNET_PUBKEY-VERIFY] READ_FAILED: pySim-shell returned ok=False")
 
             if not last_mismatches:
                 logger.info("Post-program verification OK: %s", readback)
