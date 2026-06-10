@@ -516,7 +516,8 @@ class ProgramSIMPanel(QWidget):
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_entries[key].setText("")
-        self._suci_checkbox.setChecked(False)
+        # Keep SUCI enabled by default for the next card
+        self._suci_checkbox.setChecked(True)
         self._field_entries["ICCID"].setReadOnly(False)
 
     def _on_browse_csv(self):
@@ -585,9 +586,11 @@ class ProgramSIMPanel(QWidget):
         # Preserve extra fields (PIN1/PUK1, KIC/KID/KIK, etc.) from CSV row
         self._extra_card_data = normalized
 
-        # Update SUCI checkbox from CSV
+        # Update SUCI checkbox from CSV (default to True if not specified)
         suci_val = normalized.get('SUCI', '').lower()
-        self._suci_checkbox.setChecked(suci_val in ('true', 'yes', '1', 'enabled'))
+        # If SUCI not in CSV, default to enabled; otherwise use CSV value
+        suci_enabled = suci_val in ('true', 'yes', '1', 'enabled') if suci_val else True
+        self._suci_checkbox.setChecked(suci_enabled)
 
         # Auto-fill HNET_PUBKEY from settings if not in CSV
         if not normalized.get('HNET_PUBKEY') and hasattr(self, '_cm') and self._cm:
