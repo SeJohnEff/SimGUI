@@ -762,7 +762,7 @@ class SimGUIApp(QMainWindow):
     def _on_suci_configuration(self):
         """Open the SUCI Configuration dialog."""
         from dialogs.suci_settings_dialog import SUCISettingsDialog
-        dlg = SUCISettingsDialog(self.settings_manager, self)
+        dlg = SUCISettingsDialog(self._settings, self)
         if dlg.exec():
             dlg.save_settings()
 
