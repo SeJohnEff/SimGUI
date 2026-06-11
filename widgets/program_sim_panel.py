@@ -52,6 +52,7 @@ _FORM_FIELDS = [
     ("ACC", "ACC", True),
     ("SPN", "SPN", True),
     ("FPLMN", "FPLMN", True),
+    ("HNET_PUBKEY", "HNET_PUBKEY (5G SUCI)", True),
 ]
 
 # Canonical names for all known share/index fields (lowercase key → canonical)
@@ -63,7 +64,7 @@ _KNOWN_FIELD_NAMES = {
     'kic1': 'KIC1', 'kid1': 'KID1', 'kik1': 'KIK1',
     'kic2': 'KIC2', 'kid2': 'KID2', 'kik2': 'KIK2',
     'kic3': 'KIC3', 'kid3': 'KID3', 'kik3': 'KIK3',
-    'spn': 'SPN', 'fplmn': 'FPLMN', 'suci': 'SUCI',
+    'spn': 'SPN', 'fplmn': 'FPLMN', 'suci': 'SUCI', 'hnet_pubkey': 'HNET_PUBKEY',
 }
 
 _FORM_FIELD_KEYS = frozenset(k for k, _, _ in _FORM_FIELDS)

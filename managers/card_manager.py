@@ -2299,6 +2299,8 @@ class CardManager:
             commands.extend(self._pysim_write_fplmn(changed['FPLMN']))
             fields_written.append('FPLMN')
 
+        # Track if SUCI is being enabled so we know to write HNET_PUBKEY
+        suci_enabled = False
         if 'SUCI' in changed:
             # Write EF.UST service table: activate service 124 (SUCI enabled),
             # deactivate service 125 (legacy mode off). This enables 5G SUCI
@@ -2309,19 +2311,23 @@ class CardManager:
             commands.extend(ust_commands)
             fields_written.append('SUCI')
 
-        if 'HNET_PUBKEY' in changed and self.card_type == CardType.SJA5:
+        # Write HNET_PUBKEY if: (1) it's in changed delta, OR (2) SUCI is being
+        # enabled AND HNET_PUBKEY is present in the full data. This ensures the
+        # key is written when SUCI is activated, even if the key wasn't changed.
+        hnet_pubkey_in_data = changed.get('HNET_PUBKEY', '').strip() if 'HNET_PUBKEY' in changed else (
+            card_data.get('HNET_PUBKEY', '').strip() if suci_enabled else ''
+        )
+        if hnet_pubkey_in_data and self.card_type == CardType.SJA5:
             # Write SUCI calculation parameters: home network public key and
             # protection scheme to DF.5GS/EF.SUCI_Calc_Info. Works alongside
             # EF.UST service table activation (SUCI field above) to enable
             # 5G SUCI privacy. Both writes execute in same pySim-shell session.
-            hnet_pubkey = changed['HNET_PUBKEY'].strip()
-            if hnet_pubkey:
-                prot_scheme = int(changed.get('SUCI_PROT_SCHEME', 1))
-                routing_ind = changed.get('SUCI_ROUTING_IND', '00').strip()
-                pubkey_id = int(changed.get('SUCI_PUBKEY_ID', 1))
-                commands.extend(self._pysim_write_suci_calc_info(
-                    hnet_pubkey, prot_scheme, routing_ind, pubkey_id))
-                fields_written.append('HNET_PUBKEY')
+            prot_scheme = int(changed.get('SUCI_PROT_SCHEME', card_data.get('SUCI_PROT_SCHEME', 1)))
+            routing_ind = changed.get('SUCI_ROUTING_IND', card_data.get('SUCI_ROUTING_IND', '00')).strip()
+            pubkey_id = int(changed.get('SUCI_PUBKEY_ID', card_data.get('SUCI_PUBKEY_ID', 1)))
+            commands.extend(self._pysim_write_suci_calc_info(
+                hnet_pubkey_in_data, prot_scheme, routing_ind, pubkey_id))
+            fields_written.append('HNET_PUBKEY')
 
         if not commands:
             msg = "No programmable fields changed"
