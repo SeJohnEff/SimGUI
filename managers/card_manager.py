@@ -2282,7 +2282,7 @@ class CardManager:
 
         cmd_str = '\n'.join(commands)
         logger.info("Programming non-empty card via pySim-shell: fields=%s", fields_written)
-        logger.debug("pySim-shell commands:\n%s", cmd_str)
+        logger.info("pySim-shell commands (%d total):\n%s", len(commands), cmd_str)
 
         # Release the in-process PCSC transport before spawning pySim-shell.
         # The worker holds an exclusive PCSC lock via _session["sl"]; without
