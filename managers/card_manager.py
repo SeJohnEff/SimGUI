@@ -2042,16 +2042,20 @@ class CardManager:
                 'select MF',
                 'select ADF.USIM',
                 'select EF.UST',
+                'read_binary_decoded',
                 'ust_service_activate 124',
                 'ust_service_deactivate 125',
+                'read_binary_decoded',
             ]
         else:
             return [
                 'select MF',
                 'select ADF.USIM',
                 'select EF.UST',
+                'read_binary_decoded',
                 'ust_service_deactivate 124',
                 'ust_service_activate 125',
+                'read_binary_decoded',
             ]
 
     @staticmethod
@@ -2307,12 +2311,31 @@ class CardManager:
                 logger.info("[PROGRAM-SHELL-SUCI] stdout (first 5000 chars):\n%s", stdout[:5000])
             if stderr:
                 logger.info("[PROGRAM-SHELL-SUCI] stderr (first 5000 chars):\n%s", stderr[:5000])
+            # Parse and log EF.UST read_binary_decoded output (service table state)
+            if stdout and 'read_binary_decoded' in cmd_str.lower():
+                # Extract the last JSON block (should be the post-write EF.UST state)
+                lines = stdout.split('\n')
+                json_blocks = []
+                current_block = []
+                for line in lines:
+                    if line.strip().startswith('{'):
+                        current_block = [line]
+                    elif line.strip().endswith('}') and current_block:
+                        current_block.append(line)
+                        json_blocks.append('\n'.join(current_block))
+                        current_block = []
+                    elif current_block:
+                        current_block.append(line)
+                if json_blocks:
+                    logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[-1][:1000])
             # Check for errors in EF.UST or SUCI_Calc_Info writes
             combined_lower = (stdout + stderr).lower() if (stdout or stderr) else ''
             if 'ef.ust' in combined_lower:
                 logger.info("[EF.UST-DEBUG] pySim-shell processed EF.UST commands")
             if 'ust_service' in combined_lower:
                 logger.info("[EF.UST-DEBUG] pySim-shell ust_service output detected")
+            if 'read_binary_decoded' in combined_lower:
+                logger.info("[EF.UST-DEBUG] pySim-shell read_binary_decoded output present (verifying state)")
             if 'error' in combined_lower or 'failed' in combined_lower or 'exception' in combined_lower:
                 logger.warning("[PROGRAM-SHELL-SUCI] ERROR PATTERN DETECTED in output")
                 # Additional detail for EF.UST failures
