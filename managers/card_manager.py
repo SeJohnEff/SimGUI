@@ -2341,6 +2341,25 @@ class CardManager:
         logger.info("Programming non-empty card via pySim-shell: fields=%s", fields_written)
         logger.info("pySim-shell commands (%d total):\n%s", len(commands), cmd_str)
 
+        # Detailed logging of exact sequences for SUCI/HNET_PUBKEY
+        if 'SUCI' in fields_written:
+            logger.info("[SUCI-SEQUENCE] EF.UST programming sequence:")
+            logger.info("[SUCI-SEQUENCE]   select MF")
+            logger.info("[SUCI-SEQUENCE]   select ADF.USIM")
+            logger.info("[SUCI-SEQUENCE]   select EF.UST")
+            logger.info("[SUCI-SEQUENCE]   read_binary_decoded")
+            logger.info("[SUCI-SEQUENCE]   ust_service_activate 124")
+            logger.info("[SUCI-SEQUENCE]   ust_service_deactivate 125")
+            logger.info("[SUCI-SEQUENCE]   read_binary_decoded")
+        if 'HNET_PUBKEY' in fields_written:
+            logger.info("[HNET_PUBKEY-SEQUENCE] DF.5GS/EF.SUCI_Calc_Info programming sequence:")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   select MF")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   select ADF.USIM")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   select DF.5GS")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   select EF.SUCI_Calc_Info")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   update_binary_decoded <payload with hnet_pubkey>")
+            logger.info("[HNET_PUBKEY-SEQUENCE]   read_binary_decoded")
+
         # Release the in-process PCSC transport before spawning pySim-shell.
         # The worker holds an exclusive PCSC lock via _session["sl"]; without
         # releasing it the subprocess hits Sharing Violation (0x8010000B).
