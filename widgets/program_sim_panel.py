@@ -330,24 +330,16 @@ class ProgramSIMPanel(QWidget):
     def _clear_sticky_result(self) -> None:
         self._sticky_result_iccid = None
 
-    def _get_hnet_pubkey(self, form_data: dict) -> str:
-        """Get HNET_PUBKEY from form data or settings (canonical source).
+    def _get_hnet_pubkey(self) -> str:
+        """Get HNET_PUBKEY from settings manager (canonical source).
 
-        Returns the HNET_PUBKEY value, checking:
-        1. Form data (highest priority - user-entered form value)
-        2. Settings manager (fallback for SUCI config dialog)
+        HNET_PUBKEY is ONLY managed via SUCI Configuration dialog,
+        stored in settings — it is not a form field.
         """
-        # Check form first
-        hnet_pubkey = form_data.get('HNET_PUBKEY', '').strip()
-        if hnet_pubkey:
-            return hnet_pubkey
-
-        # Fallback to settings if not in form
         if hasattr(self, '_cm') and self._cm:
             settings_mgr = getattr(self._cm, 'settings_manager', None)
             if settings_mgr:
                 return settings_mgr.get('suci_hnet_pubkey', '').strip()
-
         return ''
 
     def _handle_suci_for_card_type(self, card_info: CardInfo) -> None:
@@ -647,8 +639,8 @@ class ProgramSIMPanel(QWidget):
                           for k, _, _ in _FORM_FIELDS})
         card_data.pop('SPN', None)
 
-        # Ensure HNET_PUBKEY from settings is included if not in form (canonical source)
-        hnet_pubkey = self._get_hnet_pubkey(card_data)
+        # Include HNET_PUBKEY from settings (canonical source - only from SUCI config dialog)
+        hnet_pubkey = self._get_hnet_pubkey()
         if hnet_pubkey:
             card_data['HNET_PUBKEY'] = hnet_pubkey
         # Add SUCI from checkbox
@@ -659,9 +651,9 @@ class ProgramSIMPanel(QWidget):
         else:
             card_data.pop('SUCI', None)
 
-        # Warn if SUCI is enabled but HNET_PUBKEY is empty (check canonical source)
+        # Warn if SUCI is enabled but HNET_PUBKEY is empty (check canonical settings source)
         if suci_enabled:
-            hnet_pubkey = self._get_hnet_pubkey(card_data)
+            hnet_pubkey = self._get_hnet_pubkey()
             if not hnet_pubkey:
                 confirm = QMessageBox.warning(
                     self,
