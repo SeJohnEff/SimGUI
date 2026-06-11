@@ -2304,9 +2304,9 @@ class CardManager:
         if 'SUCI' in fields_written or 'HNET_PUBKEY' in fields_written:
             # Log EF.UST and HNET_PUBKEY programming output in detail
             if stdout:
-                logger.info("[PROGRAM-SHELL-SUCI] stdout (first 1000 chars):\n%s", stdout[:1000])
+                logger.info("[PROGRAM-SHELL-SUCI] stdout (first 5000 chars):\n%s", stdout[:5000])
             if stderr:
-                logger.info("[PROGRAM-SHELL-SUCI] stderr (first 1000 chars):\n%s", stderr[:1000])
+                logger.info("[PROGRAM-SHELL-SUCI] stderr (first 5000 chars):\n%s", stderr[:5000])
             # Check for errors in EF.UST or SUCI_Calc_Info writes
             combined_lower = (stdout + stderr).lower() if (stdout or stderr) else ''
             if 'ef.ust' in combined_lower:
