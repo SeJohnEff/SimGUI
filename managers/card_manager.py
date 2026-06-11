@@ -2169,6 +2169,19 @@ class CardManager:
         Attempts worker path first (lines 2096\u20132144; supports multiple fields).
         Legacy path (lines 2146+) writes IMSI, FPLMN, and SUCI.
         Ki/OPc and ACC are not programmable on non-empty cards.
+
+        SUCI Programming (5G Privacy on SJA5):
+          - SUCI field (bool): Enable/disable 5G SUCI privacy service table
+            Activates EF.UST service 124, deactivates service 125 when true
+          - HNET_PUBKEY field (hex): Home network public key for SUCI calculation
+            Writes to DF.5GS/EF.SUCI_Calc_Info with protection scheme and key index
+          - Optional SUCI_PROT_SCHEME (int, default 1): Protection scheme identifier
+          - Optional SUCI_ROUTING_IND (str, default '00'): Routing indicator
+          - Optional SUCI_PUBKEY_ID (int, default 1): Public key identifier
+
+        Both SUCI service table and HNET_PUBKEY are written in a single pySim-shell
+        session. Post-write verification is skipped (cryptographic keys are
+        structurally unreadable and cause PCSC contention if verification attempted).
         """
         worker_result = self._try_worker_program_delta(changed)
         if worker_result is not None:
@@ -2232,11 +2245,18 @@ class CardManager:
             fields_written.append('FPLMN')
 
         if 'SUCI' in changed:
+            # Write EF.UST service table: activate service 124 (SUCI enabled),
+            # deactivate service 125 (legacy mode off). This enables 5G SUCI
+            # privacy if the card also has HNET_PUBKEY configured.
             suci_enabled = changed['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
             commands.extend(self._pysim_write_suci(suci_enabled))
             fields_written.append('SUCI')
 
         if 'HNET_PUBKEY' in changed and self.card_type == CardType.SJA5:
+            # Write SUCI calculation parameters: home network public key and
+            # protection scheme to DF.5GS/EF.SUCI_Calc_Info. Works alongside
+            # EF.UST service table activation (SUCI field above) to enable
+            # 5G SUCI privacy. Both writes execute in same pySim-shell session.
             hnet_pubkey = changed['HNET_PUBKEY'].strip()
             if hnet_pubkey:
                 prot_scheme = int(changed.get('SUCI_PROT_SCHEME', 1))
