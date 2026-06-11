@@ -626,10 +626,30 @@ class ProgramSIMPanel(QWidget):
                           for k, _, _ in _FORM_FIELDS})
         card_data.pop('SPN', None)
         # Add SUCI from checkbox
+        suci_enabled = False
         if self._suci_checkbox.isChecked():
             card_data['SUCI'] = 'true'
+            suci_enabled = True
         else:
             card_data.pop('SUCI', None)
+
+        # Warn if SUCI is enabled but HNET_PUBKEY is empty
+        if suci_enabled:
+            hnet_pubkey = card_data.get('HNET_PUBKEY', '').strip()
+            if not hnet_pubkey:
+                confirm = QMessageBox.warning(
+                    self,
+                    "SUCI Configuration Warning",
+                    "5G SUCI (Subscription Concealed Identifier) is enabled, "
+                    "but the Home Network Public Key (HNET_PUBKEY) is empty.\n\n"
+                    "Without HNET_PUBKEY, the card cannot perform SUCI calculations. "
+                    "The service will be active but non-functional.\n\n"
+                    "Continue anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if confirm != QMessageBox.StandardButton.Yes:
+                    self._set_action_status("Programming cancelled", "info")
+                    return
 
         if self._card_watcher:
             self._card_watcher.pause()

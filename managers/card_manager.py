@@ -2110,6 +2110,7 @@ class CardManager:
         """Commands to write SUCI Calc Info via pySim-shell (SJA5 only).
 
         Writes hnet_pubkey_list with protection scheme and routing indicator.
+        Includes a DF.5GS read_binary_decoded for verification.
         """
         import json as _json
         payload = _json.dumps({
@@ -2127,6 +2128,11 @@ class CardManager:
             'select EF.SUCI_Calc_Info',
             f"update_binary_decoded '{payload}'",
             'read_binary_decoded',
+            # Read DF.5GS for verification that SUCI_Calc_Info exists
+            'select MF',
+            'select ADF.USIM',
+            'select DF.5GS',
+            'read_binary_decoded',
         ]
 
     @staticmethod
@@ -2137,6 +2143,16 @@ class CardManager:
             'select ADF.USIM',
             'select DF.5GS',
             'select EF.SUCI_Calc_Info',
+            'read_binary_decoded',
+        ]
+
+    @staticmethod
+    def _pysim_read_df5gs() -> List[str]:
+        """Commands to read DF.5GS directory for verification (SJA5 only)."""
+        return [
+            'select MF',
+            'select ADF.USIM',
+            'select DF.5GS',
             'read_binary_decoded',
         ]
 
@@ -2169,6 +2185,36 @@ class CardManager:
         except (ValueError, TypeError, KeyError):
             pass
         return ""
+
+    @staticmethod
+    def _parse_df5gs_readback(output: str) -> bool:
+        """Parse DF.5GS read_binary_decoded output to verify directory exists.
+
+        Returns True if DF.5GS structure is valid, False otherwise.
+        """
+        if not output:
+            logger.warning("[DF.5GS-VERIFY] DF.5GS readback output is empty")
+            return False
+        try:
+            import json as _json
+            # Try parsing the entire output as JSON first (multi-line)
+            data = _json.loads(output)
+            if isinstance(data, dict) and 'file_identifier' in data:
+                logger.info("[DF.5GS-VERIFY] DF.5GS structure is valid")
+                return True
+            # Fallback: try line-by-line parsing for single-line JSON
+            for line in output.splitlines():
+                line = line.strip()
+                if not line.startswith('{'):
+                    continue
+                data = _json.loads(line)
+                if isinstance(data, dict) and 'file_identifier' in data:
+                    logger.info("[DF.5GS-VERIFY] DF.5GS structure is valid")
+                    return True
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning("[DF.5GS-VERIFY] parse error: %s", e)
+        logger.warning("[DF.5GS-VERIFY] DF.5GS structure validation failed")
+        return False
 
     def _program_nonempty_card(self, card_data: Dict[str, str],
                                changed: Dict[str, str]
@@ -2314,7 +2360,7 @@ class CardManager:
                 logger.info("[PROGRAM-SHELL-SUCI] stderr (first 5000 chars):\n%s", stderr[:5000])
             # Parse and log EF.UST read_binary_decoded output (service table state)
             if stdout and 'read_binary_decoded' in cmd_str.lower():
-                # Extract all JSON blocks (EF.UST and DF.5GS/EF.SUCI_Calc_Info)
+                # Extract all JSON blocks (EF.UST, DF.5GS/EF.SUCI_Calc_Info, and DF.5GS)
                 lines = stdout.split('\n')
                 json_blocks = []
                 current_block = []
@@ -2328,15 +2374,23 @@ class CardManager:
                     elif current_block:
                         current_block.append(line)
 
-                # Log EF.UST state (second-to-last JSON block if HNET_PUBKEY present)
+                # Log EF.UST state and DF.5GS verification
                 if json_blocks and 'HNET_PUBKEY' in fields_written:
-                    if len(json_blocks) >= 2:
-                        logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[-2][:1000])
-                    logger.info("[HNET_PUBKEY-STATE] SUCI Calc Info state after write:\n%s", json_blocks[-1][:1000])
-                    # Verify hnet_pubkey is present in the output
-                    last_json = json_blocks[-1]
-                    if 'hnet_pubkey' in last_json.lower():
-                        logger.info("[HNET_PUBKEY-VERIFY] HNET_PUBKEY successfully written to DF.5GS/EF.SUCI_Calc_Info")
+                    # With HNET_PUBKEY: expect EF.UST, SUCI_Calc_Info read, and DF.5GS reads
+                    if len(json_blocks) >= 3:
+                        logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[0][:1000])
+                        logger.info("[HNET_PUBKEY-STATE] SUCI Calc Info state after write:\n%s", json_blocks[1][:1000])
+                        # Verify hnet_pubkey is present in SUCI_Calc_Info
+                        suci_calc_json = json_blocks[1]
+                        if 'hnet_pubkey' in suci_calc_json.lower():
+                            logger.info("[HNET_PUBKEY-VERIFY] HNET_PUBKEY successfully written to DF.5GS/EF.SUCI_Calc_Info")
+                        # Verify DF.5GS structure
+                        df5gs_json = json_blocks[-1]
+                        self._parse_df5gs_readback(df5gs_json)
+                        logger.info("[DF.5GS-STATE] DF.5GS directory state after write:\n%s", df5gs_json[:1000])
+                    elif len(json_blocks) >= 2:
+                        logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[0][:1000])
+                        logger.info("[HNET_PUBKEY-STATE] SUCI Calc Info state after write:\n%s", json_blocks[1][:1000])
                 elif json_blocks:
                     logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[-1][:1000])
             # Check for errors in EF.UST or SUCI_Calc_Info writes
@@ -2345,6 +2399,8 @@ class CardManager:
                 logger.info("[EF.UST-DEBUG] pySim-shell processed EF.UST commands")
             if 'ust_service' in combined_lower:
                 logger.info("[EF.UST-DEBUG] pySim-shell ust_service output detected")
+            if 'df.5gs' in combined_lower or 'df5gs' in combined_lower:
+                logger.info("[DF.5GS-DEBUG] pySim-shell processed DF.5GS commands")
             if 'read_binary_decoded' in combined_lower:
                 logger.info("[EF.UST-DEBUG] pySim-shell read_binary_decoded output present (verifying state)")
             if 'error' in combined_lower or 'failed' in combined_lower or 'exception' in combined_lower:
@@ -2353,6 +2409,11 @@ class CardManager:
                 if ('select ef.ust' in combined_lower or 'ust_service' in combined_lower or
                     '6a82' in combined_lower or '6a83' in combined_lower):
                     logger.warning("[EF.UST-ERROR] EF.UST/ust_service command failed with: %s",
+                                 combined_lower[:500])
+                # Additional detail for DF.5GS failures
+                if ('select df.5gs' in combined_lower or 'df5gs' in combined_lower or
+                    '6a82' in combined_lower):
+                    logger.warning("[DF.5GS-ERROR] DF.5GS selection or command failed: %s",
                                  combined_lower[:500])
 
         if ok:
