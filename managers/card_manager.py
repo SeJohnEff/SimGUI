@@ -2126,6 +2126,7 @@ class CardManager:
             'select DF.5GS',
             'select EF.SUCI_Calc_Info',
             f"update_binary_decoded '{payload}'",
+            'read_binary_decoded',
         ]
 
     @staticmethod
@@ -2313,7 +2314,7 @@ class CardManager:
                 logger.info("[PROGRAM-SHELL-SUCI] stderr (first 5000 chars):\n%s", stderr[:5000])
             # Parse and log EF.UST read_binary_decoded output (service table state)
             if stdout and 'read_binary_decoded' in cmd_str.lower():
-                # Extract the last JSON block (should be the post-write EF.UST state)
+                # Extract all JSON blocks (EF.UST and DF.5GS/EF.SUCI_Calc_Info)
                 lines = stdout.split('\n')
                 json_blocks = []
                 current_block = []
@@ -2326,7 +2327,17 @@ class CardManager:
                         current_block = []
                     elif current_block:
                         current_block.append(line)
-                if json_blocks:
+
+                # Log EF.UST state (second-to-last JSON block if HNET_PUBKEY present)
+                if json_blocks and 'HNET_PUBKEY' in fields_written:
+                    if len(json_blocks) >= 2:
+                        logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[-2][:1000])
+                    logger.info("[HNET_PUBKEY-STATE] SUCI Calc Info state after write:\n%s", json_blocks[-1][:1000])
+                    # Verify hnet_pubkey is present in the output
+                    last_json = json_blocks[-1]
+                    if 'hnet_pubkey' in last_json.lower():
+                        logger.info("[HNET_PUBKEY-VERIFY] HNET_PUBKEY successfully written to DF.5GS/EF.SUCI_Calc_Info")
+                elif json_blocks:
                     logger.info("[EF.UST-STATE] Service table state after write:\n%s", json_blocks[-1][:1000])
             # Check for errors in EF.UST or SUCI_Calc_Info writes
             combined_lower = (stdout + stderr).lower() if (stdout or stderr) else ''
