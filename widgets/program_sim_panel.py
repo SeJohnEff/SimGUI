@@ -101,12 +101,13 @@ class ProgramSIMPanel(QWidget):
     def __init__(self, parent=None, card_manager: CardManager = None, *,
                  state_manager: Optional[StateManager] = None,
                  last_read_data: Optional[dict] = None,
-                 ns_manager=None, card_watcher=None, **kwargs):
+                 ns_manager=None, card_watcher=None, settings=None, **kwargs):
         super().__init__(parent)
         self._cm = card_manager
         self.state_manager = state_manager
         self._ns_manager = ns_manager
         self._card_watcher = card_watcher
+        self._settings = settings
         self._last_browse_dir: Optional[str] = None
         self._csv = CSVManager()
         self._last_read_data = last_read_data if last_read_data is not None else {}
@@ -331,15 +332,13 @@ class ProgramSIMPanel(QWidget):
         self._sticky_result_iccid = None
 
     def _get_hnet_pubkey(self) -> str:
-        """Get HNET_PUBKEY from settings manager (canonical source).
+        """Get HNET_PUBKEY from canonical settings manager.
 
         HNET_PUBKEY is ONLY managed via SUCI Configuration dialog,
-        stored in settings — it is not a form field.
+        stored in the same settings_manager instance used app-wide.
         """
-        if hasattr(self, '_cm') and self._cm:
-            settings_mgr = getattr(self._cm, 'settings_manager', None)
-            if settings_mgr:
-                return settings_mgr.get('suci_hnet_pubkey', '').strip()
+        if self._settings:
+            return self._settings.get('suci_hnet_pubkey', '').strip()
         return ''
 
     def _handle_suci_for_card_type(self, card_info: CardInfo) -> None:

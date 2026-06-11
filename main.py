@@ -445,7 +445,8 @@ class SimGUIApp(QMainWindow):
             state_manager=self.state_manager,
             last_read_data=self.last_read_data,
             ns_manager=self._ns_manager,
-            card_watcher=self._card_watcher)
+            card_watcher=self._card_watcher,
+            settings=self._settings)
         self._program_panel.on_card_programmed_callback = self._on_card_programmed
         self._tabs.addTab(self._program_panel, "Program SIM")
 
