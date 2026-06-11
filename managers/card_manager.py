@@ -1054,9 +1054,13 @@ class CardManager:
         'sw: 6f00',           # Generic "no precise diagnosis"
         'sw: 6982',           # Security status not satisfied
         'sw: 6983',           # Auth method blocked (permanent)
+        'sw: 6a82',           # File not found (EF.UST, etc.)
+        'sw: 6a83',           # Record not found in linear fixed file
         'got 6f00',           # "Expected 9000 and got 6f00"
         'got 6982',           # "Expected 9000 and got 6982"
         'got 6983',           # "Expected 9000 and got 6983"
+        'got 6a82',           # "Expected 9000 and got 6a82" (file not found)
+        'got 6a83',           # "Expected 9000 and got 6a83" (record not found)
         'failed to verify',   # pySim user-message for verify_adm failure
         'tries left',         # "N tries left" suffix in verify failure output
     )
@@ -2249,7 +2253,9 @@ class CardManager:
             # deactivate service 125 (legacy mode off). This enables 5G SUCI
             # privacy if the card also has HNET_PUBKEY configured.
             suci_enabled = changed['SUCI'].lower() in ('true', 'yes', '1', 'enabled')
-            commands.extend(self._pysim_write_suci(suci_enabled))
+            ust_commands = self._pysim_write_suci(suci_enabled)
+            logger.info("[EF.UST-PROGRAM] SUCI=%s commands=%s", suci_enabled, ust_commands)
+            commands.extend(ust_commands)
             fields_written.append('SUCI')
 
         if 'HNET_PUBKEY' in changed and self.card_type == CardType.SJA5:
@@ -2295,16 +2301,25 @@ class CardManager:
 
         logger.info("[PROGRAM-SHELL] pySim-shell returned ok=%s stdout_len=%d stderr_len=%d",
                     ok, len(stdout or ''), len(stderr or ''))
-        if 'HNET_PUBKEY' in fields_written:
-            # Look for the update_binary_decoded response in stdout
+        if 'SUCI' in fields_written or 'HNET_PUBKEY' in fields_written:
+            # Log EF.UST and HNET_PUBKEY programming output in detail
             if stdout:
-                logger.info("[PROGRAM-SHELL-SUCI] stdout (first 500 chars):\n%s", stdout[:500])
+                logger.info("[PROGRAM-SHELL-SUCI] stdout (first 1000 chars):\n%s", stdout[:1000])
             if stderr:
-                logger.info("[PROGRAM-SHELL-SUCI] stderr (first 500 chars):\n%s", stderr[:500])
-            # Check for common error patterns
+                logger.info("[PROGRAM-SHELL-SUCI] stderr (first 1000 chars):\n%s", stderr[:1000])
+            # Check for errors in EF.UST or SUCI_Calc_Info writes
             combined_lower = (stdout + stderr).lower() if (stdout or stderr) else ''
+            if 'ef.ust' in combined_lower:
+                logger.info("[EF.UST-DEBUG] pySim-shell processed EF.UST commands")
+            if 'ust_service' in combined_lower:
+                logger.info("[EF.UST-DEBUG] pySim-shell ust_service output detected")
             if 'error' in combined_lower or 'failed' in combined_lower or 'exception' in combined_lower:
                 logger.warning("[PROGRAM-SHELL-SUCI] ERROR PATTERN DETECTED in output")
+                # Additional detail for EF.UST failures
+                if ('select ef.ust' in combined_lower or 'ust_service' in combined_lower or
+                    '6a82' in combined_lower or '6a83' in combined_lower):
+                    logger.warning("[EF.UST-ERROR] EF.UST/ust_service command failed with: %s",
+                                 combined_lower[:500])
 
         if ok:
             summary = ', '.join(fields_written)
