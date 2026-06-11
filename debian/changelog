@@ -1,3 +1,15 @@
+simgui (0.7.1) stable; urgency=medium
+
+  * VERIFIED: SUCI card works on iPhone — full 5G stand-alone support with
+    home network public key programming confirmed on iOS device
+  * Fixed: HNET_PUBKEY warning now correctly reads from persistent settings
+    (canonical source), not from form fields; warning no longer appears when
+    key is configured via File > SUCI Configuration dialog
+  * Architecture: ProgramSIMPanel now receives settings_manager instance from
+    main.py, eliminating stale state and ensuring runtime synchronization
+
+ -- John Fornehed <john.fornehed@gmail.com>  Wed, 11 Jun 2026 00:00:00 +0000
+
 simgui (0.7.0) stable; urgency=medium
 
   * SUCI (Subscription Concealed Identifier) support for 5G privacy on
