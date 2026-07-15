@@ -87,10 +87,8 @@ docs/                      # Diátaxis documentation
 - Blank gialersim cards have no ICCID or IMSI, but may have `ACC: ffff` from pySim-read
 
 ### Programming Flows (v0.5.32+)
-- **ALL card types** use `pySim-prog` as the single write engine (`_program_via_pysim_prog`).
-  - **Non-empty cards (SJA5)**: delta-write — only changed fields sent to pySim-prog; ICCID excluded (factory-assigned). pySim-prog uses `-t sysmoISIM-SJA5 -A <hex_ADM1>`.
-  - **Empty/gialersim cards**: full write — all non-empty fields sent to pySim-prog. Uses `-t gialersim -a <ASCII_ADM1>`. ICCID written from CSV.
-- **pySim-shell** is used ONLY for authentication (`_run_pysim_shell_safe`) — never for writes.
+- **Empty/gialersim cards**: Use `pySim-prog` with `-t gialersim -a <ASCII_ADM1>`. Full write of all non-empty fields (ICCID, IMSI, Ki, OPc, ACC, SPN, FPLMN) in a single invocation. ADM1 is stored during authentication; pySim-prog handles the actual authentication internally.
+- **Non-empty cards (SJA5/SJA2)**: Use `pySim-shell` for field writes (delta-write — only changed fields). Authenticate first via `pySim-shell -A <hex_ADM1>`, then write fields via pySim-shell commands (select, update_binary_decoded). ICCID is factory-assigned and excluded from writes.
 - **NEVER** use `-t auto` for gialersim — it causes CHV 0x0A VERIFY which fails with 6f00.
 - **NEVER** change ICCID on non-empty cards.
 - Ki and OPc share the same EF — if either changes, both are written together.
