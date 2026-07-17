@@ -246,7 +246,23 @@ def _ensure_session(rt: Any, reader_index: int) -> None:
 
 
 def reset_session() -> None:
-    """Drop the held PCSC transport. Used by tests and on worker shutdown."""
+    """Drop the held PCSC transport. Used by tests and on worker shutdown.
+
+    Explicitly ``disconnect()`` the link before dropping it. pySim opens the
+    reader in EXCLUSIVE mode; merely nulling the reference leaves that
+    exclusive PCSC handle open until Python GC finalizes the object
+    (non-deterministic). If the next poll's ``connect()`` runs before GC, it
+    collides with the still-open exclusive handle and pySim raises a transient
+    ``ProtocolError`` — which the detect path then mis-reads as a card removal,
+    causing detection to flap. Disconnecting here releases the handle
+    immediately so the next connect is clean.
+    """
+    sl = _session.get("sl")
+    if sl is not None:
+        try:
+            sl.disconnect()
+        except Exception:
+            pass
     _session["sl"] = None
     _session["scc"] = None
     _session["reader_index"] = None
