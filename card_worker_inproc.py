@@ -527,9 +527,13 @@ def detect_inprocess(reader_index: int = 0) -> dict:
     _sys.stderr.write(f"[DETECT] fields={list(fields.keys())}\n")
     _sys.stderr.flush()
 
-    blank = (card_type_str == "gialersim") or (
-        not fields.get("ICCID") and not fields.get("IMSI")
-    )
+    # "blank" means the card carries no identity yet — no ICCID and no IMSI
+    # (state-machine.md: BLANK == card inserted but no ICCID). It must reflect
+    # the actual card contents, NOT the card type: a gialersim that has already
+    # been programmed has a real ICCID/IMSI and is not blank. Forcing gialersim
+    # blank made the watcher discard its ICCID (on_card_unknown("")), leaving
+    # the ICCID field empty in the GUI for programmed gialersim cards.
+    blank = not fields.get("ICCID") and not fields.get("IMSI")
     return {
         "ok": True,
         "blank": blank,
