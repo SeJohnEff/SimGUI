@@ -1,3 +1,16 @@
+simgui (0.7.2) stable; urgency=medium
+
+  * Fixed: gialersim detection no longer flaps between detected and removed.
+    reset_session() now disconnects the EXCLUSIVE PCSC link before dropping it;
+    previously the lingering handle made the next connect() raise a transient
+    ProtocolError that the detect path mis-read as a card removal. SJA5 was
+    unaffected and its behavior is unchanged.
+  * Fixed: a programmed gialersim card's ICCID now populates in the GUI. The
+    detect path no longer forces blank=True for gialersim; blank now reflects
+    actual card contents (no ICCID and no IMSI), per state-machine.md.
+
+ -- John Fornehed <john.fornehed@gmail.com>  Fri, 17 Jul 2026 11:19:12 +0000
+
 simgui (0.7.1) stable; urgency=medium
 
   * VERIFIED: SUCI card works on iPhone — full 5G stand-alone support with
