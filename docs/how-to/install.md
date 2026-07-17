@@ -113,10 +113,27 @@ Log out and back in for the group change to take effect.
 ## macOS Installation
 
 **Applies to:** macOS 12 (Monterey) or later (Intel or Apple Silicon)  
-**Current distribution:** Source-based. A packaged `.app` is in development.  
-**Time required:** 10–15 minutes
+**Current distribution:** Packaged `.pkg` installer (recommended) or from source.  
+**Time required:** 2 minutes (`.pkg`) / 10–15 minutes (from source)
 
-### Prerequisites
+### Install with the `.pkg` installer (recommended)
+
+Download `SimGUI-v<VERSION>.pkg` from the [Releases page](https://github.com/SeJohnEff/SimGUI/releases), then:
+
+```bash
+sudo installer -pkg SimGUI-v<VERSION>.pkg -target /
+sudo xattr -dr com.apple.quarantine /Applications/SimGUI.app 2>/dev/null || true
+```
+
+Or double-click the `.pkg` in Finder to run the graphical installer, then run the `xattr`
+line above (the package is unsigned, so macOS Gatekeeper quarantines it on first launch).
+
+This installs `SimGUI.app` to `/Applications` with a bundled Python, pySim, and PCSC
+support — no prerequisites and no environment variables. Launch it from Applications or with
+`open /Applications/SimGUI.app`. A USB PCSC-compatible card reader is required for all SIM
+card operations (see [PCSC Reader Detection](#pcsc-reader-detection) below).
+
+### Prerequisites (from source)
 
 - macOS 12 (Monterey) or later
 - Python 3.9 or later ([python.org](https://python.org))
