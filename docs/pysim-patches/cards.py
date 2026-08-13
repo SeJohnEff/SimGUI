@@ -1602,6 +1602,22 @@ class GialerSim(UsimCard):
         self.set_apdu_parameter('00', '0004')
         # Authenticate
         self._scc.verify_chv(0xc, h2b('3834373936313533'))
+        # SimGUI patch: these cards require a SECOND ADM VERIFY (ref 0x0B) for
+        # writes to MF/0001 (Ki) and MF/6002 (OPc) to actually commit. With
+        # 0x0C alone, UPDATE returns 9000 but the write is silently discarded
+        # (USIM AUTHENTICATE still verifies against the OLD Ki). Evidence
+        # (same card, same payload):
+        #   0x0C only           -> UPDATE Ki 9000, NOT committed
+        #   0x0B only           -> UPDATE Ki 6982 (no priv)
+        #   both 0x0C + 0x0B    -> UPDATE Ki 9000, committed (AUTHENTICATE ok)
+        # Tolerant: card variants without ref 0x0B raise here — log and
+        # continue so they still program. The key is correct, so no wrong-key
+        # retry is ever burned against an existing counter.
+        try:
+            self._scc.verify_chv(0xb, h2b('3838383838383838'))
+        except Exception as e:
+            print("GialerSim: ADM 0x0B VERIFY failed (%s) — continuing; "
+                  "Ki/OPc writes may not commit on this card variant" % e)
         for handler in self._program_handlers:
             if p.get(handler) is not None:
                 self._program_handlers[handler](p[handler])

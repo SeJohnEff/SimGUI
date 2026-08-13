@@ -1,3 +1,24 @@
+simgui (0.7.3) stable; urgency=medium
+
+  * Fixed: gialersim Ki/OPc writes are no longer silently discarded. These
+    cards require TWO ADM VERIFYs — ref 0x0C (satisfies the EF access rule) AND
+    ref 0x0B (personalisation privilege that makes the write commit). pySim's
+    GialerSim class presented only 0x0C, so UPDATE of MF/0001 (Ki) and MF/6002
+    (OPc) returned 9000 while the card kept its previous keys — the resulting
+    SIM failed Milenage authentication (MAC failure 9862) against the keys that
+    were "written". Evidence (same card, same payload):
+        0x0C only        -> UPDATE Ki 9000, NOT committed
+        0x0B only        -> UPDATE Ki 6982 (no privilege)
+        both 0x0C + 0x0B -> UPDATE Ki 9000, committed (USIM AUTHENTICATE ok)
+    A second VERIFY of ADM 0x0B is now issued immediately after 0x0C, before any
+    Ki/OPc write. It is tolerant: card variants without ref 0x0B log a warning
+    and continue. The patch is applied to the bundled pySim by install.sh and
+    install-macos.sh so it survives a clean rebuild. Note: UPDATE returning 9000
+    does NOT prove the write committed — a USIM AUTHENTICATE self-check is
+    tracked as follow-up (docs/TODO.md).
+
+ -- John Fornehed <john.fornehed@gmail.com>  Thu, 13 Aug 2026 12:50:13 +0000
+
 simgui (0.7.2) stable; urgency=medium
 
   * Fixed: gialersim detection no longer flaps between detected and removed.

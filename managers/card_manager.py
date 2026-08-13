@@ -1926,6 +1926,14 @@ class CardManager:
             return True, msg
 
         # Ki/OPc-only write: nothing was verified by read-back \u2014 pending
+        # TODO(gialersim-selfcheck): Ki/OPc are READ=NEVER (EF_ARR record 0x13),
+        # so we cannot read them back. A pySim-prog UPDATE returning 9000 does
+        # NOT prove the write committed (see v0.7.3 dual-ADM fix \u2014 writes used to
+        # return 9000 yet be silently discarded). To positively confirm the
+        # write, add an OFFLINE USIM AUTHENTICATE self-check: after programming,
+        # send RAND+AUTN computed from the Ki/OPc just written and confirm the
+        # card returns 'DB' (success) or 'DC' (sync failure) \u2014 both prove the MAC
+        # verified against the new keys. Do NOT attempt to read Ki/OPc directly.
         if not report.verified_fields and report.unreadable_fields:
             msg = (
                 f"Card programmed: {summary}\n"

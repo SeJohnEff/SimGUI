@@ -117,6 +117,53 @@ else
     echo "Patch target not found at $GIALERSIM_PATCH_FILE — skipping (pySim may use a different layout)."
 fi
 
+# Apply GialerSim dual-ADM (0x0B) VERIFY patch
+# These cards require a SECOND ADM VERIFY (ref 0x0B) in addition to the
+# existing 0x0C for writes to MF/0001 (Ki) and MF/6002 (OPc) to actually
+# commit. With 0x0C alone, UPDATE returns 9000 but the write is silently
+# discarded (USIM AUTHENTICATE still verifies against the OLD Ki).
+echo ""
+echo "Checking for GialerSim dual-ADM (0x0B) VERIFY patch..."
+if [ -f "$GIALERSIM_PATCH_FILE" ]; then
+    if grep -q "verify_chv(0xb" "$GIALERSIM_PATCH_FILE"; then
+        echo "GialerSim 0x0B VERIFY patch already applied."
+    else
+        echo "Applying GialerSim dual-ADM (0x0B) VERIFY patch..."
+        "$PYTHON" - "$GIALERSIM_PATCH_FILE" <<'PYEOF'
+import sys
+path = sys.argv[1]
+try:
+    text = open(path).read()
+    anchor = "        self._scc.verify_chv(0xc, h2b('3834373936313533'))\n"
+    block = (
+        "        # SimGUI patch: dual-ADM — writes to MF/0001 (Ki) and MF/6002\n"
+        "        # (OPc) only commit if ADM ref 0x0B is also verified. 0x0C alone\n"
+        "        # returns 9000 on UPDATE but silently discards the write.\n"
+        "        try:\n"
+        "            self._scc.verify_chv(0xb, h2b('3838383838383838'))\n"
+        "        except Exception as e:\n"
+        "            print(\"GialerSim: ADM 0x0B VERIFY failed (%s) — continuing; \"\n"
+        "                  \"Ki/OPc writes may not commit on this card variant\" % e)\n"
+    )
+    if anchor in text and "verify_chv(0xb" not in text:
+        open(path, 'w').write(text.replace(anchor, anchor + block, 1))
+        print("Patch applied.")
+    else:
+        print("Patch skipped (already applied or anchor not found).")
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+        if grep -q "verify_chv(0xb" "$GIALERSIM_PATCH_FILE"; then
+            echo "GialerSim 0x0B VERIFY patch applied successfully."
+        else
+            echo "Warning: GialerSim 0x0B VERIFY patch could not be applied — Ki/OPc writes to blank cards may be silently discarded."
+        fi
+    fi
+else
+    echo "Patch target not found at $GIALERSIM_PATCH_FILE — skipping (pySim may use a different layout)."
+fi
+
 # Apply PCSC protocol reconnect patch
 # pySim's connect() calls setProtocol() on an already-active connection.
 # On macOS, PCSC.framework rejects this with SCARD_E_PROTO_MISMATCH.

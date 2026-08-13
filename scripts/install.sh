@@ -167,6 +167,47 @@ PYEOF
                 warn "GialerSim SPN patch could not be applied — SPN writes to blank cards will be silently skipped."
             fi
         fi
+
+        # Apply GialerSim dual-ADM (0x0B) VERIFY patch if not already applied.
+        # These cards require a SECOND ADM VERIFY (ref 0x0B) in addition to the
+        # existing 0x0C for writes to MF/0001 (Ki) and MF/6002 (OPc) to actually
+        # commit. With 0x0C alone, UPDATE returns 9000 but the write is silently
+        # discarded (USIM AUTHENTICATE still verifies against the OLD Ki).
+        if grep -q "verify_chv(0xb" "$PYSIM_CARDS"; then
+            info "GialerSim 0x0B VERIFY patch already applied."
+        else
+            info "Applying GialerSim dual-ADM (0x0B) VERIFY patch..."
+            python3 - "$PYSIM_CARDS" <<'PYEOF'
+import sys
+path = sys.argv[1]
+try:
+    text = open(path).read()
+    anchor = "        self._scc.verify_chv(0xc, h2b('3834373936313533'))\n"
+    block = (
+        "        # SimGUI patch: dual-ADM — writes to MF/0001 (Ki) and MF/6002\n"
+        "        # (OPc) only commit if ADM ref 0x0B is also verified. 0x0C alone\n"
+        "        # returns 9000 on UPDATE but silently discards the write.\n"
+        "        try:\n"
+        "            self._scc.verify_chv(0xb, h2b('3838383838383838'))\n"
+        "        except Exception as e:\n"
+        "            print(\"GialerSim: ADM 0x0B VERIFY failed (%s) — continuing; \"\n"
+        "                  \"Ki/OPc writes may not commit on this card variant\" % e)\n"
+    )
+    if anchor in text and "verify_chv(0xb" not in text:
+        open(path, 'w').write(text.replace(anchor, anchor + block, 1))
+        print("Patch applied.")
+    else:
+        print("Patch skipped (already applied or anchor not found).")
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+            if grep -q "verify_chv(0xb" "$PYSIM_CARDS"; then
+                info "GialerSim 0x0B VERIFY patch applied successfully."
+            else
+                warn "GialerSim 0x0B VERIFY patch could not be applied — Ki/OPc writes to blank cards may be silently discarded."
+            fi
+        fi
     fi
 fi
 

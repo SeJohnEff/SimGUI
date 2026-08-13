@@ -186,8 +186,9 @@ pySim-prog's `-n` flag is silently ignored for gialersim cards because
 'name': lambda name: self.update_spn(name=name, show_in_hplmn=True, hide_in_oplmn=False),
 ```
 
-**This patch must be applied manually after every pySim install/update.**
-The install script (`scripts/install.sh`) should ideally apply this automatically.
+**This patch is applied automatically after every pySim clone** by both
+`scripts/install.sh` (Ubuntu) and `scripts/install-macos.sh` (macOS), idempotent
+and marker-guarded. See the dual-ADM section below for the shared patch mechanism.
 
 **Why CHV 0x0A VERIFY fails on gialersim:**
 - Standard ADM1 auth uses CHV 0x0A — gialersim cards reject this with SW 6f00
@@ -195,6 +196,52 @@ The install script (`scripts/install.sh`) should ideally apply this automaticall
 - pySim-prog with `-t gialersim` uses the correct internal auth sequence
 - All gialersim field writes (ICCID, IMSI, Ki, OPc, ACC, SPN, FPLMN) must
   go through pySim-prog, not pySim-shell
+
+## pySim Patch — GialerSim Dual-ADM (0x0B) VERIFY (v0.7.3)
+
+**File:** `/opt/pysim/pySim/legacy/cards.py` (Ubuntu) / `~/pysim/pySim/legacy/cards.py` (macOS)
+
+**Problem:** gialersim cards require **TWO** ADM VERIFYs for Ki/OPc writes to
+commit. pySim's `GialerSim.program()` presents only ref `0x0C`
+(`3834373936313533`), which satisfies the EF access rule (ARR 0x13) — but the
+actual write of MF/0001 (Ki) and MF/6002 (OPc) only *commits* if ref `0x0B`
+(`3838383838383838`, personalisation privilege) is **also** verified. With
+`0x0C` alone, `UPDATE` returns `9000` but the write is silently discarded; the
+card keeps its previous Ki and the SIM fails Milenage auth (MAC failure `9862`).
+
+Evidence (same card, same payload):
+| ADM presented        | UPDATE Ki | committed |
+|----------------------|-----------|-----------|
+| 0x0C only (old)      | 9000      | NO        |
+| 0x0B only            | 6982      | no        |
+| both 0x0C + 0x0B     | 9000      | YES       |
+
+**Fix:** In `GialerSim.program()`, immediately after the existing
+`self._scc.verify_chv(0xc, h2b('3834373936313533'))`, add a **tolerant** second
+VERIFY (wrapped so card variants lacking ref 0x0B log and continue):
+```python
+try:
+    self._scc.verify_chv(0xb, h2b('3838383838383838'))
+except Exception as e:
+    print("GialerSim: ADM 0x0B VERIFY failed (%s) — continuing; "
+          "Ki/OPc writes may not commit on this card variant" % e)
+```
+Both VERIFYs must fire **before** the `_program_handlers` loop (which is what
+writes Ki/OPc). `verify_chv()` uses the *correct* key, so no wrong-key retry is
+ever burned against an existing counter.
+
+**Important:** `UPDATE` returning `9000` does NOT prove the write committed. A
+positive confirmation (offline USIM AUTHENTICATE self-check) is tracked in
+`docs/TODO.md` (`TODO(gialersim-selfcheck)`). Do NOT read Ki/OPc back — they are
+READ=NEVER.
+
+**Both install scripts apply the pySim patches automatically** after cloning
+(idempotent, marker-guarded): `scripts/install.sh` (Ubuntu) and
+`scripts/install-macos.sh` (macOS) apply the SPN `'name'` handler and this
+dual-ADM 0x0B VERIFY. `docs/pysim-patches/cards.py` is a reference snapshot of
+the fully-patched file. Because pySim is re-cloned on a clean install, the patch
+must live in the install scripts — a raw edit to the clone alone does not survive
+a rebuild.
 
 ## Testing
 
