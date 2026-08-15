@@ -83,7 +83,7 @@ Read-back verification is impossible; `9000` on the write proves nothing.
 ## Verification
 
 The only way to confirm keys committed is to make the card authenticate.
-`auth_validate_harness.py` sends `AUTHENTICATE` (INS `88`, P2 `81`) in
+`tools/auth_validate_harness.py` sends `AUTHENTICATE` (INS `88`, P2 `81`) in
 `ADF_USIM` with an AUTN computed from the expected Ki/OPc:
 
 * `DB …` success, or `DC …` sync failure → **MAC verified, keys correct**

@@ -454,7 +454,8 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
   failure) proves the card's MAC verified against the newly written keys. This
   would promote the native path's `WRITE_OK_PENDING` outcome to
   `WRITE_OK_VERIFIED`. **Reference implementation:**
-  `~/projects/sim_snippet/auth_validate_harness.py`. Do NOT attempt to read
+  `tools/auth_validate_harness.py` (in-repo; carries no embedded keys — supply
+  Ki/OPc via `--ki`/`--opc` or an uncommitted `--csv`). Do NOT attempt to read
   Ki/OPc directly.
 
 - [ ] **`TODO(gialersim-spn-fplmn)` — SPN/FPLMN on the native gialersim path** —

@@ -251,7 +251,7 @@ snapshot.
 **Verification:** Ki/OPc are READ=NEVER (EF_ARR `0x13`); a `9000` proves
 nothing. ICCID/IMSI are confirmed by read-back; positive key confirmation
 requires an offline USIM AUTHENTICATE self-check (`TODO(gialersim-selfcheck)`,
-reference: `~/projects/sim_snippet/auth_validate_harness.py`).
+reference: `tools/auth_validate_harness.py`).
 
 **Routing:** `CardManager.program_card()` routes `CardType.GIALERSIM` to
 `_program_gialersim_native()` (a thin adapter) → `managers/gialersim.py`.
