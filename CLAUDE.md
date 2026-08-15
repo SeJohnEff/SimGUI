@@ -258,6 +258,20 @@ reference: `tools/auth_validate_harness.py`).
 Non-gialersim empty cards still use pySim-prog; non-empty cards still use
 pySim-shell. sysmocom (SJA5/SJA2) paths are untouched.
 
+**Reader ownership (macOS worker):** the card worker subprocess
+(`card_worker_inproc.py`) holds the PCSC card in **EXCLUSIVE** mode via its
+long-lived `_session["sl"]`. Any in-process connect (our native
+`gialersim.program_reader`, or a pySim-shell subprocess) hits **Sharing
+Violation (0x8010000B)** unless the worker's handle is released first. So
+`_program_gialersim_native()` calls `self._worker_client.release_session()`
+before connecting — exactly as the pySim-shell path does. The watcher
+re-detects the card on its next poll. `program_reader` also retries the connect
+(5×) with a settle delay for good measure.
+
+**Connect must present the fixed key at 0x0C, and it is retried:** connect uses
+T=0 (GSM class answers SELECT with `9FXX`), a fresh connection object per
+attempt, and surfaces the real PC/SC error on final failure.
+
 ## Testing
 
 - Framework: pytest

@@ -350,6 +350,32 @@ class TestRouting:
         assert result.outcome == ProgramOutcome.WRITE_OK_PENDING
         assert "Ki" in result.written_only_fields
 
+    def test_native_releases_worker_session_before_connect(self):
+        """The card worker holds the PCSC card EXCLUSIVE; the native path must
+        release it (release_session) BEFORE connecting, or the connect fails with
+        Sharing Violation (0x8010000B) — the field-reported bug."""
+        cm = _gialersim_manager()
+        wc = MagicMock()
+        wc.is_ready.return_value = True
+        cm._worker_client = wc
+        order = []
+        wc.release_session.side_effect = lambda *a, **k: order.append("release")
+
+        def _prog(*a, **k):
+            order.append("program")
+            return (True, True)
+
+        with patch.object(gialersim, "program_reader", side_effect=_prog), \
+             patch("managers.card_manager._init_pyscard", return_value=True), \
+             patch("managers.card_manager._smartcard_readers",
+                   return_value=[MagicMock()]):
+            ok, msg, result = cm.program_card(self._card_data(), original_data={})
+
+        assert ok is True
+        wc.release_session.assert_called_once()
+        # Release must happen BEFORE the connect/program.
+        assert order == ["release", "program"]
+
     def test_native_forwards_fixed_recipe_fields(self):
         cm = _gialersim_manager()
         with patch.object(gialersim, "program_reader",

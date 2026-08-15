@@ -2018,6 +2018,19 @@ class CardManager:
                 skipped_fields=skipped)
             return False, msg
 
+        # Release the in-process PCSC transport before connecting. The card
+        # worker holds an EXCLUSIVE PCSC lock via _session["sl"]; without
+        # releasing it, our own connect hits Sharing Violation (0x8010000B) —
+        # exactly as the pySim-shell path does before spawning its subprocess.
+        # The watcher re-detects the card on its next poll.
+        _wc = getattr(self, "_worker_client", None)
+        if _wc is not None and _wc.is_ready():
+            try:
+                _wc.release_session()
+                logger.info("[PCSC-RELEASE] in-process session released before gialersim native")
+            except Exception as _exc:
+                logger.warning("[PCSC-RELEASE] release_session failed (non-fatal): %s", _exc)
+
         try:
             rlist = _smartcard_readers()
             if not rlist or self._pcsc_reader_index >= len(rlist):
