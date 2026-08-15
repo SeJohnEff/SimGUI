@@ -374,7 +374,13 @@ def _optional_import_linenos(tree: ast.AST) -> set:
             if is_guard:
                 break
         if is_guard:
-            for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+            # Imports in the try body AND in the except handlers are optional:
+            # the handler is where the fallback import lives
+            # (``except ImportError: from Crypto.Cipher import AES``).
+            guarded_bodies = list(node.body)
+            for handler in node.handlers:
+                guarded_bodies.extend(handler.body)
+            for child in ast.walk(ast.Module(body=guarded_bodies, type_ignores=[])):
                 if isinstance(child, ast.ImportFrom):
                     optional_lines.add(child.lineno)
     return optional_lines

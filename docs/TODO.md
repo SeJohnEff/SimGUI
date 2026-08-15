@@ -441,22 +441,18 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
 
 ## Known Issues (Acceptable / Deferred)
 
-- [ ] **`TODO(gialersim-selfcheck)` — Offline USIM AUTHENTICATE self-check for
-  Ki/OPc (gialersim)** — Ki and OPc are READ=NEVER (EF_ARR record 0x13), so they
-  can never be read back to verify a write. A `9000` on the UPDATE does NOT prove
-  the write committed: pySim's GialerSim class returned `9000` on every key write
-  yet the writes were silently discarded (wrong class + missing algorithm config),
-  and the resulting SIM failed Milenage auth (MAC failure `9862`). SimGUI now
-  programs gialersim natively (`managers/gialersim.py`), which fixes the write —
-  but a positive confirmation is still needed. Add an offline self-check after
-  programming: compute RAND+AUTN from the Ki/OPc just written and send a 3G USIM
-  AUTHENTICATE (INS `88`, P2 `81`) in ADF_USIM; a `DB…` response (or `DC` sync
-  failure) proves the card's MAC verified against the newly written keys. This
-  would promote the native path's `WRITE_OK_PENDING` outcome to
-  `WRITE_OK_VERIFIED`. **Reference implementation:**
-  `tools/auth_validate_harness.py` (in-repo; carries no embedded keys — supply
-  Ki/OPc via `--ki`/`--opc` or an uncommitted `--csv`). Do NOT attempt to read
-  Ki/OPc directly.
+- [x] **`TODO(gialersim-selfcheck)` — Offline USIM AUTHENTICATE self-check for
+  Ki/OPc (gialersim)** — DONE (v0.8.0). Ki/OPc are READ=NEVER (EF_ARR record
+  0x13) so a `9000` on the UPDATE proves nothing (pySim's broken path returned
+  `9000` yet the SIM failed Milenage auth, MAC failure `9862`).
+  `managers/gialersim_selfcheck.py` now runs after a successful native program:
+  it computes RAND+AUTN from the Ki/OPc just written and sends a 3G USIM
+  AUTHENTICATE (INS `88`, P2 `81`) in ADF_USIM. `DB…`/`DC…` (MAC verified)
+  promotes the outcome to `WRITE_OK_VERIFIED`; `9862`/`6300` (wrong keys)
+  demotes it to `WRITE_OK_VERIFICATION_FAILED`; if the check can't run it stays
+  `WRITE_OK_PENDING`. Milenage is self-tested against 3GPP TS 35.208 Test Set 1
+  first. Hardware-validated 2026-08-15 (`DC` = MAC ok). Standalone reference:
+  `tools/auth_validate_harness.py`. Ki/OPc are never read directly.
 
 - [ ] **`TODO(gialersim-spn-fplmn)` — SPN/FPLMN on the native gialersim path** —
   The verified GRSIMWrite capture (`docs/GIALERSIM_PROGRAMMING.md`) covers

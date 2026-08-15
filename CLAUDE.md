@@ -249,9 +249,15 @@ herring** and has been removed from the install scripts and the reference
 snapshot.
 
 **Verification:** Ki/OPc are READ=NEVER (EF_ARR `0x13`); a `9000` proves
-nothing. ICCID/IMSI are confirmed by read-back; positive key confirmation
-requires an offline USIM AUTHENTICATE self-check (`TODO(gialersim-selfcheck)`,
-reference: `tools/auth_validate_harness.py`).
+nothing. ICCID/IMSI are confirmed by read-back; Ki/OPc are confirmed
+automatically by an **offline USIM AUTHENTICATE self-check**
+(`managers/gialersim_selfcheck.py`, run by `_selfcheck_gialersim_keys` right
+after a successful native program): RAND+AUTN computed from the just-written
+keys, `AUTHENTICATE` (INS `88`, P2 `81`) in ADF_USIM; `DB`/`DC` (MAC verified) →
+`WRITE_OK_VERIFIED`, `9862` (wrong keys) → `WRITE_OK_VERIFICATION_FAILED`,
+can't-run → `WRITE_OK_PENDING`. Milenage self-tested vs 3GPP TS 35.208 Set 1.
+The worker session is already released before programming, so the reader is free
+for the check. Standalone reference: `tools/auth_validate_harness.py`.
 
 **Routing:** `CardManager.program_card()` routes `CardType.GIALERSIM` to
 `_program_gialersim_native()` (a thin adapter) → `managers/gialersim.py`.

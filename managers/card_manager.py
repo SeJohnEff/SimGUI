@@ -2077,14 +2077,43 @@ class CardManager:
                 skipped_fields=skipped)
             return False, msg
 
-        # ICCID/IMSI confirmed; Ki/OPc written but structurally unverifiable.
-        # TODO(gialersim-selfcheck): add an offline USIM AUTHENTICATE self-check
-        # (RAND+AUTN from the just-written Ki/OPc; 'DB'/'DC' proves the MAC) to
-        # promote this to WRITE_OK_VERIFIED. Do NOT read Ki/OPc directly.
         self.card_info["ICCID"] = fields["ICCID"]
         self.card_info["IMSI"] = fields["IMSI"]
+
+        # ICCID/IMSI confirmed by read-back. Ki/OPc are READ=NEVER, so confirm
+        # them with an offline USIM AUTHENTICATE self-check: compute RAND+AUTN
+        # from the Ki/OPc just written and check the card's MAC verifies.
+        #   verified True  -> keys committed        -> WRITE_OK_VERIFIED
+        #   verified False -> keys did NOT commit    -> WRITE_OK_VERIFICATION_FAILED
+        #   verified None  -> could not run the check-> WRITE_OK_PENDING
+        verified, detail = self._selfcheck_gialersim_keys(fields)
+
+        if verified is True:
+            msg = ("Card programmed and verified — ICCID, IMSI (read-back); "
+                   "Ki, OPc (USIM AUTHENTICATE).")
+            logger.info("gialersim self-check PASSED: %s", detail)
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFIED, message=msg,
+                verified_fields=("ICCID", "IMSI", "Ki", "OPc"),
+                skipped_fields=skipped)
+            return True, msg
+
+        if verified is False:
+            msg = ("Card programmed but Ki/OPc FAILED verification "
+                   "(USIM AUTHENTICATE rejected the written keys). "
+                   "Do NOT deploy this card.\n" + detail)
+            logger.error("gialersim self-check FAILED: %s", detail)
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED, message=msg,
+                verified_fields=("ICCID", "IMSI"),
+                failed_fields=("Ki", "OPc"),
+                skipped_fields=skipped)
+            return False, msg
+
+        # verified is None — self-check could not run; leave keys pending.
+        logger.info("gialersim self-check skipped/unavailable: %s", detail)
         msg = ("Card programmed — verified: ICCID, IMSI; written: Ki, OPc\n"
-               "(Ki/OPc are READ=NEVER — confirm on the network via "
+               "(Ki/OPc self-check unavailable — confirm on the network via "
                "authentication.)")
         self._last_program_result = ProgramResult(
             outcome=ProgramOutcome.WRITE_OK_PENDING, message=msg,
@@ -2092,6 +2121,30 @@ class CardManager:
             written_only_fields=("Ki", "OPc"),
             skipped_fields=skipped)
         return True, msg
+
+    def _selfcheck_gialersim_keys(self, fields: Dict[str, str]
+                                  ) -> Tuple[Optional[bool], str]:
+        """Confirm the just-written Ki/OPc via offline USIM AUTHENTICATE.
+
+        Thin adapter over ``managers/gialersim_selfcheck.py``. Best-effort:
+        returns ``(None, reason)`` if it cannot run (no reader, no crypto,
+        transport error) so programming stays "pending" rather than failing.
+        The card worker session was already released before programming, so the
+        reader is free for this check.
+        """
+        ki = fields.get("Ki")
+        opc = fields.get("OPc")
+        if not ki or not opc:
+            return None, "no Ki/OPc to verify"
+        try:
+            from managers import gialersim_selfcheck
+            rlist = _smartcard_readers()
+            if not rlist or self._pcsc_reader_index >= len(rlist):
+                return None, "reader unavailable for self-check"
+            reader = rlist[self._pcsc_reader_index]
+            return gialersim_selfcheck.verify_keys_on_reader(reader, ki, opc)
+        except Exception as exc:  # noqa: BLE001 — never let the check crash programming
+            return None, "self-check error: %s" % exc
 
     # ------------------------------------------------------------------
     # pySim-shell write command builders (non-empty / SJA5 cards)

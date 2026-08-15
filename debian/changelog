@@ -18,11 +18,15 @@ simgui (0.8.0) stable; urgency=medium
     present; the "88888888 at 0x0B" observation was the *contents* of a key
     file, not a second credential. The install scripts and the pySim reference
     snapshot no longer apply it.
-  * Ki/OPc remain READ=NEVER, so a successful native write is reported as
-    "verification pending" — ICCID and IMSI are confirmed by read-back; the
-    keys can only be positively confirmed by an offline USIM AUTHENTICATE
-    self-check (tracked as TODO(gialersim-selfcheck)). A 9000 on a Ki write is
-    never treated as proof of commit.
+  * Ki/OPc are READ=NEVER, so a 9000 on the write proves nothing. After a
+    successful native program, an offline USIM AUTHENTICATE self-check
+    (managers/gialersim_selfcheck.py) now confirms them positively: it computes
+    RAND+AUTN from the just-written Ki/OPc and checks the card's MAC verifies
+    (Milenage self-tested against 3GPP TS 35.208 Test Set 1). A pass (DB/DC)
+    reports WRITE_OK_VERIFIED; a reject (9862) reports
+    WRITE_OK_VERIFICATION_FAILED ("do not deploy this card"); if the check
+    cannot run it stays WRITE_OK_PENDING. Hardware-validated on a programmed
+    card. tools/auth_validate_harness.py is the standalone reference.
   * UI: the ADM1 field is now greyed out and shows "Hardcoded" when a gialersim
     card is detected — these cards present a fixed built-in ADM key, so the
     entered ADM1 is never used. This also removes any impression that a wrong

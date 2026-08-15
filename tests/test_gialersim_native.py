@@ -341,12 +341,45 @@ class TestRouting:
              patch("managers.card_manager._init_pyscard", return_value=True), \
              patch("managers.card_manager._smartcard_readers",
                    return_value=[MagicMock()]), \
+             patch.object(cm, "_selfcheck_gialersim_keys",
+                          return_value=(None, "n/a")), \
              patch.object(cm, "_run_pysim_prog") as pysim:
             ok, msg, result = cm.program_card(self._card_data(), original_data={})
         assert ok is True
         native.assert_called_once()
         pysim.assert_not_called()
-        # Ki/OPc unverifiable -> pending, not verified.
+        # Self-check unavailable -> pending, not verified.
+        assert result.outcome == ProgramOutcome.WRITE_OK_PENDING
+        assert "Ki" in result.written_only_fields
+
+    def _program_with_selfcheck(self, cm, verdict):
+        with patch.object(gialersim, "program_reader", return_value=(True, True)), \
+             patch("managers.card_manager._init_pyscard", return_value=True), \
+             patch("managers.card_manager._smartcard_readers",
+                   return_value=[MagicMock()]), \
+             patch.object(cm, "_selfcheck_gialersim_keys",
+                          return_value=verdict):
+            return cm.program_card(self._card_data(), original_data={})
+
+    def test_selfcheck_pass_promotes_to_verified(self):
+        cm = _gialersim_manager()
+        ok, msg, result = self._program_with_selfcheck(cm, (True, "DB — MAC ok"))
+        assert ok is True
+        assert result.outcome == ProgramOutcome.WRITE_OK_VERIFIED
+        # Ki/OPc are now VERIFIED, not merely written.
+        assert "Ki" in result.verified_fields and "OPc" in result.verified_fields
+
+    def test_selfcheck_fail_flags_verification_failed(self):
+        cm = _gialersim_manager()
+        ok, msg, result = self._program_with_selfcheck(cm, (False, "SW=9862"))
+        assert ok is False
+        assert result.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
+        assert "Ki" in result.failed_fields and "OPc" in result.failed_fields
+
+    def test_selfcheck_unavailable_stays_pending(self):
+        cm = _gialersim_manager()
+        ok, msg, result = self._program_with_selfcheck(cm, (None, "no crypto"))
+        assert ok is True
         assert result.outcome == ProgramOutcome.WRITE_OK_PENDING
         assert "Ki" in result.written_only_fields
 

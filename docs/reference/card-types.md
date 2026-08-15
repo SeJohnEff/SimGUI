@@ -79,9 +79,13 @@ are **not** part of the verified recipe and are not written (tracked as
 `TODO(gialersim-spn-fplmn)`).
 
 **Verification:** Ki and OPc are `READ=NEVER`, so a `9000` write proves nothing.
-ICCID and IMSI are confirmed by read-back; the keys can only be positively
-confirmed by an offline USIM `AUTHENTICATE` self-check
-(`TODO(gialersim-selfcheck)`).
+ICCID and IMSI are confirmed by read-back; **Ki and OPc are confirmed
+automatically by an offline USIM `AUTHENTICATE` self-check**
+(`managers/gialersim_selfcheck.py`) run right after programming — it computes
+RAND+AUTN from the just-written keys and checks the card's MAC verifies. A pass
+(`DB`/`DC`) promotes the result to `WRITE_OK_VERIFIED`; a reject (`9862`) marks
+it `WRITE_OK_VERIFICATION_FAILED` ("do not deploy this card"); if the check
+can't run, it stays `WRITE_OK_PENDING`.
 
 **UI behaviour:** In the Program SIM tab, when a gialersim card is detected the
 **ADM1 field is greyed out and shows "Hardcoded"** — the fixed family key is
