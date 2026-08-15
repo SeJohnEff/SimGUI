@@ -1,3 +1,38 @@
+simgui (0.8.0) stable; urgency=medium
+
+  * Native gialersim programming — gialersim cards are no longer programmed
+    through pySim. pySim's GialerSim class writes Ki and OPc in UICC class
+    (CLA=00, SELECT P2=04) and omits the algorithm configuration (EF 2FE5,
+    2FE6). On these cards every APDU returns 9000, yet the key writes are
+    silently discarded and the resulting SIM fails Milenage authentication
+    (MAC failure 9862). SimGUI now programs gialersim cards natively via
+    managers/gialersim.py using the verified GRSIMWrite sequence: GSM class
+    (CLA=A0, SELECT P2=00) throughout, VERIFY ADM at ref 0x0C with the fixed
+    family key 84796153, all ADM-gated writes (key-definition files, Ki, OPc,
+    algorithm config, ICCID) issued with MF current and no DF reselect, then
+    IMSI/ACC in DF_GSM. The recipe was recovered by USB-capturing a working
+    vendor session and hardware-verified on 2026-08-13. See
+    docs/GIALERSIM_PROGRAMMING.md.
+  * Removed the dual-ADM (0x0B) VERIFY patch added in 0.7.3. It was a red
+    herring: ref 0x0C with 84796153 is the correct and only credential to
+    present; the "88888888 at 0x0B" observation was the *contents* of a key
+    file, not a second credential. The install scripts and the pySim reference
+    snapshot no longer apply it.
+  * Ki/OPc remain READ=NEVER, so a successful native write is reported as
+    "verification pending" — ICCID and IMSI are confirmed by read-back; the
+    keys can only be positively confirmed by an offline USIM AUTHENTICATE
+    self-check (tracked as TODO(gialersim-selfcheck)). A 9000 on a Ki write is
+    never treated as proof of commit.
+  * UI: the ADM1 field is now greyed out and shows "Hardcoded" when a gialersim
+    card is detected — these cards present a fixed built-in ADM key, so the
+    entered ADM1 is never used. This also removes any impression that a wrong
+    ADM1 could lock the card. SUCI remains auto-disabled for gialersim (5G SUCI
+    is unsupported on these cards).
+  * sysmocom (SJA5/SJA2) programming is unchanged — those cards still use
+    pySim-shell (delta-write) and pySim-prog exactly as before.
+
+ -- John Fornehed <john.fornehed@gmail.com>  Sat, 15 Aug 2026 10:04:42 +0000
+
 simgui (0.7.3) stable; urgency=medium
 
   * Fixed: gialersim Ki/OPc writes are no longer silently discarded. These

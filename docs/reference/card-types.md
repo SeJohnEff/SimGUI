@@ -61,11 +61,32 @@ GIALERSIM cards are blank (unpersonalised) Fiskarheden SIM cards that have not b
 **Key differences from SJA5:**
 - Uses CHV `0x0C` (not `0x0A`) — standard `VERIFY ADM1` fails with `6f00` and **consumes retry attempts**. After 3 failures the card is permanently blocked.
 - Has no ICCID or IMSI from factory — these must be written from CSV.
-- Default ADM1 is `88888888` (ASCII) / `3838383838383838` (hex).
+- The personalisation ADM presented at ref `0x0C` is the fixed family key `84796153`, **not** the CSV ADM1. (`88888888` / `3838383838383838` is the *contents* of key file `0B00`, not a credential to present.)
 
-**Programming:** Blank cards are programmed via `pySim-prog.py -t gialersim -a <ASCII_ADM1>`. Do NOT use `-t auto` for gialersim cards.
+**Programming (native, no pySim):** GIALERSIM cards are programmed natively by
+`managers/gialersim.py` — pySim is bypassed entirely. pySim's `GialerSim` class
+writes Ki/OPc in the wrong (UICC) class and omits the algorithm configuration,
+so its writes return `9000` but never commit and the SIM fails Milenage auth
+(MAC failure `9862`). The native path uses GSM class (`CLA=A0`, SELECT `P2=00`)
+throughout, VERIFY ADM at `0x0C` with `84796153`, writes all ADM-gated files
+(key-definition files, Ki, OPc, algorithm config `2FE5`/`2FE6`, ICCID) with MF
+current and no DF reselect, then IMSI/ACC in `DF_GSM`. See
+[GIALERSIM_PROGRAMMING.md](../GIALERSIM_PROGRAMMING.md) for the full verified
+APDU sequence.
 
-**Supported fields:** ICCID, IMSI, Ki, OPc, ADM1, ACC, SPN, FPLMN, MCC, MNC — all written from CSV.
+**Supported fields (native path):** ICCID, IMSI, Ki, OPc, ACC. SPN and FPLMN
+are **not** part of the verified recipe and are not written (tracked as
+`TODO(gialersim-spn-fplmn)`).
+
+**Verification:** Ki and OPc are `READ=NEVER`, so a `9000` write proves nothing.
+ICCID and IMSI are confirmed by read-back; the keys can only be positively
+confirmed by an offline USIM `AUTHENTICATE` self-check
+(`TODO(gialersim-selfcheck)`).
+
+**UI behaviour:** In the Program SIM tab, when a gialersim card is detected the
+**ADM1 field is greyed out and shows "Hardcoded"** — the fixed family key is
+used automatically, so no ADM1 is entered (and a wrong ADM1 cannot lock the
+card). **SUCI is auto-disabled** (5G SUCI is unsupported on gialersim).
 
 ---
 

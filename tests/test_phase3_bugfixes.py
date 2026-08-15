@@ -381,8 +381,14 @@ class TestExtraFieldsAfterPysimProg:
     in a single invocation.  No extra shell call needed after pySim-prog."""
 
     def test_all_fields_go_to_pysim_prog_single_call(self, tmp_path):
-        """FPLMN, SPN, ACC all go to pySim-prog — no extra shell step."""
-        cm = _auth_manager(tmp_path, card_type=CardType.GIALERSIM)
+        """FPLMN, SPN, ACC all go to pySim-prog — no extra shell step.
+
+        This is the empty-card pySim-prog path, which now applies to
+        NON-gialersim blank cards only (gialersim is programmed natively —
+        see test_gialersim_native.py). Uses an UNKNOWN blank card so it still
+        exercises the pySim-prog single-call invariant.
+        """
+        cm = _auth_manager(tmp_path, card_type=CardType.UNKNOWN)
         card_data = {
             'ICCID': '89999880000000000200001',
             'IMSI': '999880000200001',

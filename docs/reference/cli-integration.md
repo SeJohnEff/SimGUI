@@ -108,17 +108,33 @@ quit" | python pySim-shell.py -p 0 -A <hex_ADM1>
 - **Do NOT use `exit`** — must use `quit`.
 - **Exit code is always 0**, even on APDU failures — must scan stdout for error patterns.
 
-### pySim-prog — Blank card programming (gialersim)
+### Gialersim — native programming (no pySim)
 
-For blank/gialersim cards, pySim-prog writes all fields in one operation:
+> **Gialersim cards are NOT programmed through pySim.** pySim's `GialerSim`
+> class writes Ki/OPc in UICC class and omits the algorithm configuration, so
+> its writes return `9000` but never commit and the SIM fails Milenage auth
+> (MAC failure `9862`). SimGUI programs these cards natively via
+> `managers/gialersim.py` — see
+> [GIALERSIM_PROGRAMMING.md](../GIALERSIM_PROGRAMMING.md) for the full verified
+> APDU sequence. `pySim-prog -t gialersim` is **no longer used**.
+
+The native path talks to the card via pyscard directly, in GSM class
+(`CLA=A0`, SELECT `P2=00`), VERIFY ADM at ref `0x0C` with the fixed family key
+`84796153`. It writes ICCID, IMSI, Ki, OPc, ACC (SPN/FPLMN are not part of the
+verified recipe). Ki/OPc are `READ=NEVER`; confirmation requires an offline
+USIM `AUTHENTICATE` self-check (`TODO(gialersim-selfcheck)`).
+
+### pySim-prog — non-gialersim blank cards
+
+For blank cards that are **not** gialersim, pySim-prog writes all fields in one
+operation:
 
 ```bash
-python pySim-prog.py -t gialersim -p 0 -a 88888888 \
+python pySim-prog.py -p 0 -a <ASCII_ADM1> \
     -s <ICCID> -i <IMSI> -k <Ki> --opc <OPc> \
     -n <SPN> --acc <ACC> -x <MCC> -y <MNC>
 ```
 
-- `-t gialersim` — card type. **NEVER** use `-t auto` for gialersim (causes CHV 0x0A VERIFY which fails with `6f00`).
 - `-a` — ASCII ADM1 key (NOT `-A` which is hex).
 - `-t auto -A <hex_ADM1>` — for non-empty cards (works for SJA5).
 

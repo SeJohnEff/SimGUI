@@ -441,17 +441,29 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
 
 ## Known Issues (Acceptable / Deferred)
 
-- [ ] **Offline USIM AUTHENTICATE self-check for Ki/OPc (gialersim)** — Ki and OPc
-  are READ=NEVER (EF_ARR record 0x13), so they can never be read back to verify a
-  write. A pySim-prog UPDATE returning `9000` does NOT prove the write committed:
-  before the v0.7.3 dual-ADM (0x0B) fix, Ki/OPc writes returned `9000` yet were
-  silently discarded, and the resulting SIM failed Milenage auth (MAC failure
-  `9862`). To positively confirm the write without reading the keys, add an
-  offline self-check after programming: compute RAND+AUTN from the Ki/OPc just
-  written and send a 3G USIM AUTHENTICATE (INS `88`); a `DB…` response (or `DC`
-  sync failure) proves the card's MAC verified against the newly written keys.
-  Wire this into the `WRITE_OK_PENDING` path in `managers/card_manager.py`
-  (see `TODO(gialersim-selfcheck)`). Do NOT attempt to read Ki/OPc directly.
+- [ ] **`TODO(gialersim-selfcheck)` — Offline USIM AUTHENTICATE self-check for
+  Ki/OPc (gialersim)** — Ki and OPc are READ=NEVER (EF_ARR record 0x13), so they
+  can never be read back to verify a write. A `9000` on the UPDATE does NOT prove
+  the write committed: pySim's GialerSim class returned `9000` on every key write
+  yet the writes were silently discarded (wrong class + missing algorithm config),
+  and the resulting SIM failed Milenage auth (MAC failure `9862`). SimGUI now
+  programs gialersim natively (`managers/gialersim.py`), which fixes the write —
+  but a positive confirmation is still needed. Add an offline self-check after
+  programming: compute RAND+AUTN from the Ki/OPc just written and send a 3G USIM
+  AUTHENTICATE (INS `88`, P2 `81`) in ADF_USIM; a `DB…` response (or `DC` sync
+  failure) proves the card's MAC verified against the newly written keys. This
+  would promote the native path's `WRITE_OK_PENDING` outcome to
+  `WRITE_OK_VERIFIED`. **Reference implementation:**
+  `~/projects/sim_snippet/auth_validate_harness.py`. Do NOT attempt to read
+  Ki/OPc directly.
+
+- [ ] **`TODO(gialersim-spn-fplmn)` — SPN/FPLMN on the native gialersim path** —
+  The verified GRSIMWrite capture (`docs/GIALERSIM_PROGRAMMING.md`) covers
+  ICCID/IMSI/ACC/Ki/OPc only; SPN and FPLMN were never observed being written to
+  a gialersim card and are therefore NOT written by `managers/gialersim.py`. The
+  pySim-prog path used to write them. If SPN/FPLMN are required on gialersim
+  cards, capture (or otherwise verify) the correct GSM-class file IDs and payload
+  format for these cards before adding the writes — do not extrapolate blindly.
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
 - [ ] App unresponsive after closing Network Storage dialog (user: "Acceptable")
 - [x] **FIXED v0.5.35: Right pane says "Insert SIM" even after blank card detected** — Root cause: intermittent PCSC 'No card in reader' from the fast probe right after pySim-read releases the reader on blank gialersim cards. Fix: CardWatcher now requires two consecutive absent probes before firing on_card_removed() when last_iccid is None (blank card). Non-blank cards still removed on first absent probe. Debounce applied in both fast-probe (_handle_probe_result) and slow-poll (_check_once_slow) paths.

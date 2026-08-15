@@ -160,6 +160,12 @@ class TestProgramSIMPanelOnCardDetected:
         stub._step = 0
         stub._set_action_status = MagicMock()
         stub._fields_have_data = MagicMock(return_value=False)
+        # Bind the real card-type helpers (a bare MagicMock attribute would be
+        # truthy and wrongly trigger the gialersim ADM1 grey-out path). With a
+        # MagicMock _cm, _is_gialersim() correctly returns False.
+        stub._is_gialersim = types.MethodType(ProgramSIMPanel._is_gialersim, stub)
+        stub._apply_adm1_card_type_lock = types.MethodType(
+            ProgramSIMPanel._apply_adm1_card_type_lock, stub)
         stub._original_form_data = {}
         stub._update_program_btn_state = MagicMock()
 

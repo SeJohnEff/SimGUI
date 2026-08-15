@@ -86,12 +86,32 @@ docs/                      # Diátaxis documentation
 - pySim-read auto-detects gialersim cards: output contains `Autodetected card type: gialersim`
 - Blank gialersim cards have no ICCID or IMSI, but may have `ACC: ffff` from pySim-read
 
-### Programming Flows (v0.5.32+)
-- **Empty/gialersim cards**: Use `pySim-prog` with `-t gialersim -a <ASCII_ADM1>`. Full write of all non-empty fields (ICCID, IMSI, Ki, OPc, ACC, SPN, FPLMN) in a single invocation. ADM1 is stored during authentication; pySim-prog handles the actual authentication internally.
-- **Non-empty cards (SJA5/SJA2)**: Use `pySim-shell` for field writes (delta-write — only changed fields). Authenticate first via `pySim-shell -A <hex_ADM1>`, then write fields via pySim-shell commands (select, update_binary_decoded). ICCID is factory-assigned and excluded from writes.
-- **NEVER** use `-t auto` for gialersim — it causes CHV 0x0A VERIFY which fails with 6f00.
+### Programming Flows (routed by card type in `program_card`)
+- **Gialersim cards → NATIVE (v0.8.0)**: Programmed by `managers/gialersim.py`
+  via pyscard directly — **pySim is bypassed entirely**. pySim's `GialerSim`
+  class writes Ki/OPc in UICC class (`CLA=00`) and omits the algorithm config
+  (`EF 2FE5`/`2FE6`), so its writes return `9000` but never commit and the SIM
+  fails Milenage auth (MAC failure `9862`). The native path uses GSM class
+  (`CLA=A0`, SELECT `P2=00`), VERIFY ADM at ref `0x0C` with the **fixed family
+  key `84796153`** (NOT the CSV ADM1), and writes all ADM-gated files
+  (key-definition files, Ki, OPc, algorithm config, ICCID) with MF current and
+  **no DF reselect**, then IMSI/ACC in `DF_GSM`. Writes ICCID/IMSI/Ki/OPc/ACC;
+  **SPN/FPLMN are not in the verified recipe and are not written**. See
+  `docs/GIALERSIM_PROGRAMMING.md` and `TODO(gialersim-spn-fplmn)`.
+- **Non-gialersim empty/blank cards**: Use `pySim-prog` (full write of all
+  non-empty fields in a single invocation).
+- **Non-empty cards (SJA5/SJA2)**: Use `pySim-shell` for field writes
+  (delta-write — only changed fields). Authenticate first via
+  `pySim-shell -A <hex_ADM1>`, then write fields via pySim-shell commands
+  (select, update_binary_decoded). ICCID is factory-assigned and excluded from
+  writes. **These sysmocom paths are unchanged and must stay that way.**
+- **NEVER** use `-t auto` for gialersim (not that it matters now — gialersim
+  never touches pySim; `-t auto` would cause CHV 0x0A VERIFY which fails 6f00).
 - **NEVER** change ICCID on non-empty cards.
 - Ki and OPc share the same EF — if either changes, both are written together.
+- **`9000` on a Ki write proves NOTHING** — Ki/OPc are READ=NEVER; positive
+  confirmation needs an offline USIM AUTHENTICATE self-check
+  (`TODO(gialersim-selfcheck)`).
 
 ### ADM1 Key Format
 - ADM1 is an **administrative key** (not a PIN). 8 bytes.
@@ -134,11 +154,13 @@ authenticate(adm1_ascii):
 - Reads: ICCID, IMSI, ACC, SPN, FPLMN
 - Blank cards return empty ICCID/IMSI but may return ACC
 
-### pySim-prog (empty cards)
+### pySim-prog (non-gialersim empty cards)
+> Gialersim cards do NOT use pySim-prog — they are programmed natively (see
+> `managers/gialersim.py` and `docs/GIALERSIM_PROGRAMMING.md`). pySim-prog is
+> used only for non-gialersim blank cards.
 ```bash
-pySim-prog.py -t gialersim -p 0 -a 88888888 -s <ICCID> -i <IMSI> -k <Ki> --opc <OPc> -n <SPN> --acc <ACC> -x <MCC> -y <MNC>
+pySim-prog.py -p 0 -a <ASCII_ADM1> -s <ICCID> -i <IMSI> -k <Ki> --opc <OPc> -n <SPN> --acc <ACC> -x <MCC> -y <MNC>
 ```
-- `-t gialersim` — card type (NOT `-t auto`)
 - `-a` — ASCII ADM1 key (NOT `-A` which is hex)
 - `-p 0` — PCSC reader slot 0
 
@@ -188,60 +210,53 @@ pySim-prog's `-n` flag is silently ignored for gialersim cards because
 
 **This patch is applied automatically after every pySim clone** by both
 `scripts/install.sh` (Ubuntu) and `scripts/install-macos.sh` (macOS), idempotent
-and marker-guarded. See the dual-ADM section below for the shared patch mechanism.
+and marker-guarded. It is retained for any residual pySim use, but note that
+gialersim SPN is not written at all now (native path omits it — see
+`TODO(gialersim-spn-fplmn)`).
 
-**Why CHV 0x0A VERIFY fails on gialersim:**
-- Standard ADM1 auth uses CHV 0x0A — gialersim cards reject this with SW 6f00
-- pySim-shell does not support `-t` flag (unrecognized argument)
-- pySim-prog with `-t gialersim` uses the correct internal auth sequence
-- All gialersim field writes (ICCID, IMSI, Ki, OPc, ACC, SPN, FPLMN) must
-  go through pySim-prog, not pySim-shell
+## Native GialerSim Programming (v0.8.0) — pySim is bypassed
 
-## pySim Patch — GialerSim Dual-ADM (0x0B) VERIFY (v0.7.3)
+**File:** `managers/gialersim.py` (framework-free, pyscard directly).
 
-**File:** `/opt/pysim/pySim/legacy/cards.py` (Ubuntu) / `~/pysim/pySim/legacy/cards.py` (macOS)
+**Why native.** pySim's `GialerSim` class writes Ki/OPc in **UICC class**
+(`CLA=00`, SELECT `P2=04`) and never writes the algorithm config (`EF 2FE5`,
+`2FE6`). On these cards every APDU returns `9000`, yet the key writes are
+silently discarded and the SIM fails Milenage auth (MAC failure `9862`). Two
+independent defects, both fatal:
+1. **Wrong class byte** — key writes only *commit* in **GSM class** (`CLA=A0`,
+   SELECT `P2=00`).
+2. **Missing algorithm config** — `EF 2FE5`/`2FE6` bind an algorithm to the key
+   set; without them `AUTHENTICATE` fails no matter how correct the Ki is.
 
-**Problem:** gialersim cards require **TWO** ADM VERIFYs for Ki/OPc writes to
-commit. pySim's `GialerSim.program()` presents only ref `0x0C`
-(`3834373936313533`), which satisfies the EF access rule (ARR 0x13) — but the
-actual write of MF/0001 (Ki) and MF/6002 (OPc) only *commits* if ref `0x0B`
-(`3838383838383838`, personalisation privilege) is **also** verified. With
-`0x0C` alone, `UPDATE` returns `9000` but the write is silently discarded; the
-card keeps its previous Ki and the SIM fails Milenage auth (MAC failure `9862`).
+**The verified recipe** (USB-captured from GRSIMWrite, hardware-verified
+2026-08-13 — full APDU listing in `docs/GIALERSIM_PROGRAMMING.md`):
+1. VERIFY ADM ref `0x0C` = **`84796153`** (fixed family key, NOT the CSV ADM1;
+   no SELECT MF first — MF is implicit after reset).
+2. key-definition files `0100`/`0200`/`0B00` (verbatim).
+3. Ki → `MF/0001`.  4. OPc → `MF/6002` (`01` prefix).
+5. algorithm config `2FE5` + `2FE6` records.  6. ICCID → `MF/2FE2`.
+7. **only now** descend DF: IMSI → `7F20/6F07`, ACC → `6F78`.
 
-Evidence (same card, same payload):
-| ADM presented        | UPDATE Ki | committed |
-|----------------------|-----------|-----------|
-| 0x0C only (old)      | 9000      | NO        |
-| 0x0B only            | 6982      | no        |
-| both 0x0C + 0x0B     | 9000      | YES       |
+**Order is load-bearing:** steps 2–6 run with MF current and **no DF reselect** —
+selecting a DF drops the ADM security state, after which every ADM-gated UPDATE
+returns `9000` but is silently discarded. Abort on any non-`9000` for a recipe
+step; **never treat `9000` on a Ki write as success**.
 
-**Fix:** In `GialerSim.program()`, immediately after the existing
-`self._scc.verify_chv(0xc, h2b('3834373936313533'))`, add a **tolerant** second
-VERIFY (wrapped so card variants lacking ref 0x0B log and continue):
-```python
-try:
-    self._scc.verify_chv(0xb, h2b('3838383838383838'))
-except Exception as e:
-    print("GialerSim: ADM 0x0B VERIFY failed (%s) — continuing; "
-          "Ki/OPc writes may not commit on this card variant" % e)
-```
-Both VERIFYs must fire **before** the `_program_handlers` loop (which is what
-writes Ki/OPc). `verify_chv()` uses the *correct* key, so no wrong-key retry is
-ever burned against an existing counter.
+**ADM clarification:** the credential at `0x0C` is `84796153`. The
+`88888888`/`3838383838383838` value is the *contents* of key file `0B00`, not a
+second credential — the earlier "dual-ADM 0x0B" hypothesis (v0.7.3) was a **red
+herring** and has been removed from the install scripts and the reference
+snapshot.
 
-**Important:** `UPDATE` returning `9000` does NOT prove the write committed. A
-positive confirmation (offline USIM AUTHENTICATE self-check) is tracked in
-`docs/TODO.md` (`TODO(gialersim-selfcheck)`). Do NOT read Ki/OPc back — they are
-READ=NEVER.
+**Verification:** Ki/OPc are READ=NEVER (EF_ARR `0x13`); a `9000` proves
+nothing. ICCID/IMSI are confirmed by read-back; positive key confirmation
+requires an offline USIM AUTHENTICATE self-check (`TODO(gialersim-selfcheck)`,
+reference: `~/projects/sim_snippet/auth_validate_harness.py`).
 
-**Both install scripts apply the pySim patches automatically** after cloning
-(idempotent, marker-guarded): `scripts/install.sh` (Ubuntu) and
-`scripts/install-macos.sh` (macOS) apply the SPN `'name'` handler and this
-dual-ADM 0x0B VERIFY. `docs/pysim-patches/cards.py` is a reference snapshot of
-the fully-patched file. Because pySim is re-cloned on a clean install, the patch
-must live in the install scripts — a raw edit to the clone alone does not survive
-a rebuild.
+**Routing:** `CardManager.program_card()` routes `CardType.GIALERSIM` to
+`_program_gialersim_native()` (a thin adapter) → `managers/gialersim.py`.
+Non-gialersim empty cards still use pySim-prog; non-empty cards still use
+pySim-shell. sysmocom (SJA5/SJA2) paths are untouched.
 
 ## Testing
 

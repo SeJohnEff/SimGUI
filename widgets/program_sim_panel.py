@@ -303,6 +303,7 @@ class ProgramSIMPanel(QWidget):
                 self._clear_sticky_result()
         self._update_program_btn_state()
         self._handle_suci_for_card_type(card_info)
+        self._apply_adm1_card_type_lock()
 
         if not card_info.iccid:
             return
@@ -368,6 +369,37 @@ class ProgramSIMPanel(QWidget):
         else:
             # Other card types - enable SUCI checkbox but don't force
             self._suci_checkbox.setEnabled(True)
+
+    def _is_gialersim(self) -> bool:
+        """True when the currently detected card is a gialersim card."""
+        from managers.card_manager import CardType
+        return getattr(self._cm, "card_type", None) == CardType.GIALERSIM
+
+    def _apply_adm1_card_type_lock(self) -> None:
+        """Grey out the ADM1 field for gialersim cards.
+
+        gialersim cards are programmed natively and always present a fixed
+        built-in ADM key (84796153, ref 0x0C); the ADM1 the user would type is
+        never used. Disabling the field with a "Hardcoded" hint prevents
+        confusion and removes any impression that a wrong ADM1 could lock the
+        card. For all other card types the field is a normal editable input.
+        """
+        entry = self._field_entries.get("ADM1")
+        if entry is None:
+            return
+        if self._is_gialersim():
+            entry.clear()
+            entry.setReadOnly(True)
+            entry.setEnabled(False)
+            entry.setPlaceholderText("Hardcoded")
+            entry.setToolTip(
+                "Gialersim cards use a fixed built-in ADM key — the ADM1 field "
+                "is not used for these cards.")
+        else:
+            entry.setEnabled(True)
+            entry.setReadOnly(False)
+            entry.setPlaceholderText("")
+            entry.setToolTip("")
 
     def _set_action_status(self, text: str, style: str = "normal"):
         self._action_status.setPlainText(text)
@@ -467,7 +499,12 @@ class ProgramSIMPanel(QWidget):
 
         if card_data:
             normalized = _normalize_card_data(card_data)
+            gialersim = self._is_gialersim()
             for key, _, _ in _FORM_FIELDS:
+                # ADM1 is hardcoded for gialersim — leave the field greyed out
+                # rather than filling it from the CSV (the value is never used).
+                if key == "ADM1" and gialersim:
+                    continue
                 val = normalized.get(key, "")
                 # Public read fields absent from the CSV keep whatever
                 # _on_card_info_changed already set from CardInfo (pySim-read
@@ -519,6 +556,9 @@ class ProgramSIMPanel(QWidget):
         else:
             self._field_entries["ICCID"].setReadOnly(False)
 
+        # Grey out ADM1 for gialersim (or restore it for other types).
+        self._apply_adm1_card_type_lock()
+
     def on_card_removed(self):
         self._clear_sticky_result()
         self._detected_non_empty = False
@@ -528,6 +568,8 @@ class ProgramSIMPanel(QWidget):
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_entries[key].setText("")
+        # Card gone — restore ADM1 to a normal editable field for the next card.
+        self._apply_adm1_card_type_lock()
         # Keep SUCI enabled by default for the next card
         self._suci_checkbox.setChecked(True)
         self._field_entries["ICCID"].setReadOnly(False)
@@ -626,6 +668,13 @@ class ProgramSIMPanel(QWidget):
         # Clear any previous sticky result — this is a new explicit action.
         self._clear_sticky_result()
         adm1 = self._field_entries["ADM1"].text().strip()
+        if self._is_gialersim():
+            # ADM1 field is greyed out for gialersim — the native programmer
+            # always presents the fixed built-in ADM key. Supply it here so the
+            # shared authenticate()/program_card() gate is satisfied; the value
+            # is not otherwise used (no VERIFY is sent for gialersim).
+            from managers.gialersim import ADM_ASCII
+            adm1 = ADM_ASCII
         if not adm1:
             self._set_action_status("ADM1 is required", "warning")
             return

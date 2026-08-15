@@ -886,22 +886,34 @@ class TestProgramNonemptyCard:
         assert ok is True
         assert 'no programmable fields' in msg.lower()
 
-    def test_gialersim_path_unchanged(self, tmp_path):
-        """Gialersim cards still use _program_via_pysim_prog — not _program_nonempty_card."""
+    def test_gialersim_routes_native(self, tmp_path):
+        """Gialersim cards are programmed natively — never via pySim.
+
+        pySim's GialerSim class writes Ki/OPc in the wrong (UICC) class and
+        omits the algorithm config, so its writes return 9000 but never commit.
+        program_card must route GIALERSIM to _program_gialersim_native and NOT
+        touch _program_via_pysim_prog or _program_nonempty_card.
+        """
         cm = _make_hw_manager(tmp_path)
         cm.card_type = CardType.GIALERSIM
         cm._original_card_data = {}
         cm.authenticated = True
         cm._authenticated_adm1_hex = '3838383838383838'
+        cm._safety_override_acknowledged = True
 
-        prog_called = []
-        with patch.object(cm, '_program_via_pysim_prog',
-                          side_effect=lambda *a: prog_called.append(True) or (True, 'OK')) as mock_prog:
+        native_called = []
+        with patch.object(cm, '_program_gialersim_native',
+                          side_effect=lambda *a: native_called.append(True) or (True, 'OK')), \
+             patch.object(cm, '_program_via_pysim_prog') as mock_prog, \
+             patch.object(cm, '_program_nonempty_card') as mock_nonempty:
             cm.program_card(
-                {'IMSI': '240070000000001', 'Ki': 'A' * 32, 'OPc': 'B' * 32},
+                {'ICCID': '8946200000000000001', 'IMSI': '240070000000001',
+                 'Ki': 'A' * 32, 'OPc': 'B' * 32},
                 original_data=None)
 
-        assert prog_called, "_program_via_pysim_prog must be called for gialersim"
+        assert native_called, "_program_gialersim_native must be called for gialersim"
+        mock_prog.assert_not_called()
+        mock_nonempty.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

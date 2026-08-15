@@ -1849,7 +1849,16 @@ class CardManager:
 
         # Brief pause after retry-counter check to let the reader settle
         time.sleep(0.3)
-        if empty_card:
+        # Routing is by CARD TYPE first — "gialersim" is a distinct card family,
+        # NOT merely a synonym for "empty/blank". A gialersim card always goes
+        # native (managers/gialersim.py), whether blank or already personalised,
+        # because pySim's GialerSim class writes Ki/OPc in the wrong (UICC) class
+        # and omits the algorithm config, so its writes return 9000 but never
+        # commit. Only non-gialersim cards fall through to the pySim paths:
+        # empty/blank → pySim-prog (full write), non-empty → pySim-shell (delta).
+        if self.card_type == CardType.GIALERSIM:
+            ok, msg = self._program_gialersim_native(changed)
+        elif empty_card:
             ok, msg = self._program_via_pysim_prog(changed)
         else:
             ok, msg = self._program_nonempty_card(card_data, changed)
@@ -1970,6 +1979,105 @@ class CardManager:
             skipped_fields=skipped,
             failed_fields=(),
         )
+        return True, msg
+
+    def _program_gialersim_native(self, fields: Dict[str, str]
+                                  ) -> Tuple[bool, str]:
+        """Program a gialersim card natively via ``managers/gialersim.py``.
+
+        Thin adapter (no card logic lives here): resolve the reader, hand the
+        verified recipe the fields it needs, and translate the outcome into a
+        :class:`ProgramResult`.  All GSM-class APDU logic lives in the
+        ``gialersim`` module.
+
+        Ki and OPc are ``READ=NEVER`` and cannot be read back, so a successful
+        run is reported as ``WRITE_OK_PENDING`` (ICCID/IMSI are confirmed by
+        read-back; the keys require the offline AUTHENTICATE self-check tracked
+        as ``TODO(gialersim-selfcheck)``).  A ``9000`` on a Ki write does NOT
+        prove the key committed.
+        """
+        from managers import gialersim
+
+        # gialersim always writes the full identity set; SPN/FPLMN are not part
+        # of the verified recipe and are intentionally not written here (see
+        # TODO(gialersim-spn-fplmn) in docs/TODO.md).
+        skipped = tuple(k for k in ("SPN", "FPLMN") if fields.get(k))
+        required = ("ICCID", "IMSI", "Ki", "OPc")
+        missing = [k for k in required if not fields.get(k)]
+        if missing:
+            msg = f"Cannot program gialersim: missing {', '.join(missing)}"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED, message=msg,
+                failed_fields=tuple(required), skipped_fields=skipped)
+            return False, msg
+
+        if not _init_pyscard(self._venv_python):
+            msg = "Cannot program gialersim: PC/SC (pyscard) unavailable"
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED, message=msg,
+                skipped_fields=skipped)
+            return False, msg
+
+        try:
+            rlist = _smartcard_readers()
+            if not rlist or self._pcsc_reader_index >= len(rlist):
+                raise gialersim.GialerSimError("card reader not available")
+            reader = rlist[self._pcsc_reader_index]
+            iccid_ok, imsi_ok = gialersim.program_reader(
+                reader,
+                iccid=fields["ICCID"],
+                imsi=fields["IMSI"],
+                ki=fields["Ki"],
+                opc=fields["OPc"],
+                acc=fields.get("ACC") or "0001",
+            )
+        except gialersim.GialerSimError as exc:
+            msg = f"gialersim programming failed: {exc}"
+            logger.error(msg)
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED, message=msg,
+                failed_fields=("ICCID", "IMSI", "Ki", "OPc"),
+                skipped_fields=skipped)
+            return False, msg
+        except Exception as exc:  # noqa: BLE001 — surface transport errors
+            msg = f"gialersim programming failed (transport): {exc}"
+            logger.error(msg)
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_FAILED, message=msg,
+                failed_fields=("ICCID", "IMSI", "Ki", "OPc"),
+                skipped_fields=skipped)
+            return False, msg
+
+        readback_failed = [
+            name for name, ok in (("ICCID", iccid_ok), ("IMSI", imsi_ok))
+            if not ok
+        ]
+        if readback_failed:
+            msg = ("gialersim programmed but read-back mismatch on: "
+                   + ", ".join(readback_failed))
+            self._last_program_result = ProgramResult(
+                outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED, message=msg,
+                verified_fields=tuple(
+                    n for n in ("ICCID", "IMSI") if n not in readback_failed),
+                written_only_fields=("Ki", "OPc"),
+                failed_fields=tuple(readback_failed),
+                skipped_fields=skipped)
+            return False, msg
+
+        # ICCID/IMSI confirmed; Ki/OPc written but structurally unverifiable.
+        # TODO(gialersim-selfcheck): add an offline USIM AUTHENTICATE self-check
+        # (RAND+AUTN from the just-written Ki/OPc; 'DB'/'DC' proves the MAC) to
+        # promote this to WRITE_OK_VERIFIED. Do NOT read Ki/OPc directly.
+        self.card_info["ICCID"] = fields["ICCID"]
+        self.card_info["IMSI"] = fields["IMSI"]
+        msg = ("Card programmed — verified: ICCID, IMSI; written: Ki, OPc\n"
+               "(Ki/OPc are READ=NEVER — confirm on the network via "
+               "authentication.)")
+        self._last_program_result = ProgramResult(
+            outcome=ProgramOutcome.WRITE_OK_PENDING, message=msg,
+            verified_fields=("ICCID", "IMSI"),
+            written_only_fields=("Ki", "OPc"),
+            skipped_fields=skipped)
         return True, msg
 
     # ------------------------------------------------------------------

@@ -234,9 +234,14 @@ class TestSPNStrippedBeforeProgramCall(unittest.TestCase):
 class TestCardManagerDropsSPN(unittest.TestCase):
 
     def test_program_card_drops_spn_from_changed_fields(self):
-        """program_card() must silently drop SPN before calling _program_via_pysim_prog."""
+        """program_card() must silently drop SPN before the write path.
+
+        gialersim cards are programmed natively (SPN is not part of the
+        verified recipe), so SPN must be gone from the fields handed to
+        _program_gialersim_native.
+        """
         cm = _make_card_manager(card_type=CardType.GIALERSIM)
-        cm._original_card_data = {}  # blank card → empty path → _program_via_pysim_prog
+        cm._original_card_data = {}  # blank gialersim → native path
         card_data = {
             "IMSI": "240010000000002",
             "SPN": "ShouldBeDropped",
@@ -244,23 +249,23 @@ class TestCardManagerDropsSPN(unittest.TestCase):
         }
         passed_fields = {}
 
-        def fake_program_via(fields):
+        def fake_program_native(fields):
             from state_manager import ProgramResult, ProgramOutcome
             passed_fields.update(fields)
             cm._last_program_result = ProgramResult(
-                outcome=ProgramOutcome.WRITE_OK_VERIFIED,
+                outcome=ProgramOutcome.WRITE_OK_PENDING,
                 message="Card programmed — verified: IMSI, ACC"
             )
             return True, "Card programmed — verified: IMSI, ACC"
 
-        cm._program_via_pysim_prog = fake_program_via
+        cm._program_gialersim_native = fake_program_native
         cm.check_adm1_retry_counter = MagicMock(return_value=5)
 
         ok, msg, _result = cm.program_card(card_data)
 
         self.assertTrue(ok)
         self.assertNotIn("SPN", passed_fields,
-                         "SPN must be dropped before _program_via_pysim_prog")
+                         "SPN must be dropped before the gialersim write path")
 
     def test_program_via_pysim_prog_drops_spn_defensively(self):
         """_program_via_pysim_prog() must pop SPN before passing fields to _run_pysim_prog."""

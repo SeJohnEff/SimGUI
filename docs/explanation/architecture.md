@@ -72,8 +72,22 @@ The central card interface. Manages:
 - CLI backend auto-detection (pySim at `/opt/pysim` is primary; sysmo-usim-tool is optional fallback)
 - Card detection and type identification (SJA2, SJA5, GIALERSIM, MAGIC via pySim-read)
 - ADM1 authentication (skipped for blank/gialersim cards to avoid CHV 0x0C failures)
-- Programming: pySim-shell for non-empty cards, pySim-prog for blank/gialersim cards
+- Programming, routed by **card type** in `program_card()`:
+  - **gialersim → native** (`managers/gialersim.py`, pyscard directly, no pySim)
+  - **non-gialersim empty/blank → pySim-prog** (full write)
+  - **non-empty (SJA5/SJA2) → pySim-shell** (delta-write)
 - ICCID cross-verification before every authentication
+
+> **Why gialersim bypasses the subprocess boundary.** Every other flow shells
+> out to a CLI tool (see below). gialersim is the one exception: pySim's
+> `GialerSim` class writes Ki/OPc in the wrong (UICC) class and omits the
+> algorithm configuration, so its writes return `9000` but never commit — a
+> silent, card-bricking failure. The correct GSM-class sequence is small,
+> verified, and security-critical, so it lives in-process in
+> `managers/gialersim.py` (a framework-free module using pyscard, like the ADM1
+> retry-counter probe already does). This is a card-type branch, not a platform
+> branch — sysmocom cards are untouched and still use pySim. See
+> [GIALERSIM_PROGRAMMING.md](../GIALERSIM_PROGRAMMING.md).
 
 A single `CardManager` instance is created in `main.py` and passed to every component that needs card access.
 
