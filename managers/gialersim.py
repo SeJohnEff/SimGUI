@@ -38,6 +38,7 @@ exactly as ``card_manager`` already does for the ADM1 retry counter.
 """
 
 import logging
+import time
 from typing import Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -294,7 +295,8 @@ def program_connection(
     return iccid_ok, imsi_ok
 
 
-def program_reader(reader, **kwargs) -> Tuple[bool, bool]:
+def program_reader(reader, *, connect_retries: int = 5,
+                   retry_delay: float = 0.6, **kwargs) -> Tuple[bool, bool]:
     """Open a T=0 GSM-class session to *reader* and run :func:`program_connection`.
 
     Owns the connect/disconnect around a single ADM session — the whole recipe
@@ -302,21 +304,52 @@ def program_reader(reader, **kwargs) -> Tuple[bool, bool]:
     T=0 is preferred (GSM class answers SELECT with ``9FXX`` under T=0);
     falls back to T=1 only if T=0 cannot be negotiated.
 
+    **Connect is retried.**  On macOS, a fresh SCardConnect can transiently fail
+    right after another part of the app released the card (e.g. the ADM1
+    retry-counter probe, or the CardWatcher settling), so we retry the whole
+    protocol loop a few times with a short delay — the same pattern
+    ``detect_card`` uses.  A *fresh* connection object is created per attempt (a
+    failed ``connect`` can leave the handle unusable).  The last real PC/SC error
+    is surfaced instead of a generic message, so genuine failures are diagnosable.
+
+    Once connected, :func:`program_connection` runs exactly once — a programming
+    error is never retried against a partially-written card.
+
     ``**kwargs`` are forwarded verbatim to :func:`program_connection`.
     """
     from smartcard.CardConnection import CardConnection
 
-    conn = reader.createConnection()
-    for proto, name in ((CardConnection.T0_protocol, "T=0"),
-                        (CardConnection.T1_protocol, "T=1")):
-        try:
-            conn.connect(proto)
-            logger.info("gialersim: connected with %s", name)
+    conn = None
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, connect_retries + 1):
+        for proto, name in ((CardConnection.T0_protocol, "T=0"),
+                            (CardConnection.T1_protocol, "T=1")):
+            candidate = reader.createConnection()
+            try:
+                candidate.connect(proto)
+                conn = candidate
+                logger.info("gialersim: connected with %s (attempt %d/%d)",
+                            name, attempt, connect_retries)
+                break
+            except Exception as exc:
+                last_exc = exc
+                try:
+                    candidate.disconnect()
+                except Exception:
+                    pass
+        if conn is not None:
             break
-        except Exception:
-            continue
-    else:
-        raise GialerSimError("could not connect to card (T=0/T=1 both failed)")
+        if attempt < connect_retries:
+            logger.warning("gialersim: connect attempt %d/%d failed (%s) — "
+                           "retrying in %.1fs", attempt, connect_retries,
+                           last_exc, retry_delay)
+            time.sleep(retry_delay)
+
+    if conn is None:
+        raise GialerSimError(
+            "could not connect to card after %d attempt(s) (last error: %s)"
+            % (connect_retries, last_exc))
+
     try:
         return program_connection(conn, **kwargs)
     finally:

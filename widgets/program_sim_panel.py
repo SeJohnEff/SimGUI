@@ -343,21 +343,26 @@ class ProgramSIMPanel(QWidget):
         return ''
 
     def _handle_suci_for_card_type(self, card_info: CardInfo) -> None:
-        """Show SUCI warnings and update UI based on detected card type."""
+        """Show SUCI warnings and update UI based on detected card type.
+
+        Uses the authoritative ``CardType`` enum from the card manager, NOT
+        ``card_info.card_type`` (a display *string* that never equals the enum,
+        which silently disabled this whole handler).
+        """
         from managers.card_manager import CardType
         from dialogs.suci_suggested_dialog import SUCISuggestedDialog
         from dialogs.suci_unsupported_dialog import SUCIUnsupportedDialog
 
-        card_type = card_info.card_type
+        card_type = getattr(self._cm, "card_type", None)
         suci_checked = self._suci_checkbox.isChecked()
 
         if card_type == CardType.GIALERSIM:
-            # Gialersim doesn't support SUCI
-            self._suci_checkbox.setEnabled(False)
+            # Gialersim doesn't support SUCI — always force off and disabled.
             if suci_checked:
                 dlg = SUCIUnsupportedDialog(self)
                 dlg.exec()
-                self._suci_checkbox.setChecked(False)
+            self._suci_checkbox.setChecked(False)
+            self._suci_checkbox.setEnabled(False)
         elif card_type == CardType.SJA5:
             # SJA5 supports SUCI - suggest if not checked
             self._suci_checkbox.setEnabled(True)

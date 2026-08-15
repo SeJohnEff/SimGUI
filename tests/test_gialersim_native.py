@@ -237,6 +237,81 @@ class TestAbort:
 
 
 # ---------------------------------------------------------------------------
+# program_reader: connect is retried (macOS PCSC contention)
+# ---------------------------------------------------------------------------
+
+class TestConnectRetry:
+    """A fresh SCardConnect can transiently fail right after another part of the
+    app released the card. program_reader must retry connect (not the write)."""
+
+    def _install_fake_cardconnection(self, monkeypatch):
+        import sys, types
+        mod = types.ModuleType("smartcard.CardConnection")
+
+        class CardConnection:
+            T0_protocol = 1
+            T1_protocol = 2
+        mod.CardConnection = CardConnection
+        if "smartcard" not in sys.modules:
+            monkeypatch.setitem(sys.modules, "smartcard", types.ModuleType("smartcard"))
+        monkeypatch.setitem(sys.modules, "smartcard.CardConnection", mod)
+
+    def test_connect_retries_then_succeeds(self, monkeypatch):
+        from managers import gialersim
+        self._install_fake_cardconnection(monkeypatch)
+        monkeypatch.setattr(gialersim.time, "sleep", lambda *_a, **_k: None)
+
+        # Fail the first 3 connect calls (attempt 1: T0+T1, attempt 2: T0),
+        # then succeed on attempt 2's T1.
+        state = {"fails_left": 3}
+
+        class RetryConn(FakeConnection):
+            def connect(self, proto):
+                if state["fails_left"] > 0:
+                    state["fails_left"] -= 1
+                    raise RuntimeError("SCARD_E_SHARING_VIOLATION")
+
+            def disconnect(self):
+                pass
+
+            def getATR(self):
+                return []
+
+        class FakeReader:
+            def createConnection(self):
+                return RetryConn()
+
+        ok = gialersim.program_reader(
+            FakeReader(), iccid=ICCID, imsi=IMSI, ki=KI, opc=OPC, acc="0001",
+            connect_retries=5, retry_delay=0)
+        assert ok == (True, True)
+        assert state["fails_left"] == 0  # all transient failures consumed
+
+    def test_connect_exhausts_retries_raises_with_real_error(self, monkeypatch):
+        from managers import gialersim
+        self._install_fake_cardconnection(monkeypatch)
+        monkeypatch.setattr(gialersim.time, "sleep", lambda *_a, **_k: None)
+
+        class DeadConn(FakeConnection):
+            def connect(self, proto):
+                raise RuntimeError("SCARD_E_NO_SMARTCARD")
+
+            def disconnect(self):
+                pass
+
+        class FakeReader:
+            def createConnection(self):
+                return DeadConn()
+
+        with pytest.raises(GialerSimError) as exc:
+            gialersim.program_reader(
+                FakeReader(), iccid=ICCID, imsi=IMSI, ki=KI, opc=OPC,
+                connect_retries=3, retry_delay=0)
+        # The real PC/SC error must be surfaced, not a generic message.
+        assert "SCARD_E_NO_SMARTCARD" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
 # card_manager routing (thin adapter)
 # ---------------------------------------------------------------------------
 
@@ -352,6 +427,25 @@ class TestAdm1GreyOut:
         adm1.setEnabled.assert_called_with(True)
         adm1.setReadOnly.assert_called_with(False)
         adm1.setPlaceholderText.assert_called_with("")
+
+    def test_gialersim_disables_and_unchecks_suci(self):
+        """SUCI must be forced OFF and disabled for gialersim, keyed on the
+        authoritative CardManager enum (not the CardInfo display string, which
+        never equals the enum and silently disabled this whole handler)."""
+        import types
+        from widgets.program_sim_panel import ProgramSIMPanel
+        stub = MagicMock()
+        stub._cm = MagicMock()
+        stub._cm.card_type = CardType.GIALERSIM
+        stub._suci_checkbox = MagicMock()
+        stub._suci_checkbox.isChecked.return_value = False  # skip the warning dialog
+        stub._handle_suci_for_card_type = types.MethodType(
+            ProgramSIMPanel._handle_suci_for_card_type, stub)
+
+        stub._handle_suci_for_card_type(MagicMock())
+
+        stub._suci_checkbox.setChecked.assert_called_with(False)
+        stub._suci_checkbox.setEnabled.assert_called_with(False)
 
     def test_on_program_supplies_hardcoded_adm_for_gialersim(self):
         """Empty ADM1 field must NOT abort for gialersim — the fixed family key
