@@ -1,5 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+
+def normalize_card_type(card_type: Any) -> str:
+    """Normalize a card type (``CardType`` enum, name, or string) to a token.
+
+    Single normalization used by both the profile factory and the capability
+    schema, so ``CardType.GIALERSIM``, ``"gialersim"`` and ``"GIALERSIM"`` all
+    map to the same key.
+    """
+    raw = card_type.name if hasattr(card_type, "name") else str(card_type)
+    return raw.upper().replace("-", "").replace("_", "").replace(" ", "")
 
 
 class CardProfileError(Exception):

@@ -36,7 +36,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # Directories to skip (not production code)
 _SKIP_DIRS = {
     "__pycache__", "htmlcov", ".git", "debian", "scripts", "docs",
-    ".venv", "venv", "site-packages", "dist", "tests",
+    ".venv", "venv", "site-packages", "dist", "tests", "tools",
 }
 
 

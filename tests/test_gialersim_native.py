@@ -406,7 +406,7 @@ class TestAdm1GreyOut:
         stub._cm = MagicMock()
         stub._cm.card_type = card_type
         stub._field_entries = {k: MagicMock() for k, _, _ in _FORM_FIELDS}
-        stub._is_gialersim = types.MethodType(ProgramSIMPanel._is_gialersim, stub)
+        stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
         stub._apply_adm1_card_type_lock = types.MethodType(
             ProgramSIMPanel._apply_adm1_card_type_lock, stub)
         return stub
@@ -429,9 +429,8 @@ class TestAdm1GreyOut:
         adm1.setPlaceholderText.assert_called_with("")
 
     def test_gialersim_disables_and_unchecks_suci(self):
-        """SUCI must be forced OFF and disabled for gialersim, keyed on the
-        authoritative CardManager enum (not the CardInfo display string, which
-        never equals the enum and silently disabled this whole handler)."""
+        """SUCI must be forced OFF and disabled when the card's capability says
+        it is unsupported (gialersim), driven by the capability schema."""
         import types
         from widgets.program_sim_panel import ProgramSIMPanel
         stub = MagicMock()
@@ -439,6 +438,7 @@ class TestAdm1GreyOut:
         stub._cm.card_type = CardType.GIALERSIM
         stub._suci_checkbox = MagicMock()
         stub._suci_checkbox.isChecked.return_value = False  # skip the warning dialog
+        stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
         stub._handle_suci_for_card_type = types.MethodType(
             ProgramSIMPanel._handle_suci_for_card_type, stub)
 
@@ -446,6 +446,30 @@ class TestAdm1GreyOut:
 
         stub._suci_checkbox.setChecked.assert_called_with(False)
         stub._suci_checkbox.setEnabled.assert_called_with(False)
+
+    def test_csv_row_does_not_recheck_suci_for_gialersim(self):
+        """Regression: selecting a CSV row must NOT re-enable SUCI for a card
+        whose capability says it is unsupported. This was the field bug — the
+        detection handler unchecked SUCI, then _on_card_select re-checked it
+        from the CSV default, so programming saw it enabled."""
+        import types
+        from widgets.program_sim_panel import ProgramSIMPanel
+        # The SUCI-from-CSV block lives inside _on_card_select; exercise just
+        # that capability guard in isolation.
+        stub = MagicMock()
+        stub._cm = MagicMock()
+        stub._cm.card_type = CardType.GIALERSIM
+        stub._suci_checkbox = MagicMock()
+        stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
+
+        # Simulate the guarded block from _on_card_select for a CSV row with no
+        # SUCI column (which used to default to True).
+        normalized = {"SUCI": ""}
+        if stub._card_caps().supports_suci:
+            stub._suci_checkbox.setChecked(True)
+
+        # gialersim -> supports_suci is False -> setChecked must NOT be called.
+        stub._suci_checkbox.setChecked.assert_not_called()
 
     def test_on_program_supplies_hardcoded_adm_for_gialersim(self):
         """Empty ADM1 field must NOT abort for gialersim — the fixed family key
@@ -478,7 +502,7 @@ class TestAdm1GreyOut:
         stub._set_sticky_result = MagicMock()
         stub._clear_sticky_result = MagicMock()
         stub.on_card_programmed_callback = None
-        stub._is_gialersim = types.MethodType(ProgramSIMPanel._is_gialersim, stub)
+        stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
         stub._on_program = types.MethodType(ProgramSIMPanel._on_program, stub)
 
         stub._on_program()

@@ -356,50 +356,57 @@ class ProgramSIMPanel(QWidget):
         card_type = getattr(self._cm, "card_type", None)
         suci_checked = self._suci_checkbox.isChecked()
 
-        if card_type == CardType.GIALERSIM:
-            # Gialersim doesn't support SUCI — always force off and disabled.
+        if not self._card_caps().supports_suci:
+            # Capability says no SUCI (e.g. gialersim) — force off and disabled.
             if suci_checked:
-                dlg = SUCIUnsupportedDialog(self)
-                dlg.exec()
+                SUCIUnsupportedDialog(self).exec()
             self._suci_checkbox.setChecked(False)
             self._suci_checkbox.setEnabled(False)
-        elif card_type == CardType.SJA5:
-            # SJA5 supports SUCI - suggest if not checked
-            self._suci_checkbox.setEnabled(True)
-            if not suci_checked:
-                dlg = SUCISuggestedDialog(self)
-                result = dlg.exec()
-                if result == SUCISuggestedDialog.RESULT_CHECK:
-                    self._suci_checkbox.setChecked(True)
-        else:
-            # Other card types - enable SUCI checkbox but don't force
-            self._suci_checkbox.setEnabled(True)
+            return
 
-    def _is_gialersim(self) -> bool:
-        """True when the currently detected card is a gialersim card."""
-        from managers.card_manager import CardType
-        return getattr(self._cm, "card_type", None) == CardType.GIALERSIM
+        # SUCI is supported — enable the control.
+        self._suci_checkbox.setEnabled(True)
+        # SJA5 nudge: suggest enabling SUCI if the operator left it off.
+        if card_type == CardType.SJA5 and not suci_checked:
+            dlg = SUCISuggestedDialog(self)
+            if dlg.exec() == SUCISuggestedDialog.RESULT_CHECK:
+                self._suci_checkbox.setChecked(True)
+
+    def _card_caps(self):
+        """Capabilities for the detected card type — the single source of truth
+        for card-type-driven UI (SUCI support, hardcoded ADM1).
+
+        The rules live once in ``card_profiles/capabilities.py``; this panel only
+        renders from them. Never re-decide a capability with an ``if gialersim``
+        check — read it from here.
+        """
+        from card_profiles import capabilities_for
+        return capabilities_for(getattr(self._cm, "card_type", None))
+
+    def _suci_supported(self) -> bool:
+        """Whether the detected card supports 5G SUCI (schema-driven)."""
+        return self._card_caps().supports_suci
 
     def _apply_adm1_card_type_lock(self) -> None:
-        """Grey out the ADM1 field for gialersim cards.
+        """Render the ADM1 field per the card's ``adm1_hardcoded`` capability.
 
-        gialersim cards are programmed natively and always present a fixed
-        built-in ADM key (84796153, ref 0x0C); the ADM1 the user would type is
-        never used. Disabling the field with a "Hardcoded" hint prevents
-        confusion and removes any impression that a wrong ADM1 could lock the
-        card. For all other card types the field is a normal editable input.
+        When the card's ADM key is hardcoded (e.g. gialersim presents a fixed
+        built-in key — see ``managers/gialersim.py``), the operator never
+        supplies ADM1, so the field is greyed with a "Hardcoded" hint and its
+        value is unused. Editable for all other card types. Driven by the
+        capability schema, not a per-type check.
         """
         entry = self._field_entries.get("ADM1")
         if entry is None:
             return
-        if self._is_gialersim():
+        if self._card_caps().adm1_hardcoded:
             entry.clear()
             entry.setReadOnly(True)
             entry.setEnabled(False)
             entry.setPlaceholderText("Hardcoded")
             entry.setToolTip(
-                "Gialersim cards use a fixed built-in ADM key — the ADM1 field "
-                "is not used for these cards.")
+                "This card uses a fixed built-in ADM key — the ADM1 field is "
+                "not used.")
         else:
             entry.setEnabled(True)
             entry.setReadOnly(False)
@@ -504,11 +511,11 @@ class ProgramSIMPanel(QWidget):
 
         if card_data:
             normalized = _normalize_card_data(card_data)
-            gialersim = self._is_gialersim()
+            adm1_hardcoded = self._card_caps().adm1_hardcoded
             for key, _, _ in _FORM_FIELDS:
-                # ADM1 is hardcoded for gialersim — leave the field greyed out
-                # rather than filling it from the CSV (the value is never used).
-                if key == "ADM1" and gialersim:
+                # When the ADM key is hardcoded (e.g. gialersim), leave the field
+                # greyed rather than filling it from the CSV (value is unused).
+                if key == "ADM1" and adm1_hardcoded:
                     continue
                 val = normalized.get(key, "")
                 # Public read fields absent from the CSV keep whatever
@@ -645,11 +652,14 @@ class ProgramSIMPanel(QWidget):
         # Preserve extra fields (PIN1/PUK1, KIC/KID/KIK, etc.) from CSV row
         self._extra_card_data = normalized
 
-        # Update SUCI checkbox from CSV (default to True if not specified)
-        suci_val = normalized.get('SUCI', '').lower()
-        # If SUCI not in CSV, default to enabled; otherwise use CSV value
-        suci_enabled = suci_val in ('true', 'yes', '1', 'enabled') if suci_val else True
-        self._suci_checkbox.setChecked(suci_enabled)
+        # Update SUCI checkbox from CSV (default to True if not specified).
+        # Only when the card supports SUCI — a card whose capability says no SUCI
+        # (e.g. gialersim) must stay forced off; a CSV row can never re-enable it.
+        if self._card_caps().supports_suci:
+            suci_val = normalized.get('SUCI', '').lower()
+            # If SUCI not in CSV, default to enabled; otherwise use CSV value
+            suci_enabled = suci_val in ('true', 'yes', '1', 'enabled') if suci_val else True
+            self._suci_checkbox.setChecked(suci_enabled)
 
         # Auto-fill HNET_PUBKEY from settings if not in CSV
         if not normalized.get('HNET_PUBKEY') and hasattr(self, '_cm') and self._cm:
@@ -672,12 +682,13 @@ class ProgramSIMPanel(QWidget):
             return
         # Clear any previous sticky result — this is a new explicit action.
         self._clear_sticky_result()
+        caps = self._card_caps()
         adm1 = self._field_entries["ADM1"].text().strip()
-        if self._is_gialersim():
-            # ADM1 field is greyed out for gialersim — the native programmer
-            # always presents the fixed built-in ADM key. Supply it here so the
-            # shared authenticate()/program_card() gate is satisfied; the value
-            # is not otherwise used (no VERIFY is sent for gialersim).
+        if caps.adm1_hardcoded:
+            # The ADM1 field is greyed for hardcoded-ADM cards. The native
+            # programmer presents the fixed built-in key itself; supply that
+            # value here only so the shared authenticate()/program_card() gate
+            # is satisfied (it is not otherwise used — no VERIFY is sent).
             from managers.gialersim import ADM_ASCII
             adm1 = ADM_ASCII
         if not adm1:
@@ -696,9 +707,11 @@ class ProgramSIMPanel(QWidget):
         hnet_pubkey = self._get_hnet_pubkey()
         if hnet_pubkey:
             card_data['HNET_PUBKEY'] = hnet_pubkey
-        # Add SUCI from checkbox
+        # Add SUCI from checkbox — but only if the card capability allows it.
+        # Defence in depth: even if the checkbox were somehow left checked for a
+        # card that doesn't support SUCI, programming never enables it here.
         suci_enabled = False
-        if self._suci_checkbox.isChecked():
+        if self._suci_checkbox.isChecked() and caps.supports_suci:
             card_data['SUCI'] = 'true'
             suci_enabled = True
         else:

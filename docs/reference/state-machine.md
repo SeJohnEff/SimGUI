@@ -66,12 +66,20 @@ follow these invariants. When in doubt, consult this document.
 See `docs/reference/card-types.md` for the full list. The key distinction for state
 machine purposes:
 
-| Type       | ICCID present | Uses CHV for auth |
-|------------|---------------|-------------------|
-| SJA5       | Yes           | 0x0A              |
-| GIALERSIM  | No (blank)    | 0x0C (hardcoded)  |
-| MAGIC      | Yes           | 0x0A              |
-| UNKNOWN    | Unknown       | Unknown           |
+| Type       | ICCID present | Uses CHV for auth | ADM1 hardcoded | 5G SUCI |
+|------------|---------------|-------------------|----------------|---------|
+| SJA5       | Yes           | 0x0A              | No             | Yes     |
+| GIALERSIM  | No (blank)    | 0x0C (hardcoded)  | Yes            | No      |
+| MAGIC      | Yes           | 0x0A              | No             | Yes     |
+| UNKNOWN    | Unknown       | Unknown           | No (default)   | Yes (default) |
+
+The **ADM1 hardcoded** and **5G SUCI** columns are UI-facing *capabilities*.
+They are defined once, declaratively, in `card_profiles/capabilities.py`
+(`capabilities_for(card_type) -> CardCapabilities`) and are the single source of
+truth the Program SIM panel renders from — it must never re-derive them with a
+per-card-type check. `adm1_hardcoded` greys the ADM1 field ("Hardcoded"); `not
+supports_suci` forces the SUCI control off and disabled and prevents programming
+from enabling SUCI.
 
 ---
 

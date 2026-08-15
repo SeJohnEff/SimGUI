@@ -110,10 +110,11 @@ def _make_panel_stub():
     stub._prog_btn = MagicMock()
     stub.on_card_detected = types.MethodType(ProgramSIMPanel.on_card_detected, stub)
     stub.on_card_removed = types.MethodType(ProgramSIMPanel.on_card_removed, stub)
-    # Bind the real card-type helpers so on_card_detected behaves like the panel
-    # (a bare MagicMock attribute would be truthy and wrongly trigger the
-    # gialersim path). With a MagicMock _cm, _is_gialersim() returns False.
-    stub._is_gialersim = types.MethodType(ProgramSIMPanel._is_gialersim, stub)
+    # Non-gialersim card so on_card_detected behaves like a normal card (editable
+    # ADM1, SUCI available). Bind the real capability helpers so the schema
+    # drives behaviour instead of truthy MagicMock attributes.
+    stub._cm.card_type = "SJA5"
+    stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
     stub._apply_adm1_card_type_lock = types.MethodType(
         ProgramSIMPanel._apply_adm1_card_type_lock, stub)
     stub._reset_step = MagicMock()
@@ -324,8 +325,9 @@ class TestOnProgramMergesExtras:
             stub._field_entries[key] = m
         stub._set_action_status = MagicMock()
         stub._card_watcher = None
-        # Non-gialersim card: ADM1 is required, so an empty field must abort.
-        stub._is_gialersim = MagicMock(return_value=False)
+        # Non-hardcoded-ADM card: ADM1 is required, so an empty field must abort.
+        from card_profiles import CardCapabilities
+        stub._card_caps = MagicMock(return_value=CardCapabilities())
         stub._on_program = types.MethodType(ProgramSIMPanel._on_program, stub)
 
         stub._on_program()
