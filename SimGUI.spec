@@ -24,6 +24,12 @@ a = Analysis(
     ],
     hiddenimports=[
         'smartcard', 'smartcard.scard', 'smartcard.scard._scard',
+        # Crypto backend for the gialersim USIM AUTHENTICATE self-check
+        # (managers/gialersim_selfcheck.py). Without these bundled, the frozen
+        # app loses Milenage and every gialersim program fails verification
+        # (VERIFY_UNAVAILABLE) even though a source run passes. pycryptodome
+        # installs as `Crypto`; the self-check also accepts `Cryptodome`.
+        'Crypto', 'Crypto.Cipher', 'Crypto.Cipher.AES',
         'abc', 'argparse', 'array', 'ast', 'asyncio', 'base64', 'bdb',
         'binascii', 'bisect', 'bz2', 'calendar', 'cmd', 'code', 'codecs',
         'codeop', 'collections', 'colorsys', 'concurrent', 'contextlib', 'contextvars',

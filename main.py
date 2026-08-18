@@ -18,6 +18,22 @@ if "--simgui-worker-process" in sys.argv or os.environ.get("SIMGUI_WORKER_PROCES
     from card_worker_process import main as _worker_main
     sys.exit(_worker_main())
 
+# Crypto self-check entry point — used by the packaged-app build smoke test to
+# verify the gialersim USIM AUTHENTICATE crypto backend is importable INSIDE the
+# frozen app (a raw framework-python cannot import PyInstaller's PYZ-archived
+# modules, so this must run through the frozen executable). Exits 0 if Milenage
+# is available and self-tests against 3GPP TS 35.208, non-zero otherwise.
+#
+# KEEP THIS BLOCK AHEAD OF THE csv/Qt/manager IMPORTS BELOW. It must reach the
+# crypto backend through the smallest possible import graph, so an unrelated
+# import failure (Qt, a manager, pySim) can never mask or defeat the crypto
+# check. Do not move it below the heavy imports.
+if "--selfcheck-crypto" in sys.argv:
+    from managers import gialersim_selfcheck
+    _ok = gialersim_selfcheck.selftest()
+    print("crypto self-check: %s" % ("OK" if _ok else "FAILED"))
+    sys.exit(0 if _ok else 1)
+
 import csv
 import logging
 from datetime import datetime
@@ -39,7 +55,7 @@ from PyQt6.QtWidgets import (
 )
 
 from managers.auto_artifact_manager import AutoArtifactManager, DEFAULT_ARTIFACT_FIELDS
-from managers.card_manager import CardManager, CLIBackend
+from managers.card_manager import CardManager, CLIBackend, CardType
 from managers.card_watcher import CardWatcher
 from managers.iccid_index import IccidIndex
 from managers.network_storage_manager import NetworkStorageManager
@@ -80,6 +96,7 @@ class BackgroundStartupWorker(QObject):
     status_requested = pyqtSignal(str)
     mounts_updated = pyqtSignal(list)
     index_updated = pyqtSignal()
+    verify_check_done = pyqtSignal(bool)   # gialersim key-verification available?
 
     def __init__(self, ns_manager, iccid_index, standards_mgr=None) -> None:
         super().__init__()
@@ -89,6 +106,18 @@ class BackgroundStartupWorker(QObject):
 
     def run(self) -> None:
         """Execute startup tasks and emit signals."""
+        # Key-verification capability check FIRST, so the fail-closed pre-gate is
+        # in effect before any card can be programmed. selftest() imports the
+        # crypto backend and validates Milenage against 3GPP TS 35.208 — if it
+        # fails, gialersim key writes cannot be verified and must be blocked.
+        try:
+            from managers import gialersim_selfcheck
+            verify_ok = gialersim_selfcheck.selftest()
+        except Exception as exc:  # noqa: BLE001 — never let this crash startup
+            logger.warning("verify self-test raised: %s", exc)
+            verify_ok = False
+        self.verify_check_done.emit(verify_ok)
+
         try:
             results = self._ns_manager.reconnect_saved()
         except Exception as exc:
@@ -286,6 +315,18 @@ class SimGUIApp(QMainWindow):
 
         # ---- State manager -----------------------------------------------
         self.state_manager = StateManager(self)
+
+        # Fail-closed override (deliberate escape hatch, never a default): when
+        # key verification is unavailable, gialersim programming is disabled. A
+        # CLI flag — or the Card-menu toggle — permits programming anyway, but
+        # the write is still reported NOT verified (VERIFY_UNAVAILABLE), never
+        # as a silent success.
+        if "--allow-unverified-programming" in sys.argv:
+            self.state_manager.allow_unverified_programming = True
+            logger.warning(
+                "Unverified gialersim programming ENABLED via "
+                "--allow-unverified-programming (writes will be reported "
+                "VERIFY_UNAVAILABLE, not verified)")
 
         # ---- Managers (framework-independent) ----------------------------
         self._card_manager = CardManager()
@@ -541,6 +582,20 @@ class SimGUIApp(QMainWindow):
         auth_act.triggered.connect(self._on_authenticate)
         card_menu.addAction(auth_act)
 
+        card_menu.addSeparator()
+
+        # Fail-closed escape hatch (off by default). When key verification is
+        # unavailable, gialersim programming is disabled; enabling this permits
+        # it anyway, but the write is still reported VERIFY_UNAVAILABLE.
+        self._allow_unverified_act = QAction(
+            "Allow Unverified Gialersim Programming", self)
+        self._allow_unverified_act.setCheckable(True)
+        self._allow_unverified_act.setChecked(
+            self.state_manager.allow_unverified_programming)
+        self._allow_unverified_act.toggled.connect(
+            self._on_toggle_allow_unverified)
+        card_menu.addAction(self._allow_unverified_act)
+
 
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
@@ -598,6 +653,11 @@ class SimGUIApp(QMainWindow):
 
         def on_detected(iccid, card_data, file_path):
             self.state_manager.card_state = CardState.DETECTED
+            # Publish the authoritative card identity to StateManager (the SSOT).
+            # Set BEFORE update_card_info/on_card_detected so identity-driven UI
+            # reads the correct type. This is the only place widgets learn the
+            # card type — none of them read CardManager.card_type.
+            self.state_manager.card_type = self._card_manager.card_type
             # Merge pySim-read data with CSV data: CSV wins when both have a value;
             # pySim-read fills in fields the CSV omits (IMSI, ACC, SPN, FPLMN).
             raw = self._card_manager.card_info or {}
@@ -620,6 +680,9 @@ class SimGUIApp(QMainWindow):
             else:
                 self.state_manager.card_state = CardState.BLANK
                 self.state_manager.status_text = "Blank card detected (no ICCID)"
+            # Publish authoritative identity (e.g. a blank gialersim is still
+            # GIALERSIM) before card_info/panel updates read it.
+            self.state_manager.card_type = self._card_manager.card_type
             raw = self._card_manager.card_info or {}
             self.state_manager.update_card_info(
                 iccid=iccid or "(blank)",
@@ -636,6 +699,18 @@ class SimGUIApp(QMainWindow):
             self.state_manager.status_text = "Reader connected — insert a SIM card"
 
         def on_removed():
+            # "Card gone" clears identity and card_info together, here, in one
+            # place. Two deliberate ordering rules:
+            #  1. Identity is cleared no later than card_info, so no consumer can
+            #     ever observe a blank CardInfo alongside a stale identity.
+            #  2. Identity is cleared before card_state, so a NO_CARD reactor
+            #     (e.g. the panel's ADM1 lock) already reads UNKNOWN.
+            # These orderings are defence-in-depth, not the mechanism: the
+            # structural guarantee is that setting card_type to UNKNOWN cannot
+            # emit card_identified (the setter fires only on the UNKNOWN→known
+            # edge), so removal can never drive the SUCI-unsupported notice
+            # regardless of the order these run in.
+            self.state_manager.card_type = CardType.UNKNOWN
             self.state_manager.card_state = CardState.NO_CARD
             self.state_manager.clear_card_info()
             self.state_manager.status_text = "Card removed"
@@ -687,6 +762,7 @@ class SimGUIApp(QMainWindow):
         worker.status_requested.connect(self._on_worker_status)
         worker.mounts_updated.connect(self._on_worker_mounts)
         worker.index_updated.connect(self._on_worker_index_updated)
+        worker.verify_check_done.connect(self._on_verify_check_done)
         worker.finished.connect(self._startup_worker_thread.quit)
         worker.finished.connect(worker.deleteLater)
         self._startup_worker_thread.finished.connect(self._on_thread_finished)
@@ -694,6 +770,37 @@ class SimGUIApp(QMainWindow):
         self._startup_worker = worker  # keep strong ref so GC doesn't collect before thread fires
         self._startup_worker_thread.started.connect(worker.run)
         self._startup_worker_thread.start()
+
+    def _on_verify_check_done(self, ok: bool) -> None:
+        """Publish the startup key-verification capability and surface failure.
+
+        When verification is unavailable the panel's fail-closed pre-gate
+        disables gialersim programming; we also raise a prominent toast so the
+        cause (missing crypto backend) is visible immediately, not only when a
+        card is inserted.
+        """
+        self.state_manager.keys_verification_available = ok
+        if not ok:
+            logger.error(
+                "gialersim key verification UNAVAILABLE at startup — Milenage "
+                "self-test failed (crypto backend missing?). Gialersim "
+                "programming is disabled until resolved.")
+            self.state_manager.request_toast(
+                "Key verification unavailable (crypto backend missing). "
+                "Gialersim programming is disabled — install pycryptodome, or "
+                "override via Card ▸ Allow Unverified Gialersim Programming.",
+                "error", 15000)
+
+    def _on_toggle_allow_unverified(self, checked: bool) -> None:
+        """Card-menu escape hatch: permit gialersim programming when
+        verification is unavailable. The write still reports VERIFY_UNAVAILABLE
+        (never a silent success) — this only lifts the pre-gate."""
+        self.state_manager.allow_unverified_programming = checked
+        if checked:
+            self.state_manager.request_toast(
+                "Unverified gialersim programming ENABLED — cards will be "
+                "written but reported NOT verified (VERIFY_UNAVAILABLE).",
+                "warning", 10000)
 
     def _on_worker_toast(self, msg: str, typ: str, dur: int) -> None:
         self.state_manager.request_toast(msg, typ, dur)

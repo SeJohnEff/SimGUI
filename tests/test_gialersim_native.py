@@ -345,11 +345,11 @@ class TestRouting:
                           return_value=(None, "n/a")), \
              patch.object(cm, "_run_pysim_prog") as pysim:
             ok, msg, result = cm.program_card(self._card_data(), original_data={})
-        assert ok is True
         native.assert_called_once()
         pysim.assert_not_called()
-        # Self-check unavailable -> pending, not verified.
-        assert result.outcome == ProgramOutcome.WRITE_OK_PENDING
+        # Self-check unavailable -> FAIL-CLOSED: VERIFY_UNAVAILABLE, not success.
+        assert ok is False
+        assert result.outcome == ProgramOutcome.VERIFY_UNAVAILABLE
         assert "Ki" in result.written_only_fields
 
     def _program_with_selfcheck(self, cm, verdict):
@@ -376,12 +376,17 @@ class TestRouting:
         assert result.outcome == ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
         assert "Ki" in result.failed_fields and "OPc" in result.failed_fields
 
-    def test_selfcheck_unavailable_stays_pending(self):
+    def test_selfcheck_unavailable_is_failclosed(self):
+        """Fail-closed: a check that cannot run is NOT success. 'Could not
+        verify' is a distinct failure (VERIFY_UNAVAILABLE) from 'keys wrong'
+        (WRITE_OK_VERIFICATION_FAILED), and neither returns ok=True."""
         cm = _gialersim_manager()
         ok, msg, result = self._program_with_selfcheck(cm, (None, "no crypto"))
-        assert ok is True
-        assert result.outcome == ProgramOutcome.WRITE_OK_PENDING
+        assert ok is False
+        assert result.outcome == ProgramOutcome.VERIFY_UNAVAILABLE
         assert "Ki" in result.written_only_fields
+        # Distinct from the "keys wrong" failure.
+        assert result.outcome != ProgramOutcome.WRITE_OK_VERIFICATION_FAILED
 
     def test_native_releases_worker_session_before_connect(self):
         """The card worker holds the PCSC card EXCLUSIVE; the native path must
@@ -399,6 +404,8 @@ class TestRouting:
             return (True, True)
 
         with patch.object(gialersim, "program_reader", side_effect=_prog), \
+             patch.object(cm, "_selfcheck_gialersim_keys",
+                          return_value=(True, "ok")), \
              patch("managers.card_manager._init_pyscard", return_value=True), \
              patch("managers.card_manager._smartcard_readers",
                    return_value=[MagicMock()]):
@@ -463,8 +470,12 @@ class TestAdm1GreyOut:
         from widgets.program_sim_panel import ProgramSIMPanel, _FORM_FIELDS
         stub = MagicMock()
         stub._cm = MagicMock()
-        stub._cm.card_type = card_type
+        # Identity is now read from StateManager (the SSOT), never CardManager.
+        stub.state_manager = MagicMock()
+        stub.state_manager.card_type = card_type
         stub._field_entries = {k: MagicMock() for k, _, _ in _FORM_FIELDS}
+        stub._current_card_type = types.MethodType(
+            ProgramSIMPanel._current_card_type, stub)
         stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
         stub._apply_adm1_card_type_lock = types.MethodType(
             ProgramSIMPanel._apply_adm1_card_type_lock, stub)
@@ -489,19 +500,27 @@ class TestAdm1GreyOut:
 
     def test_gialersim_disables_and_unchecks_suci(self):
         """SUCI must be forced OFF and disabled when the card's capability says
-        it is unsupported (gialersim), driven by the capability schema."""
+        it is unsupported (gialersim), driven by the capability schema.
+
+        Now delivered via _on_card_identified (the card_identified edge), not
+        the removed _handle_suci_for_card_type/card_info path.
+        """
         import types
         from widgets.program_sim_panel import ProgramSIMPanel
         stub = MagicMock()
-        stub._cm = MagicMock()
-        stub._cm.card_type = CardType.GIALERSIM
+        stub.state_manager = MagicMock()
+        stub.state_manager.card_type = CardType.GIALERSIM
+        # Skip the once-per-session dialog for this UI-state assertion.
+        stub.state_manager.claim_once.return_value = False
         stub._suci_checkbox = MagicMock()
-        stub._suci_checkbox.isChecked.return_value = False  # skip the warning dialog
+        stub._apply_adm1_card_type_lock = MagicMock()
+        stub._current_card_type = types.MethodType(
+            ProgramSIMPanel._current_card_type, stub)
         stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
-        stub._handle_suci_for_card_type = types.MethodType(
-            ProgramSIMPanel._handle_suci_for_card_type, stub)
+        stub._on_card_identified = types.MethodType(
+            ProgramSIMPanel._on_card_identified, stub)
 
-        stub._handle_suci_for_card_type(MagicMock())
+        stub._on_card_identified(CardType.GIALERSIM)
 
         stub._suci_checkbox.setChecked.assert_called_with(False)
         stub._suci_checkbox.setEnabled.assert_called_with(False)
@@ -516,9 +535,11 @@ class TestAdm1GreyOut:
         # The SUCI-from-CSV block lives inside _on_card_select; exercise just
         # that capability guard in isolation.
         stub = MagicMock()
-        stub._cm = MagicMock()
-        stub._cm.card_type = CardType.GIALERSIM
+        stub.state_manager = MagicMock()
+        stub.state_manager.card_type = CardType.GIALERSIM
         stub._suci_checkbox = MagicMock()
+        stub._current_card_type = types.MethodType(
+            ProgramSIMPanel._current_card_type, stub)
         stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
 
         # Simulate the guarded block from _on_card_select for a CSV row with no
@@ -539,7 +560,10 @@ class TestAdm1GreyOut:
 
         stub = MagicMock()
         stub._cm = MagicMock()
-        stub._cm.card_type = CardType.GIALERSIM
+        stub.state_manager = MagicMock()
+        stub.state_manager.card_type = CardType.GIALERSIM
+        stub._current_card_type = types.MethodType(
+            ProgramSIMPanel._current_card_type, stub)
         stub._step = 1
         stub._extra_card_data = {}
         stub._original_form_data = {}
@@ -572,3 +596,70 @@ class TestAdm1GreyOut:
         # It must not have aborted with the "ADM1 is required" warning.
         for call in stub._set_action_status.call_args_list:
             assert "ADM1 is required" not in call[0][0]
+
+
+class TestSuciNoticeLifecycle:
+    """SUCI-unsupported notice behaviour driven end-to-end through the REAL
+    StateManager.card_identified signal and the REAL panel handler.
+
+    Covers the acceptance scenarios a-e:
+      a. insert gialersim              → notice exactly once
+      b. remove it                     → no notice
+      c. re-insert same                → no notice (once per session)
+      d. sysmocom then gialersim       → notice once, on the gialersim only
+      e. restart app, insert gialersim → notice again (session-scoped)
+
+    Removal is modelled exactly as main.on_removed() does it: card_type is set
+    to UNKNOWN, which the setter must NOT turn into a card_identified emission.
+    """
+
+    def _wire(self, sm):
+        import types
+        from widgets.program_sim_panel import ProgramSIMPanel
+        stub = MagicMock()
+        stub.state_manager = sm
+        stub._suci_checkbox = MagicMock()
+        stub._suci_checkbox.isChecked.return_value = False
+        stub._apply_adm1_card_type_lock = MagicMock()
+        stub._current_card_type = types.MethodType(
+            ProgramSIMPanel._current_card_type, stub)
+        stub._card_caps = types.MethodType(ProgramSIMPanel._card_caps, stub)
+        stub._on_card_identified = types.MethodType(
+            ProgramSIMPanel._on_card_identified, stub)
+        sm.card_identified.connect(stub._on_card_identified)
+        return stub
+
+    def test_scenarios_a_through_e(self):
+        from state_manager import StateManager
+        with patch("dialogs.suci_unsupported_dialog.SUCIUnsupportedDialog") as Dlg, \
+             patch("dialogs.suci_suggested_dialog.SUCISuggestedDialog"):
+            # ---- session 1 ----
+            sm = StateManager()
+            self._wire(sm)
+
+            sm.card_type = CardType.GIALERSIM                # (a) insert gialersim
+            assert Dlg.call_count == 1, "a: notice must appear exactly once"
+
+            sm.card_type = CardType.UNKNOWN                  # (b) remove
+            assert Dlg.call_count == 1, "b: removal must not notify"
+
+            sm.card_type = CardType.GIALERSIM                # (c) re-insert same
+            assert Dlg.call_count == 1, "c: re-insert must not notify again"
+
+            # ---- session 2 (fresh app) : sysmocom then gialersim ----
+            Dlg.reset_mock()
+            sm2 = StateManager()
+            self._wire(sm2)
+
+            sm2.card_type = CardType.SJA5                    # sysmocom → no notice
+            assert Dlg.call_count == 0, "d: sysmocom must not notify"
+            sm2.card_type = CardType.UNKNOWN                 # remove
+            sm2.card_type = CardType.GIALERSIM              # gialersim → notice
+            assert Dlg.call_count == 1, "d: notice once, on the gialersim only"
+
+            # ---- session 3 (restart) : notice again ----
+            Dlg.reset_mock()
+            sm3 = StateManager()
+            self._wire(sm3)
+            sm3.card_type = CardType.GIALERSIM
+            assert Dlg.call_count == 1, "e: session-scoped, notifies again"

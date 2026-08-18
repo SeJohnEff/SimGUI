@@ -52,7 +52,10 @@ _FORM_FIELDS = [
     ("ACC", "ACC", True),
     ("SPN", "SPN", True),
     ("FPLMN", "FPLMN", True),
-    ("HNET_PUBKEY", "HNET_PUBKEY (5G SUCI)", True),
+    # HNET_PUBKEY is intentionally NOT a main-form field. It is a 5G SUCI
+    # parameter edited only under File ▸ SUCI Configuration and sourced from the
+    # settings manager (see _get_hnet_pubkey); exposing it here duplicated a
+    # single source of truth. Removed from the main GUI (defect #5).
 ]
 
 # Canonical names for all known share/index fields (lowercase key → canonical)
@@ -81,6 +84,36 @@ def _normalize_card_data(data: dict) -> dict:
         norm = _KNOWN_FIELD_NAMES.get(k.strip().lower(), k.strip().upper())
         result[norm] = v
     return result
+
+
+# Fail-closed pre-gate message (shown when a gialersim card cannot be verified).
+_VERIFY_BLOCKED_MSG = (
+    "Gialersim programming disabled — key verification unavailable (crypto "
+    "backend missing). An unverifiable key write is indistinguishable from a "
+    "bricked card. Install pycryptodome, or override via "
+    "Card ▸ Allow Unverified Gialersim Programming."
+)
+
+
+def _verification_blocked(card_type, state_manager) -> bool:
+    """Whether fail-closed policy blocks programming this card.
+
+    A pure module function (not a method) on purpose: the two call sites run on
+    MagicMock stubs in unit tests, and a bound method there would auto-mock to a
+    truthy value and spuriously block. Reading explicit arguments keeps it safe —
+    a non-gialersim ``card_type`` (or a MagicMock) compares unequal and returns
+    False immediately.
+
+    Blocks only when ALL hold: the card is gialersim, key verification is
+    unavailable, and the operator has not enabled the unverified override.
+    """
+    from managers.card_manager import CardType
+    if card_type != CardType.GIALERSIM:
+        return False
+    if state_manager is None:
+        return False
+    return (not state_manager.keys_verification_available
+            and not state_manager.allow_unverified_programming)
 
 
 class ProgramSIMPanel(QWidget):
@@ -114,6 +147,7 @@ class ProgramSIMPanel(QWidget):
         self._mode_var = "manual"
         self._field_vars: dict[str, str] = {}
         self._field_entries: dict[str, QLineEdit] = {}
+        self._field_rows: dict[str, tuple] = {}  # key -> (label_widget, entry)
         self._step = 0
         self._original_form_data: dict[str, str] = {}
         self._detected_non_empty: bool = False
@@ -133,11 +167,25 @@ class ProgramSIMPanel(QWidget):
             self.state_manager.card_info_changed.connect(self._on_card_info_changed)
             self.state_manager.card_state_changed.connect(self._on_card_state_changed)
             self.state_manager.status_changed.connect(self._on_global_status_changed)
+            # Identity-driven UI (SUCI support, hardcoded ADM1) is wired ONLY to
+            # card_identified — the UNKNOWN→known edge — so it can never be
+            # triggered by a card-removal signal. See docs/reference/
+            # state-machine.md and the SUCI-on-removal fix.
+            self.state_manager.card_identified.connect(self._on_card_identified)
+            # Re-evaluate the fail-closed pre-gate when key-verification
+            # availability (or the override) changes.
+            self.state_manager.verify_availability_changed.connect(
+                lambda _ok: self._update_program_btn_state())
             self._on_card_state_changed(self.state_manager.card_state)
             # Bootstrap: if a card is already detected when the panel is created,
             # populate public fields from the existing CardInfo.
             if self.state_manager.card_info.iccid:
                 self._on_card_info_changed(self.state_manager.card_info)
+            # Bootstrap identity too: card_identified may have fired before this
+            # panel existed (card detected before the tab was built).
+            _ct = self.state_manager.card_type
+            if getattr(_ct, "name", None) not in (None, "UNKNOWN"):
+                self._on_card_identified(_ct)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -183,6 +231,10 @@ class ProgramSIMPanel(QWidget):
             data_layout.addWidget(entry, i, 1)
             self._field_vars[key] = ""
             self._field_entries[key] = entry
+            # Keep the label+entry pair so fields excluded for a card type
+            # (e.g. SPN/FPLMN for gialersim) can be hidden — "what is shown is
+            # what is programmed".
+            self._field_rows[key] = (label_widget, entry)
 
         data_layout.setColumnStretch(1, 1)
         top_layout.addWidget(data_group)
@@ -302,8 +354,15 @@ class ProgramSIMPanel(QWidget):
             if incoming != self._sticky_result_iccid:
                 self._clear_sticky_result()
         self._update_program_btn_state()
-        self._handle_suci_for_card_type(card_info)
-        self._apply_adm1_card_type_lock()
+        # NOTE: NO card-identity-derived UI runs here — not the SUCI dialog and
+        # not the ADM1 lock. card_info_changed fires on card removal too
+        # (clear_card_info), so deriving identity here is the breach class that
+        # fired the SUCI dialog on a removed card. Both live on identity edges:
+        #   - present card  → _on_card_identified (the UNKNOWN→known edge)
+        #   - card detected → on_card_detected (applies the ADM1 lock)
+        #   - card removed  → on_card_removed (unlocks ADM1 for the next card)
+        # so ADM1 lock state always matches the identified type without ever
+        # keying off card_info.
 
         if not card_info.iccid:
             return
@@ -342,35 +401,72 @@ class ProgramSIMPanel(QWidget):
             return self._settings.get('suci_hnet_pubkey', '').strip()
         return ''
 
-    def _handle_suci_for_card_type(self, card_info: CardInfo) -> None:
-        """Show SUCI warnings and update UI based on detected card type.
+    def _on_card_identified(self, card_type) -> None:
+        """Apply card-type-driven UI when a card is IDENTIFIED.
 
-        Uses the authoritative ``CardType`` enum from the card manager, NOT
-        ``card_info.card_type`` (a display *string* that never equals the enum,
-        which silently disabled this whole handler).
+        Reached ONLY via ``StateManager.card_identified``, which fires solely on
+        the UNKNOWN→known identity edge. It therefore cannot run on card removal
+        (removal sets ``card_type = UNKNOWN``, which does not emit the signal) —
+        the structural fix for the SUCI dialog appearing on a removed card.
+
+        The once-per-session SUCI-unsupported notice is gated by
+        ``StateManager.claim_once`` so "shown at most once per session" is a
+        property of the registry, not a flag bolted onto this widget.
         """
         from managers.card_manager import CardType
         from dialogs.suci_suggested_dialog import SUCISuggestedDialog
         from dialogs.suci_unsupported_dialog import SUCIUnsupportedDialog
 
-        card_type = getattr(self._cm, "card_type", None)
-        suci_checked = self._suci_checkbox.isChecked()
+        # Keep the ADM1 field render and per-type field visibility in sync with
+        # the identified type.
+        self._apply_adm1_card_type_lock()
+        self._apply_field_visibility()
 
-        if not self._card_caps().supports_suci:
+        caps = self._card_caps()
+        if not caps.supports_suci:
             # Capability says no SUCI (e.g. gialersim) — force off and disabled.
-            if suci_checked:
-                SUCIUnsupportedDialog(self).exec()
             self._suci_checkbox.setChecked(False)
             self._suci_checkbox.setEnabled(False)
+            if self.state_manager and self.state_manager.claim_once("suci_unsupported"):
+                SUCIUnsupportedDialog(self).exec()
             return
 
         # SUCI is supported — enable the control.
         self._suci_checkbox.setEnabled(True)
         # SJA5 nudge: suggest enabling SUCI if the operator left it off.
-        if card_type == CardType.SJA5 and not suci_checked:
+        if card_type == CardType.SJA5 and not self._suci_checkbox.isChecked():
             dlg = SUCISuggestedDialog(self)
             if dlg.exec() == SUCISuggestedDialog.RESULT_CHECK:
                 self._suci_checkbox.setChecked(True)
+
+    def _apply_field_visibility(self) -> None:
+        """Show/hide form fields per the identified card type's schema.
+
+        Fields the card type is not programmed with (gialersim: SPN/FPLMN — not
+        in the verified recipe) are hidden, so the operator can never enter a
+        value that would silently not be written. Driven by
+        ``card_profiles/field_schema.py``, the single source shared with the
+        programming and verification paths. All fields are shown for UNKNOWN and
+        for non-gialersim types (today's behaviour).
+        """
+        from card_profiles import fields_for
+        excluded = set(fields_for(self._current_card_type()).excluded)
+        for key, (label_widget, entry) in self._field_rows.items():
+            visible = key not in excluded
+            label_widget.setVisible(visible)
+            entry.setVisible(visible)
+            if not visible:
+                entry.clear()
+
+    def _current_card_type(self):
+        """The authoritative card identity — read ONLY from StateManager.
+
+        Never read ``CardManager.card_type`` from a widget: that copy is not
+        reset on removal, and reading it is exactly what fired the SUCI dialog on
+        a removed card. StateManager is the single source of truth.
+        """
+        sm = self.state_manager
+        return sm.card_type if sm is not None else None
 
     def _card_caps(self):
         """Capabilities for the detected card type — the single source of truth
@@ -381,7 +477,7 @@ class ProgramSIMPanel(QWidget):
         check — read it from here.
         """
         from card_profiles import capabilities_for
-        return capabilities_for(getattr(self._cm, "card_type", None))
+        return capabilities_for(self._current_card_type())
 
     def _suci_supported(self) -> bool:
         """Whether the detected card supports 5G SUCI (schema-driven)."""
@@ -439,6 +535,14 @@ class ProgramSIMPanel(QWidget):
         - AND there is form data selected (at least one field populated)
         """
         if not self.state_manager:
+            return
+
+        # Fail-closed pre-gate: an unverifiable gialersim card cannot be
+        # programmed (unless the operator has enabled the override). This wins
+        # over every other enable/status decision below.
+        if _verification_blocked(self._current_card_type(), self.state_manager):
+            self._prog_btn.setEnabled(False)
+            self._set_action_status(_VERIFY_BLOCKED_MSG, "error")
             return
 
         _current = self.state_manager.card_state
@@ -580,10 +684,14 @@ class ProgramSIMPanel(QWidget):
         self._original_form_data = {}
         for key, _, _ in _FORM_FIELDS:
             self._field_entries[key].setText("")
-        # Card gone — restore ADM1 to a normal editable field for the next card.
+        # Card gone — restore ADM1 to a normal editable field and re-show all
+        # fields (card_type is UNKNOWN now) for the next card.
         self._apply_adm1_card_type_lock()
-        # Keep SUCI enabled by default for the next card
+        self._apply_field_visibility()
+        # Reset SUCI to the default enabled+checked state for the next card
+        # (gialersim disables it; the next card must start from a clean control).
         self._suci_checkbox.setChecked(True)
+        self._suci_checkbox.setEnabled(True)
         self._field_entries["ICCID"].setReadOnly(False)
 
     def _on_browse_csv(self):
@@ -679,6 +787,12 @@ class ProgramSIMPanel(QWidget):
 
     def _on_program(self):
         if self._step < 1:
+            return
+        # Fail-closed pre-gate (defence in depth behind the disabled button):
+        # never write keys to a gialersim card we cannot verify unless the
+        # operator has explicitly enabled the override.
+        if _verification_blocked(self._current_card_type(), self.state_manager):
+            self._set_action_status(_VERIFY_BLOCKED_MSG, "error")
             return
         # Clear any previous sticky result — this is a new explicit action.
         self._clear_sticky_result()

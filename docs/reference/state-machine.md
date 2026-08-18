@@ -196,9 +196,34 @@ These rules are non-negotiable. Violating them causes incorrect UI behaviour.
 |---------------------------|-------------|----------------------------------------------|
 | `card_state_changed`      | `CardState` | Card reader state changed                    |
 | `card_info_changed`       | `CardInfo`  | ICCID, IMSI, card_type, or other info changed|
+| `card_identified`         | `CardType`  | Card identity known — fires ONLY on the UNKNOWN→known edge (never on removal) |
 | `status_changed`          | `str`       | Status bar text update                       |
 | `error_occurred`          | `str`       | Non-fatal error for toast/log display        |
 | `share_status_changed`    | `ShareStatus`| Network share mount/unmount                 |
+| `verify_availability_changed` | `bool`  | Key-verification capability (or override) changed |
+
+### Card identity is single-sourced in StateManager
+
+`StateManager.card_type` (a `CardType`) is the **single source of truth for card
+identity**. Widgets must read it — or `capabilities_for(...)` / `fields_for(...)`
+derived from it — never `CardManager.card_type`, whose copy is an internal
+working value not reset on removal. Reading that stale copy is what once fired
+the SUCI-unsupported dialog on a *removed* card.
+
+- The MainWindow watcher bridge sets `card_type` on detect/unknown and clears it
+  to `UNKNOWN` on removal, in one place, alongside `clear_card_info()`.
+- The setter emits `card_identified` **only** when transitioning INTO a known
+  type. Clearing to `UNKNOWN` (removal) emits nothing, so identity-driven UI
+  (the SUCI dialog, ADM1 lock, per-type field visibility) can never be triggered
+  by a removal. This is structural, not ordering-dependent.
+
+### Session one-shot notices
+
+`StateManager.claim_once(notice_id) -> bool` is the structural "show at most once
+per application session" primitive: the first caller for an id gets `True`, every
+later caller `False`, for the life of the session. The SUCI-unsupported dialog is
+gated by `claim_once("suci_unsupported")`, so "once per session" is a property of
+the registry, not a flag on a widget.
 
 ### Desired future signals (not yet implemented)
 
@@ -342,8 +367,9 @@ or reader state.
 | `ADM1_AUTH_FAILED` | A VERIFY command was sent and the card rejected it (wrong key). Counter decremented. |
 | `WRITE_FAILED` | ADM1 auth succeeded (or was skipped for blank) but at least one field write failed. |
 | `WRITE_OK_VERIFIED` | All written fields were read back and confirmed to match the intended values. |
-| `WRITE_OK_PENDING` | Writes completed without error, but read-back verification was not performed or was inconclusive (e.g., SPN-only change where SPN read-back is not supported). |
+| `WRITE_OK_PENDING` | Writes completed without error, but read-back verification was not performed or was inconclusive (e.g., SPN-only change where SPN read-back is not supported). **Not a clean success** — see fail-closed note below. |
 | `WRITE_OK_VERIFICATION_FAILED` | Write command reported success; read-back verification ran; at least one readable intended field value mismatches the intended value. |
+| `VERIFY_UNAVAILABLE` | Writes completed, but key verification **could not run** (crypto backend missing, Milenage self-test failed, transport error, or the check was skipped). Distinct from `WRITE_OK_VERIFICATION_FAILED` (keys proven wrong): here the result is unknown. **A failure**, never a success — see fail-closed note. Used by the gialersim USIM AUTHENTICATE self-check. |
 
 ### Required Distinctions
 
@@ -363,7 +389,23 @@ These three outcomes share the same write-phase result (writer/CLI reported succ
 
 - `WRITE_OK_VERIFIED`: verification ran; every readable intended field matched the intended value. This is the only "clean success" state. Artifact generation is allowed. UI shows green success.
 - `WRITE_OK_VERIFICATION_FAILED`: verification ran; at least one readable intended field value mismatches the intended value. The write command did not error, but the card data does not match what was requested. `failed_fields` is populated. No artifact is generated. UI shows red failure.
-- `WRITE_OK_PENDING`: verification could not run or was inconclusive — at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified. No artifact is generated. UI shows amber warning.
+- `WRITE_OK_PENDING`: verification could not run or was inconclusive — at least one field could not be verified by read-back (e.g., SPN write on a card type that does not support SPN read-back via pySim-read). The programmer must treat this as unverified. No artifact is generated. UI shows amber warning. Used by the sysmocom/pySim paths; it is **not** a clean success.
+- `VERIFY_UNAVAILABLE`: the write completed but the key-verification step (gialersim offline USIM AUTHENTICATE) **could not run at all** — no crypto backend, Milenage self-test failed, transport error, or the check was skipped. Distinct from `WRITE_OK_VERIFICATION_FAILED` (keys proven wrong): here the result is simply unknown. Fail-closed treats "unknown" as failure. No artifact. UI shows red failure.
+
+**Fail-closed verification (gialersim keys)**
+
+Ki/OPc are `READ=NEVER`; a `9000` on the write proves nothing (this is the exact
+defect the self-check exists to prevent — a status that meant nothing and was
+trusted). Verification is therefore **fail-closed**: only a positive USIM
+`AUTHENTICATE` is success. Both "keys wrong" (`WRITE_OK_VERIFICATION_FAILED`) and
+"could not verify" (`VERIFY_UNAVAILABLE`) are failure states — distinct from each
+other (they need different operator responses) and both distinct from
+`WRITE_OK_VERIFIED`. Neither returns success, is coloured green, nor emits an
+artifact. An unverifiable key write is indistinguishable from a bricked card, so
+the app additionally pre-gates (disables) gialersim programming when the startup
+key-verification self-test fails, with a deliberate, explicit override
+(`--allow-unverified-programming` / Card menu) that still reports
+`VERIFY_UNAVAILABLE` — never a silent success.
 
 **`WRITE_FAILED` vs `WRITE_OK_VERIFICATION_FAILED`**
 
@@ -372,7 +414,7 @@ These three outcomes share the same write-phase result (writer/CLI reported succ
 
 **No `WRITE_OK_PARTIAL`**
 
-Any partial write failure (some fields written, some not) is `WRITE_FAILED`. There is no `WRITE_OK_PARTIAL` state. A success state (`WRITE_OK_VERIFIED` or `WRITE_OK_PENDING`) means all intended writes completed without error; a failure state means at least one did not.
+Any partial write failure (some fields written, some not) is `WRITE_FAILED`. There is no `WRITE_OK_PARTIAL` state. The **only** clean-success state is `WRITE_OK_VERIFIED`. `WRITE_OK_PENDING` means the writes completed without error but are unverified (amber, no artifact); `VERIFY_UNAVAILABLE` and `WRITE_OK_VERIFICATION_FAILED` are failures. A failure state means at least one intended write did not complete or could not be confirmed.
 
 ### Outcome Metadata
 
@@ -395,6 +437,7 @@ For non-write outcomes (`IDLE`, `NO_CHANGES`, `ICCID_MISMATCH`, `ADM1_LOCKED`,
 | `WRITE_OK_VERIFIED` | Green | Yes |
 | `WRITE_OK_PENDING` | Amber | No |
 | `WRITE_OK_VERIFICATION_FAILED` | Red | No |
+| `VERIFY_UNAVAILABLE` | Red | No |
 | `NO_CHANGES` | Neutral | No |
 | `WRITE_FAILED` | Red | No |
 | `ADM1_AUTH_FAILED` | Red | No |

@@ -1,3 +1,36 @@
+simgui (0.8.1) stable; urgency=medium
+
+  * Gialersim SUCI dialog no longer appears on card removal and shows at most
+    once per session. Card identity is now single-sourced in StateManager
+    (card_type + card_identified signal, emitted only on the UNKNOWN→known
+    edge); widgets no longer read CardManager.card_type. Removal clears identity
+    alongside card_info in one place. The SUCI-unsupported notice is gated by a
+    session-scoped StateManager.claim_once registry. Fixes the dialog firing on
+    every insertion and, impossibly, on removal.
+  * Gialersim key verification is now FAIL-CLOSED. The offline USIM AUTHENTICATE
+    self-check (managers/gialersim_selfcheck.py) already existed but silently
+    degraded to a pending "success" when its crypto backend was missing — so a
+    card that was never verified looked programmed. pycryptodome is now a hard
+    prerequisite (requirements.txt, debian/control python3-pycryptodome,
+    SimGUI.spec hiddenimports, install scripts); the macOS build fails if the
+    frozen app cannot import it (main.py --selfcheck-crypto). A new
+    ProgramOutcome.VERIFY_UNAVAILABLE (red, no artifact) is reported when the
+    check cannot run — distinct from WRITE_OK_VERIFICATION_FAILED (keys proven
+    wrong). At startup the app self-tests Milenage and, on failure, DISABLES
+    gialersim programming, with an explicit --allow-unverified-programming /
+    Card-menu override that still reports VERIFY_UNAVAILABLE (never a silent
+    success). Post-program success message is concise and green.
+  * Gialersim programming no longer does delta writes — the full canonical field
+    set (ICCID, IMSI, Ki, OPc, ACC) is written every time and ICCID is never
+    dropped, fixing partial/failed writes when re-programming a personalised
+    gialersim card. The field set is defined once in
+    card_profiles/field_schema.py and shared by the GUI, programming and
+    verification. SPN/FPLMN are hidden for gialersim (not in the verified
+    recipe); HNET_PUBKEY is removed from the main form (edited only under
+    File ▸ SUCI Configuration). sysmocom (SJA5/SJA2) paths are unchanged.
+
+ -- John Fornehed <john.fornehed@gmail.com>  Mon, 17 Aug 2026 00:00:00 +0000
+
 simgui (0.8.0) stable; urgency=medium
 
   * Native gialersim programming — gialersim cards are no longer programmed

@@ -11,6 +11,13 @@ Pillow>=10.0      # Image support for tkinter (required for PNG icons in PyInsta
 # They can be omitted for CSV-only / offline usage.
 pyscard>=2.0.0    # PC/SC smart-card interface (card reader communication)
 pytlv>=0.3        # TLV parsing for SIM card data structures
+#
+# REQUIRED for gialersim key verification (not optional). The offline USIM
+# AUTHENTICATE self-check (managers/gialersim_selfcheck.py) computes Milenage to
+# prove Ki/OPc committed; without a crypto backend that check cannot run, and
+# fail-closed policy then refuses to report the card as programmed. Provides the
+# `Crypto` package (the self-check also accepts `Cryptodome`/pycryptodomex).
+pycryptodome>=3.19  # Milenage AES for the gialersim AUTHENTICATE self-check
 
 # Development / testing
 # pytest>=7.0

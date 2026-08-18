@@ -1823,7 +1823,17 @@ class CardManager:
         orig = original_data if original_data is not None else self._original_card_data
         empty_card = self._is_empty_card(original_data)
 
-        if not empty_card and orig:
+        if self.card_type == CardType.GIALERSIM:
+            # Gialersim is programmed by a fixed, verified native recipe. It has
+            # NO delta: every field shown in the GUI is written every time, and
+            # ICCID is always written (blank cards have none, and re-programmed
+            # cards must be able to rewrite it). The delta path below is a
+            # non-empty-sysmocom concept — applying it to gialersim silently
+            # dropped ICCID (popped) and any unchanged required field, producing
+            # WRITE_FAILED / partial writes when re-programming a personalised
+            # gialersim. Write the full canonical field set instead.
+            changed = {k: v.strip() for k, v in card_data.items() if v.strip()}
+        elif not empty_card and orig:
             # Non-empty card: delta-write only fields that changed.
             changed = self._compute_changed_fields(card_data, orig)
             # ICCID is factory-assigned on non-empty cards — never overwrite.
@@ -1835,7 +1845,7 @@ class CardManager:
                 if card_data.get('OPc'):
                     changed['OPc'] = card_data['OPc']
         else:
-            # Empty / blank / gialersim — write every non-empty field
+            # Empty / blank (non-gialersim) — write every non-empty field
             changed = {k: v.strip() for k, v in card_data.items() if v.strip()}
 
         changed.pop('ADM1', None)
@@ -1990,19 +2000,24 @@ class CardManager:
         :class:`ProgramResult`.  All GSM-class APDU logic lives in the
         ``gialersim`` module.
 
-        Ki and OPc are ``READ=NEVER`` and cannot be read back, so a successful
-        run is reported as ``WRITE_OK_PENDING`` (ICCID/IMSI are confirmed by
-        read-back; the keys require the offline AUTHENTICATE self-check tracked
-        as ``TODO(gialersim-selfcheck)``).  A ``9000`` on a Ki write does NOT
-        prove the key committed.
+        ICCID/IMSI are confirmed by read-back. Ki and OPc are ``READ=NEVER`` —
+        a ``9000`` on a key write proves nothing — so they are confirmed by an
+        offline USIM ``AUTHENTICATE`` self-check (``_selfcheck_gialersim_keys``).
+        Verification is FAIL-CLOSED: only a positive AUTHENTICATE yields
+        ``WRITE_OK_VERIFIED``; wrong keys yield ``WRITE_OK_VERIFICATION_FAILED``
+        and an un-runnable check yields ``VERIFY_UNAVAILABLE`` — both failures.
         """
         from managers import gialersim
+        from card_profiles import fields_for
 
-        # gialersim always writes the full identity set; SPN/FPLMN are not part
-        # of the verified recipe and are intentionally not written here (see
-        # TODO(gialersim-spn-fplmn) in docs/TODO.md).
-        skipped = tuple(k for k in ("SPN", "FPLMN") if fields.get(k))
-        required = ("ICCID", "IMSI", "Ki", "OPc")
+        # Canonical gialersim field set — one definition shared with the GUI and
+        # verification (card_profiles/field_schema.py) so they cannot drift.
+        schema = fields_for(CardType.GIALERSIM)
+        # gialersim always writes the full identity set; SPN/FPLMN are excluded
+        # from the verified recipe and are intentionally not written here (the
+        # GUI also hides them for gialersim). See docs/GIALERSIM_PROGRAMMING.md.
+        skipped = tuple(k for k in schema.excluded if fields.get(k))
+        required = schema.required
         missing = [k for k in required if not fields.get(k)]
         if missing:
             msg = f"Cannot program gialersim: missing {', '.join(missing)}"
@@ -2080,17 +2095,19 @@ class CardManager:
         self.card_info["ICCID"] = fields["ICCID"]
         self.card_info["IMSI"] = fields["IMSI"]
 
-        # ICCID/IMSI confirmed by read-back. Ki/OPc are READ=NEVER, so confirm
-        # them with an offline USIM AUTHENTICATE self-check: compute RAND+AUTN
-        # from the Ki/OPc just written and check the card's MAC verifies.
-        #   verified True  -> keys committed        -> WRITE_OK_VERIFIED
-        #   verified False -> keys did NOT commit    -> WRITE_OK_VERIFICATION_FAILED
-        #   verified None  -> could not run the check-> WRITE_OK_PENDING
+        # ICCID/IMSI confirmed by read-back. Ki/OPc are READ=NEVER, so a 9000 on
+        # the write proves nothing — confirm them with an offline USIM
+        # AUTHENTICATE self-check (compute RAND+AUTN from the Ki/OPc just written
+        # and check the card's MAC verifies). Verification is FAIL-CLOSED: only
+        # a positive AUTHENTICATE is success; "wrong keys" and "could not check"
+        # are BOTH failures, distinct from each other and from VERIFIED.
+        #   verified True  -> keys committed         -> WRITE_OK_VERIFIED  (success)
+        #   verified False -> keys did NOT commit     -> WRITE_OK_VERIFICATION_FAILED (fail)
+        #   verified None  -> check could not run     -> VERIFY_UNAVAILABLE  (fail)
         verified, detail = self._selfcheck_gialersim_keys(fields)
 
         if verified is True:
-            msg = ("Card programmed and verified — ICCID, IMSI (read-back); "
-                   "Ki, OPc (USIM AUTHENTICATE).")
+            msg = "Card programmed and verified (ICCID, IMSI, Ki, OPc)."
             logger.info("gialersim self-check PASSED: %s", detail)
             self._last_program_result = ProgramResult(
                 outcome=ProgramOutcome.WRITE_OK_VERIFIED, message=msg,
@@ -2099,9 +2116,9 @@ class CardManager:
             return True, msg
 
         if verified is False:
-            msg = ("Card programmed but Ki/OPc FAILED verification "
-                   "(USIM AUTHENTICATE rejected the written keys). "
-                   "Do NOT deploy this card.\n" + detail)
+            msg = ("Card programmed but Ki/OPc FAILED verification — USIM "
+                   "AUTHENTICATE rejected the written keys. Do NOT deploy this "
+                   "card.\n" + detail)
             logger.error("gialersim self-check FAILED: %s", detail)
             self._last_program_result = ProgramResult(
                 outcome=ProgramOutcome.WRITE_OK_VERIFICATION_FAILED, message=msg,
@@ -2110,17 +2127,19 @@ class CardManager:
                 skipped_fields=skipped)
             return False, msg
 
-        # verified is None — self-check could not run; leave keys pending.
-        logger.info("gialersim self-check skipped/unavailable: %s", detail)
-        msg = ("Card programmed — verified: ICCID, IMSI; written: Ki, OPc\n"
-               "(Ki/OPc self-check unavailable — confirm on the network via "
-               "authentication.)")
+        # verified is None — the check could not run. FAIL-CLOSED: this is NOT a
+        # success. An unverified card is indistinguishable from a bricked one
+        # (the exact failure this whole path exists to prevent — a 9000 that
+        # meant nothing), so it is reported as a failure, never programmed-OK.
+        msg = ("Card written but Ki/OPc could NOT be verified — "
+               + detail + ". Treat as NOT programmed; do not deploy.")
+        logger.error("gialersim self-check UNAVAILABLE: %s", detail)
         self._last_program_result = ProgramResult(
-            outcome=ProgramOutcome.WRITE_OK_PENDING, message=msg,
+            outcome=ProgramOutcome.VERIFY_UNAVAILABLE, message=msg,
             verified_fields=("ICCID", "IMSI"),
             written_only_fields=("Ki", "OPc"),
             skipped_fields=skipped)
-        return True, msg
+        return False, msg
 
     def _selfcheck_gialersim_keys(self, fields: Dict[str, str]
                                   ) -> Tuple[Optional[bool], str]:

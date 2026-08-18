@@ -320,6 +320,30 @@ PYSIM_IMPORT_ERR=$(PYTHONHOME="$BUNDLED_FWK_DIR" PYTHONPATH="$BUNDLE_PYSIM_DIR:$
 }
 echo "✓ pySim import smoke test passed (smpp.pdu, pySim.sms, pySim.app)"
 
+# Check 4b: crypto backend for the gialersim USIM AUTHENTICATE self-check.
+# hiddenimports only DECLARES the dependency; PyInstaller can still drop it, and
+# the failure is SILENT until a card fails verification in the field. A bundle
+# without a working crypto backend disables gialersim programming entirely
+# (VERIFY_UNAVAILABLE), so this FAILS the build rather than warning.
+#
+# The check MUST run through the FROZEN EXECUTABLE, not a framework python -c:
+# PyInstaller stores pure-Python modules (e.g. Crypto/Cipher/AES.py) inside its
+# PYZ archive, which only the frozen app's bootloader can import — a raw
+# framework python sees the on-disk .so extensions but not the .py, and would
+# report a false failure. `main.py --selfcheck-crypto` runs selftest() inside
+# the frozen process, exactly as the app does at startup.
+APP_EXE="$PROJECT_ROOT/dist/SimGUI.app/Contents/MacOS/SimGUI"
+CRYPTO_SELFCHECK_ERR=$("$APP_EXE" --selfcheck-crypto 2>&1) || {
+    echo "✗ Frozen-app crypto self-check FAILED — aborting"
+    echo "$CRYPTO_SELFCHECK_ERR"
+    echo "  gialersim key verification would be UNAVAILABLE in the shipped app,"
+    echo "  disabling gialersim programming. Ensure 'pycryptodome' is installed"
+    echo "  in the build venv and present in SimGUI.spec hiddenimports"
+    echo "  (Crypto, Crypto.Cipher, Crypto.Cipher.AES)."
+    exit 1
+}
+echo "✓ Frozen-app crypto self-check passed ($CRYPTO_SELFCHECK_ERR)"
+
 # Check 5: simulate worker preload using bundled Python against the built bundle.
 # This catches any missing stdlib module or broken import before the .pkg reaches
 # the target machine. Runs card_worker_inproc.py preload() directly.

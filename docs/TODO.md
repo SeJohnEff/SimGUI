@@ -449,18 +449,26 @@ The CLAUDE.md is already substantial (267 lines) but needs restructuring to serv
   it computes RAND+AUTN from the Ki/OPc just written and sends a 3G USIM
   AUTHENTICATE (INS `88`, P2 `81`) in ADF_USIM. `DB…`/`DC…` (MAC verified)
   promotes the outcome to `WRITE_OK_VERIFIED`; `9862`/`6300` (wrong keys)
-  demotes it to `WRITE_OK_VERIFICATION_FAILED`; if the check can't run it stays
-  `WRITE_OK_PENDING`. Milenage is self-tested against 3GPP TS 35.208 Test Set 1
-  first. Hardware-validated 2026-08-15 (`DC` = MAC ok). Standalone reference:
-  `tools/auth_validate_harness.py`. Ki/OPc are never read directly.
+  demotes it to `WRITE_OK_VERIFICATION_FAILED`; if the check can't run it is
+  `VERIFY_UNAVAILABLE` (**fail-closed** — a failure, never a silent success).
+  `pycryptodome` is a hard prerequisite (declared in requirements/spec/debian
+  and gated by the macOS build's frozen-app `--selfcheck-crypto`); the app
+  pre-gates (disables) gialersim programming when the startup self-test fails,
+  with an explicit `--allow-unverified-programming` / Card-menu override that
+  still reports `VERIFY_UNAVAILABLE`. Milenage is self-tested against 3GPP TS
+  35.208 Test Set 1 first. Hardware-validated 2026-08-15 (`DC` = MAC ok).
+  Standalone reference: `tools/auth_validate_harness.py`. Ki/OPc never read.
 
 - [ ] **`TODO(gialersim-spn-fplmn)` — SPN/FPLMN on the native gialersim path** —
-  The verified GRSIMWrite capture (`docs/GIALERSIM_PROGRAMMING.md`) covers
-  ICCID/IMSI/ACC/Ki/OPc only; SPN and FPLMN were never observed being written to
-  a gialersim card and are therefore NOT written by `managers/gialersim.py`. The
-  pySim-prog path used to write them. If SPN/FPLMN are required on gialersim
-  cards, capture (or otherwise verify) the correct GSM-class file IDs and payload
-  format for these cards before adding the writes — do not extrapolate blindly.
+  The native path writes ICCID/IMSI/ACC/Ki/OPc only; SPN and FPLMN are **excluded**
+  from `card_profiles/field_schema.py` (`GIALERSIM_SCHEMA`) and the GUI hides them
+  for a gialersim card, so "what is shown is what is programmed" holds with zero
+  risk to the verified recipe. The GRSIMWrite trace **does** contain SPN (`6F46`)
+  and FPLMN (`6F7B`) writes, after the DF switch, on non-ADM files — so they can
+  be added safely, but as a **separate** change: capture/verify the exact
+  GSM-class payload format, add them to the recipe and to `GIALERSIM_SCHEMA`
+  (moving them from `excluded` to `written`), then un-hide them in the GUI. Do
+  not extrapolate blindly.
 - [ ] Share indicator grey on startup (user: "Acceptable, don't look into this right now")
 - [ ] App unresponsive after closing Network Storage dialog (user: "Acceptable")
 - [x] **FIXED v0.5.35: Right pane says "Insert SIM" even after blank card detected** — Root cause: intermittent PCSC 'No card in reader' from the fast probe right after pySim-read releases the reader on blank gialersim cards. Fix: CardWatcher now requires two consecutive absent probes before firing on_card_removed() when last_iccid is None (blank card). Non-blank cards still removed on first absent probe. Debounce applied in both fast-probe (_handle_probe_result) and slow-poll (_check_once_slow) paths.

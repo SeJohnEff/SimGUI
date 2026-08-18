@@ -80,19 +80,35 @@ GSM class answers SELECT with `9FXX` (not `61XX`); follow with
 Ki and OPc are **unreadable by design** (EF_ARR record `0x13`, READ = NEVER).
 Read-back verification is impossible; `9000` on the write proves nothing.
 
-## Verification
+## Verification (implemented, fail-closed)
 
-The only way to confirm keys committed is to make the card authenticate.
-`tools/auth_validate_harness.py` sends `AUTHENTICATE` (INS `88`, P2 `81`) in
-`ADF_USIM` with an AUTN computed from the expected Ki/OPc:
+Ki/OPc are `READ=NEVER`; a `9000` on the write proves nothing. The only way to
+confirm the keys committed is to make the card authenticate. This is implemented
+in-app as an **offline USIM AUTHENTICATE self-check** in
+`managers/gialersim_selfcheck.py`, run automatically after every native program
+(`CardManager._selfcheck_gialersim_keys`). It sends `AUTHENTICATE` (INS `88`,
+P2 `81`) in `ADF_USIM` with an AUTN computed from the just-written Ki/OPc:
 
-* `DB …` success, or `DC …` sync failure → **MAC verified, keys correct**
-* `9862` / `6300` → keys wrong
+* `DB …` success, or `DC …` sync failure → **MAC verified, keys correct** →
+  `WRITE_OK_VERIFIED` (green, artifact allowed).
+* `9862` / `6300` → **keys wrong** → `WRITE_OK_VERIFICATION_FAILED` (red).
+* check could not run (no crypto backend, self-test failed, transport error) →
+  `VERIFY_UNAVAILABLE` (red) — **fail-closed: never reported as programmed**.
 
 Sync failure still proves the key, so the result is independent of SQN state.
 Milenage is self-tested against 3GPP TS 35.208 Test Set 1 before each run.
+Takes ~15 s per card, offline, no network required. The standalone
+`tools/auth_validate_harness.py` uses the identical method.
 
-Takes ~15 s per card, offline, no network required.
+**Crypto backend is a hard prerequisite.** The self-check needs `pycryptodome`
+(imports as `Crypto`; `Cryptodome` also accepted). It is declared in
+`requirements.txt`, `debian/control` (`python3-pycryptodome`), the install
+scripts, and `SimGUI.spec` `hiddenimports`; the macOS build (`build-macos-app.sh`)
+fails if the frozen app cannot import it (`main.py --selfcheck-crypto`). At
+startup the app runs the Milenage self-test and, if it fails, **disables
+gialersim programming** (fail-closed pre-gate) with a deliberate override
+(`--allow-unverified-programming` / Card menu) that still reports
+`VERIFY_UNAVAILABLE`.
 
 ## Dead ends (all falsified by measurement)
 
@@ -129,6 +145,18 @@ nothing. Reader in that capture: SCM/Identiv `04e6:5810`.
 This sequence is implemented natively in `managers/gialersim.py` and is the
 sole programming path for `CardType.GIALERSIM` (routed from
 `CardManager.program_card`). pySim is bypassed entirely for these cards.
-sysmocom (SJA5/SJA2) cards are unaffected and continue to use pySim. SPN and
-FPLMN are not part of the verified recipe and are intentionally not written by
-the native path (see `TODO(gialersim-spn-fplmn)` in `docs/TODO.md`).
+sysmocom (SJA5/SJA2) cards are unaffected and continue to use pySim.
+
+**No delta for gialersim.** `program_card` writes the full canonical field set
+every time (never a delta, ICCID always written) — the delta path is a
+non-empty-sysmocom concept that, applied to gialersim, silently dropped ICCID
+and unchanged required fields when re-programming a personalised card.
+
+**Canonical field set.** The written/verified fields are defined once in
+`card_profiles/field_schema.py` (`GIALERSIM_SCHEMA`), read by the GUI,
+programming, and verification so they cannot drift: written = ICCID, IMSI, Ki,
+OPc, ACC. SPN, FPLMN and HNET_PUBKEY are **excluded** — not part of the verified
+recipe — so the GUI hides them for a gialersim card ("what is shown is what is
+programmed"). The GRSIMWrite trace does contain SPN (`6F46`) and FPLMN (`6F7B`)
+writes after the DF switch on non-ADM files, so they can be added safely as a
+**separate** change (see `docs/TODO.md`).

@@ -46,7 +46,7 @@ info "Installing build dependencies..."
 if ! apt-get update -qq 2>&1; then
     warn "apt-get update had warnings (continuing anyway)"
 fi
-apt-get install -y -qq git dpkg-dev debhelper pcscd pcsc-tools python3-pyscard 2>&1 | grep -v "is already the newest" || true
+apt-get install -y -qq git dpkg-dev debhelper pcscd pcsc-tools python3-pyscard python3-pycryptodome 2>&1 | grep -v "is already the newest" || true
 
 info "Installing Qt runtime dependencies..."
 apt-get install -y -qq libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 2>&1 | grep -v "is already the newest" || true

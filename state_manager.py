@@ -74,6 +74,13 @@ class ProgramOutcome(Enum):
     WRITE_OK_VERIFIED = auto()
     WRITE_OK_PENDING = auto()
     WRITE_OK_VERIFICATION_FAILED = auto()
+    # Writes completed but key verification could NOT be run (crypto backend
+    # missing, self-test failed, transport error, or check skipped). This is a
+    # FAILURE state, distinct from WRITE_OK_VERIFICATION_FAILED (keys proven
+    # wrong): here we simply do not know, and fail-closed policy forbids
+    # reporting an unverified card as programmed. See docs/reference/
+    # state-machine.md (Programming Outcome States) and the gialersim self-check.
+    VERIFY_UNAVAILABLE = auto()
 
 
 @dataclass(frozen=True)
@@ -188,6 +195,8 @@ class StateManager(QObject):
     # -- Signals ------------------------------------------------------------
     card_state_changed = pyqtSignal(object)       # CardState
     card_info_changed = pyqtSignal(object)         # CardInfo
+    card_identified = pyqtSignal(object)           # CardType — fired on the
+    #   UNKNOWN→known identity edge only (never on removal / de-identify).
     status_changed = pyqtSignal(str)
     share_status_changed = pyqtSignal(object)      # ShareStatus
     csv_path_changed = pyqtSignal(str)
@@ -197,6 +206,7 @@ class StateManager(QObject):
     card_programmed = pyqtSignal(dict)
     program_result_changed = pyqtSignal(object)  # ProgramResult
     iccid_index_updated = pyqtSignal()
+    verify_availability_changed = pyqtSignal(bool)  # key-verification available?
 
     def __init__(self, parent: Optional[QObject]= None) -> None:
         super().__init__(parent)
@@ -204,10 +214,22 @@ class StateManager(QObject):
         # Internal state
         self._card_state = CardState.NO_CARD
         self._card_info = CardInfo()
+        self._card_type = None            # authoritative card identity (CardType)
         self._status_text = "Ready"
         self._share_status = ShareStatus()
         self._csv_path = ""
         self._batch_running = False
+
+        # Session-scoped one-shot notice registry: makes "show this at most once
+        # per application session" a structural property (see claim_once) rather
+        # than a boolean flag bolted onto a widget.
+        self._fired_notices: set[str] = set()
+
+        # Key-verification capability (offline USIM AUTHENTICATE self-check).
+        # Determined by a startup self-test; when False, fail-closed policy
+        # disables gialersim programming unless the operator opts in explicitly.
+        self._keys_verification_available = True
+        self._allow_unverified_programming = False
 
     # -- card_state ---------------------------------------------------------
 
@@ -249,6 +271,77 @@ class StateManager(QObject):
         """Reset card info to defaults (card removed) and emit."""
         self._card_info.clear()
         self.card_info_changed.emit(self._card_info)
+
+    # -- card_type (authoritative identity) ---------------------------------
+
+    @property
+    def card_type(self):
+        """The authoritative detected card identity (a ``CardType`` enum).
+
+        This is the single source of truth for card-type-driven UI (SUCI
+        support, hardcoded ADM1, field schema). Widgets must read this, not
+        ``CardManager.card_type`` — the manager's copy is an internal working
+        value that is not reset on removal, which is exactly what caused the
+        SUCI popup to fire on a removed card.
+        """
+        return self._card_type
+
+    @card_type.setter
+    def card_type(self, value) -> None:
+        if self._card_type is value:
+            return
+        self._card_type = value
+        # Fire the "identified" edge only when we transition INTO a known type.
+        # Clearing to UNKNOWN/None on removal is a de-identify, not an identify,
+        # so it must not drive identity-triggered notifications (e.g. the
+        # SUCI-unsupported dialog must never appear on card removal).
+        name = getattr(value, "name", None)
+        if name and name != "UNKNOWN":
+            self.card_identified.emit(value)
+            logger.debug("card_identified → %s", name)
+
+    # -- session one-shot notices -------------------------------------------
+
+    def claim_once(self, notice_id: str) -> bool:
+        """Return True the first time *notice_id* is claimed this session.
+
+        Structural "once per session" primitive: the first caller for a given
+        id gets True (and should show the notice); every later caller gets
+        False. The registry lives for the process/session, so callers need no
+        local flag. Reset only by starting a new session.
+        """
+        if notice_id in self._fired_notices:
+            return False
+        self._fired_notices.add(notice_id)
+        return True
+
+    # -- key-verification capability / fail-closed override -----------------
+
+    @property
+    def keys_verification_available(self) -> bool:
+        return self._keys_verification_available
+
+    @keys_verification_available.setter
+    def keys_verification_available(self, value: bool) -> None:
+        value = bool(value)
+        if self._keys_verification_available == value:
+            return
+        self._keys_verification_available = value
+        self.verify_availability_changed.emit(value)
+
+    @property
+    def allow_unverified_programming(self) -> bool:
+        return self._allow_unverified_programming
+
+    @allow_unverified_programming.setter
+    def allow_unverified_programming(self, value: bool) -> None:
+        value = bool(value)
+        if self._allow_unverified_programming == value:
+            return
+        self._allow_unverified_programming = value
+        # Reuse the same signal so the panel re-evaluates the pre-gate when the
+        # operator toggles the override.
+        self.verify_availability_changed.emit(self._keys_verification_available)
 
     # -- status_text --------------------------------------------------------
 

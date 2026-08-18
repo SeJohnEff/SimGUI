@@ -7,7 +7,7 @@ Standards-Version: 4.5.0
 
 Package: simgui
 Architecture: all
-Depends: python3 (>= 3.8), python3-pyqt6, python3-pip, libpcsclite-dev, swig, cifs-utils, nfs-common, smbclient, avahi-utils, libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0
+Depends: python3 (>= 3.8), python3-pyqt6, python3-pip, python3-pycryptodome, libpcsclite-dev, swig, cifs-utils, nfs-common, smbclient, avahi-utils, libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0
 Recommends: python3-venv
 Description: GUI wrapper for SIM card programming tools
  SimGUI is a lightweight GUI wrapper for sysmo-usim-tool and pySim.
